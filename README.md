@@ -6,14 +6,14 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.8 (Router) is implemented. Everything else is design only.
+Phase 2.8.1 (Route Parameters Contract) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
-| `framework/barezen-web` | 2.7–2.8 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`) and an immutable route table (`Router`, `RouteMatch`) — no server, no middleware, no context |
-| `barezen-http-jdk` | 3 | not created |
+| `framework/barezen-web` | 2.7–2.8.1 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`) and an immutable route table (`Router`, `RouteMatch`) — no server, no middleware, no context |
+| `barezen-http-jdk` | 2.9 | not created |
 | Discovery, Extension Points | later | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
@@ -48,9 +48,9 @@ pom.xml                     barezen-parent: owns maven.compiler.release=17, vers
 barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
                             assembly (di), plugin SPI, events, errors
-framework/barezen-web/      HTTP contract and route table: handler, request, response, headers, method, router —
-                            no shipped dependency, no server
-docs/adr/                   architecture decision records, 0001-0019
+framework/barezen-web/      HTTP contract and route table: handler, request, response, headers, method, router,
+                            route match — no shipped dependency, no server
+docs/adr/                   architecture decision records, 0001-0020
 scripts/                    build guards
 ```
 
@@ -250,7 +250,8 @@ services.require(BillingService.class).charge("123");         // publish -> audi
 
 `framework/barezen-web` is the web layer's HTTP contract, and it has **zero dependencies in the jar it ships** — not on
 Jetty, Netty or Servlet, and not on `barezen-core` either (Phase 2.8 later put core on the *test* classpath only).
-Five public types: `Handler.handle(Request) → Response`, `Request`
+Five public types: `Handler.handle(Request, Map<String, String>) → Response` — Phase 2.8.1 added that second argument,
+and Phase 2.7 shipped `handle(Request)` (ADR-0020) — `Request`
 (method, raw path, raw query, headers, body), `Response` (status, headers, body), `Headers` (case-insensitive names,
 repeated fields kept as repeated fields, no `Map` in sight) and `HttpMethod` (nine shared constants, unknown methods
 keep the client's spelling). Everything is immutable and validated at construction, so a `Request` a handler received
@@ -260,18 +261,19 @@ middleware type must answer are answered by decorating `Handler` with a lambda, 
 timing and a `401` short-circuit. No `HttpContext`, no `request.service(...)`, no attributes, no `EventBus` inside a
 `Request` — a contract that can look things up stops being a contract. And nothing serves: `com.sun.net.httpserver`
 lives in the `barezen-http-jdk` adapter to come, which will implement `LifecycleParticipant`, own the port, read the
-body, catch the exception and choose the error format. Fourteen ArchUnit rules hold that line, each verified by a
-mutation probe that made it fail (ADR-0018).
+body, catch the exception and choose the error format. Fourteen ArchUnit rules held that line at the time, each verified
+by a mutation probe that made it fail (ADR-0018); Phase 2.8 amended two of them and added five, and Phase 2.8.1 amended
+one more and added two (ADR-0019, ADR-0020).
 
 ```java
 // An application writes handlers; the contract is all it needs to see.
-Handler reports = request -> request.headers().first("Authorization").isPresent()
+Handler reports = (request, ignored) -> request.headers().first("Authorization").isPresent()
     ? new Response(200, Headers.of("Content-Type", "application/json"), json.toByteArray(UTF_8))
-    : new Response(401, Headers.empty(), null);                 // null body = an empty body, not a missing one
+    : new Response(401, Headers.empty(), null);    // null body = an empty body, not a missing one
 
-Handler timed = request -> {                                    // "middleware" as decoration, no new type
+Handler timed = (request, parameters) -> {          // "middleware" as decoration, no new type
   long started = System.nanoTime();
-  Response answered = reports.handle(request);
+  Response answered = reports.handle(request, parameters);
   return new Response(answered.status(),
       answered.headers().with("X-Elapsed-Nanos", Long.toString(System.nanoTime() - started)),
       answered.body());
@@ -289,9 +291,9 @@ makes the more specific route a total order — so `GET /users` registered twice
 naming both patterns and the shape they share, and registration order never decides a winner. `build()` freezes the
 table with `List.copyOf`, which is why there is no `built` flag, no `unregister`, no hot reload and no synchronisation
 in the matching path: concurrency is answered by immutability, not by locks. `RouteMatch` exists for one reason — a
-captured parameter has nowhere else to go — and it carries the handler plus an unmodifiable map of raw values; the
-matching gap it exposes is recorded honestly: `Handler.handle(Request)` cannot receive it, so a handler re-derives its
-id from `request.path()` until ADR-0020 settles whether the contract grows. A `Router` is not a
+captured parameter has nowhere else to go — and it carries the handler plus an unmodifiable map of raw values. That
+left the map's only reader outside the contract: `Handler.handle(Request)` could not receive it, so a handler re-derived
+its id from `request.path()`. Phase 2.8.1 closed it (ADR-0020). A `Router` is not a
 `LifecycleParticipant` and not a container: it owns no thread, socket or file, and a plugin takes `Router.Builder` in
 its constructor, which is why `barezen-core` is on the test classpath and nowhere in the shipped jar. `Router` is also
 the first name ADR-0018 forbade that this phase allowed, so two of its fourteen rules were amended rather than deleted
@@ -306,6 +308,36 @@ Router routes = Router.builder()
 
 Request request = new Request(HttpMethod.GET, "/users/42", null, Headers.empty(), null);
 routes.match(request)                                        // empty -> 404, non-empty -> dispatch
-    .ifPresent(match -> match.handler().handle(request));    // the adapter dispatches; the router never did
+    .ifPresent(match -> match.handler().handle(request, match.parameters()));
 Set<HttpMethod> allowed = routes.methodsFor("/users");       // empty -> no route, non-empty -> 405
 ```
+
+## Phase 2.8.1 in one paragraph
+
+Phase 2.8 shipped a route table whose second output nobody could read: `match()` returned captured parameters, and
+`Handler.handle(Request)` had no argument to receive them, so the integration test sliced `id` back out of
+`request.path()`. That is not a style problem — `/{a}/fixed/{b}` is not reconstructible from a path at all, because
+nothing in the path marks which segments the pattern considered literal, and a handler written against `path()` cannot be
+checked against the pattern it was registered under. The fix is one argument:
+
+```java
+Response handle(Request request, Map<String, String> parameters);   // what the client sent + what routing decided
+```
+
+`RouteMatch` keeps holding a `Handler`, because both halves have the same consumer — the adapter — and one call site
+separates them; handing the match to a handler would hand it its own identity, and a probe showed a handler could then
+call `match.handler().handle(...)` and compile. `handle(Request)` was **removed** rather than kept as a default, because
+an overload lets a handler registered under `/users/{id}` silently read nothing, which is the fail-silently failure
+Phase 2.8 refused for duplicate routes. There is no `LegacyHandler`, no `RouteHandler`, no binder, no converter, no
+context, no attribute bag, and `RouteMatch` is unchanged.
+
+Two findings are worth more than the change itself. The rejected alternative — `request.routeParameters()` with a
+`withRouteParameters(...)` copy — was implemented fully, immutable and well-named, and **passed all nineteen architecture
+rules**; the rule that should have refused it was the sentence "a request carries what the client sent", which nothing in
+the file expressed, so `a_request_carries_only_what_the_client_sent` is now a closed allow-list over `Request`'s public
+methods. And editing the argument list had **silently voided** `nothing_in_the_contract_dispatches_a_handler`, whose
+`callMethod` target named `handle(Request)` and therefore matched nothing: a probe of a router that really does dispatch a
+handler stayed green under the old rule text and fired under the corrected one. Twenty-one rules now, and 213 web tests,
+including a delivery group that dispatches 600 concurrent requests over three paths and gets 200 of each id. Encoding
+semantics are untouched — `/users/a%2Fb` still delivers `id = "a%2Fb"` — and the contract is now frozen with the hole
+closed, which is what makes the 2.9 adapter safe to write once (ADR-0020).

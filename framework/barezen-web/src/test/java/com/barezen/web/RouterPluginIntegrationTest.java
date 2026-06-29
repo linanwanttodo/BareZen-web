@@ -86,23 +86,21 @@ class RouterPluginIntegrationTest {
       // are not necessarily ready, and initialize() is the phase whose documented purpose is "complete internal
       // wiring" — which is what binding routes to a table is (ADR-0003, ADR-0019 §15).
       routes.route(HttpMethod.GET, "/users/{id}", this::readUser);
-      routes.route(HttpMethod.POST, "/users", request -> new Response(201, Headers.empty(), null));
+      routes.route(HttpMethod.POST, "/users",
+          (request, ignored) -> new Response(201, Headers.empty(), null));
     }
 
     /**
-     * The handler for {@code GET /users/{id}}.
+     * The handler for {@code GET /users/{id}}, reading the identifier out of the parameters the route table captured.
      *
-     * <p>It reads the identifier off the path rather than being handed the {@link RouteMatch}: {@link Handler#handle(Request)}
-     * takes a request and nothing else, Phase 2.7 froze that signature, and §1 of this phase forbids rewriting it for the
-     * router's sake. The two ways out — a {@code RouteMatch}-taking handler, or parameters stashed on the request — are
-     * both contract changes, and the second is the servlet {@code setAttribute} ADR-0018 §8 refuses. What makes the
-     * workaround safe is that the router already proved this is a one-segment tail and captured it raw, so the handler is
-     * re-deriving a value the table just computed rather than parsing a path nobody has checked (ADR-0019 §7, and the
-     * design debt §25 asks to be named).
+     * <p>This is the whole point of Phase 2.8.1. The method reference below is a {@code Handler}, and a handler now takes
+     * the map the router built, so {@code id} arrives as the value routing decided on rather than being sliced back out of
+     * {@code request.path()}. Nothing here calls {@link Request#path()} at all: an application that never sees the pattern
+     * now cannot be the component that re-derives it, which is what makes «the router's answer is used» a property of the
+     * code rather than a habit a reviewer has to check (ADR-0020 §2, closing the gap ADR-0019 §7 recorded).
      */
-    private Response readUser(Request request) {
-      String path = request.path();
-      String id = path.substring(path.lastIndexOf('/') + 1);
+    private Response readUser(Request request, Map<String, String> parameters) {
+      String id = parameters.get("id");
 
       return store.find(id)
           .map(json -> new Response(200, Headers.of("Content-Type", "application/json"),
@@ -147,7 +145,8 @@ class RouterPluginIntegrationTest {
 
         assertThat(plugin.initializations()).isEqualTo(1);
         RouteMatch found = router.match(request(HttpMethod.GET, "/users/42")).orElseThrow();
-        Response answered = found.handler().handle(request(HttpMethod.GET, "/users/42"));
+        Response answered = found.handler().handle(request(HttpMethod.GET, "/users/42"),
+            found.parameters());
 
         assertThat(answered.status()).isEqualTo(200);
         assertThat(new String(answered.body(), java.nio.charset.StandardCharsets.UTF_8))
@@ -189,7 +188,7 @@ class RouterPluginIntegrationTest {
 
     @Test
     void aDuplicateRouteFromASecondPluginFailsAtStartupNotSilently() {
-      Router.Builder routes = Router.builder().route(HttpMethod.GET, "/users", request -> null);
+      Router.Builder routes = Router.builder().route(HttpMethod.GET, "/users", (request, ignored) -> null);
       ClashingPlugin clash = new ClashingPlugin(routes);
 
       try (LifecycleOrchestrator application = LifecycleOrchestrator.builder()
@@ -248,7 +247,7 @@ class RouterPluginIntegrationTest {
   /** A second contributor, so "one table, several plugins" is shown rather than asserted about one plugin. */
   private static final class HealthPlugin implements Plugin {
 
-    final Handler handler = request -> new Response(200, Headers.empty(), null);
+    final Handler handler = (request, ignored) -> new Response(200, Headers.empty(), null);
     private final Router.Builder routes;
 
     HealthPlugin(Router.Builder routes) {
@@ -282,7 +281,8 @@ class RouterPluginIntegrationTest {
 
     @Override
     public void initialize() {
-      routes.route(HttpMethod.GET, "/users", request -> new Response(200, Headers.empty(), null));
+      routes.route(HttpMethod.GET, "/users",
+        (request, ignored) -> new Response(200, Headers.empty(), null));
     }
   }
 }

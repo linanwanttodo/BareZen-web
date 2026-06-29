@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  */
 class RouteMatchTest {
 
-  private static final Handler HANDLER = request -> new Response(200, Headers.empty(), null);
+  private static final Handler HANDLER = (request, ignored) -> new Response(200, Headers.empty(), null);
 
   @Nested
   @DisplayName("the surface")
@@ -130,7 +130,7 @@ class RouteMatchTest {
 
     @Test
     void aDifferentHandlerOrADifferentCaptureIsADifferentAnswer() {
-      Handler other = request -> new Response(204, Headers.empty(), null);
+      Handler other = (request, ignored) -> new Response(204, Headers.empty(), null);
 
       assertThat(new RouteMatch(other, Map.of("id", "42"))).isNotEqualTo(new RouteMatch(HANDLER, Map.of("id", "42")));
       assertThat(new RouteMatch(HANDLER, Map.of("id", "43"))).isNotEqualTo(new RouteMatch(HANDLER, Map.of("id", "42")));

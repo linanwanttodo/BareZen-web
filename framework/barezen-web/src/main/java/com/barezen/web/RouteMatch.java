@@ -15,11 +15,28 @@ import java.util.Objects;
  * from either the handler or the request, because it never sees the pattern. A third member — the matched pattern, a
  * route name, the handler's class — would be metadata with no consumer yet, so it is absent (ADR-0019 §11, §19).
  *
+ * <p><b>Both halves have exactly one consumer, and it is the adapter</b> — which is why this record keeps holding a
+ * {@link Handler} rather than being split into a parameters-only match plus a resolution. {@code Handler.handle} takes
+ * the request and the {@linkplain Handler#handle(Request, java.util.Map) map}, not this type: a match names the handler to
+ * call, so passing it would hand a handler its own identity and invite {@code match.handler().handle(...)} — dispatching
+ * from inside the contract, which ADR-0018 §10 refuses, and it would make a handler with no route table uncallable, since
+ * a match cannot be constructed without naming a handler. The map, on the other hand, is on its way to a handler, and this
+ * record is where the adapter picks it up:
+ *
+ * <pre>{@code
+ * RouteMatch found = router.match(request).orElseThrow();          // adapter: 404 if empty
+ * found.handler().handle(request, found.parameters());             // adapter: dispatch with what routing decided
+ * }</pre>
+ *
+ * <p>So the two members are never separated in practice and never reach separate consumers, which is the test for whether
+ * they belong in one type: a {@code RouteResolution} alongside a parameters-only {@code RouteMatch} would be two public
+ * types where the code has one call site (ADR-0020 §9, ADR-0019 §19).
+ *
  * <p>{@link #parameters()} are raw and undecoded, exactly as they arrived on the wire, for the reason Phase 2.7 gave for
  * {@link Request#path()}: {@code /users/a%2Fb} matched by {@code /users/{id}} captured one segment holding an encoded
  * slash, and decoding it here would turn a one-segment path into a two-segment value behind the application's back.
  * Whether {@code id} is an integer, a slug or a percent-encoded identifier is the handler's decision, and the handler is
- * the only component that can make it (ADR-0019 §5, §7).
+ * the only component that can make it (ADR-0019 §5, §7; ADR-0020 §2).
  *
  * <p>Read the map rather than asking for one name: there is no {@code parameter("id")} accessor, because with the map in
  * hand a handler sees what the route actually captured instead of trusting a name it typed from memory, and a typo that

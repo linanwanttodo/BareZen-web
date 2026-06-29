@@ -33,11 +33,11 @@ import org.junit.jupiter.api.Test;
 class RouterTest {
 
   /** One named handler per role, so a match is checked by identity rather than by behaviour. */
-  private static final Handler LIST_USERS = request -> new Response(200, Headers.empty(), null);
-  private static final Handler CREATE_USER = request -> new Response(201, Headers.empty(), null);
-  private static final Handler READ_USER = request -> new Response(200, Headers.empty(), null);
-  private static final Handler NEW_USER_FORM = request -> new Response(200, Headers.empty(), null);
-  private static final Handler TRAILING_SLASH_HANDLER = request -> new Response(200, Headers.empty(), null);
+  private static final Handler LIST_USERS = (request, ignored) -> new Response(200, Headers.empty(), null);
+  private static final Handler CREATE_USER = (request, ignored) -> new Response(201, Headers.empty(), null);
+  private static final Handler READ_USER = (request, ignored) -> new Response(200, Headers.empty(), null);
+  private static final Handler NEW_USER_FORM = (request, ignored) -> new Response(200, Headers.empty(), null);
+  private static final Handler TRAILING_SLASH_HANDLER = (request, ignored) -> new Response(200, Headers.empty(), null);
 
   private static Request request(HttpMethod method, String path) {
     return new Request(method, path, null, Headers.empty(), null);
@@ -122,12 +122,13 @@ class RouterTest {
       // handler and never calls it (ADR-0019 §1).
       RouteMatch found = match(usersRouter(), HttpMethod.GET, "/users").orElseThrow();
 
-      assertThat(found.handler().handle(request(HttpMethod.GET, "/users")).status()).isEqualTo(200);
+      assertThat(found.handler().handle(request(HttpMethod.GET, "/users"), found.parameters()).status())
+          .isEqualTo(200);
     }
 
     @Test
     void theRouterNeverCallsTheHandlerItRegistered() {
-      Handler failing = request -> {
+      Handler failing = (request, ignored) -> {
         throw new IllegalStateException("a router must not call a handler");
       };
       Router router = Router.builder().route(HttpMethod.GET, "/users", failing).build();
@@ -920,6 +921,174 @@ class RouterTest {
   }
 
   @Nested
+  @DisplayName("parameter delivery: router to handler")
+  class Delivery {
+
+    @Test
+    void theHandlerReceivesWhatTheRouterCapturedWithoutParsingThePath() {
+      // The handler is written against the parameter name only: no substring, no lastIndexOf, no segment count. Under
+      // the previous contract this test could not be written, because the only way to get an id was to slice
+      // request.path() again (ADR-0020 §1).
+      List<Map<String, String>> seenByHandler = new ArrayList<>();
+      Handler read = (request, parameters) -> {
+        seenByHandler.add(parameters);
+        return new Response(200, Headers.empty(),
+            parameters.get("id").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      };
+      Router router = Router.builder().route(HttpMethod.GET, "/users/{id}", read).build();
+
+      Request request = request(HttpMethod.GET, "/users/42");
+      RouteMatch found = router.match(request).orElseThrow();
+
+      assertThat(new String(found.handler().handle(request, found.parameters()).body(),
+          java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("42");
+      // Identity across the hand-off: the map the handler read is the very map the match produced, so nothing between
+      // routing and dispatching rebuilt or replaced what routing decided.
+      assertThat(seenByHandler).singleElement().isSameAs(found.parameters());
+    }
+
+    @Test
+    void twoParametersArriveByNameAndInPatternOrder() {
+      List<String> observed = new ArrayList<>();
+      Handler both = (request, parameters) -> {
+        observed.addAll(parameters.keySet());
+        return new Response(200, Headers.empty(), null);
+      };
+      Router router = Router.builder()
+          .route(HttpMethod.GET, "/users/{userId}/posts/{postId}", both)
+          .build();
+
+      Request request = request(HttpMethod.GET, "/users/7/posts/3");
+      RouteMatch found = router.match(request).orElseThrow();
+      found.handler().handle(request, found.parameters());
+
+      assertThat(observed).containsExactly("userId", "postId");
+      assertThat(found.parameters()).containsExactly(
+          Map.entry("userId", "7"), Map.entry("postId", "3"));
+      // The names came from the pattern, which the handler cannot see: re-parsing the path would have produced the two
+      // values and no way to know which was which. This is the case where the router's answer is not reconstructible
+      // from the request at all.
+    }
+
+    @Test
+    void anEncodedParameterReachesTheHandlerStillEncodedAndStillOneValue() {
+      Handler read = (request, parameters) -> new Response(
+          200, Headers.empty(), parameters.get("id").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      Router router = Router.builder().route(HttpMethod.GET, "/users/{id}", read).build();
+
+      Request request = request(HttpMethod.GET, "/users/a%2Fb");
+      RouteMatch found = router.match(request).orElseThrow();
+
+      assertThat(new String(found.handler().handle(request, found.parameters()).body(),
+          java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("a%2Fb");
+      assertThat(found.parameters().get("id")).doesNotContain("/");
+      // Phase 2.8's encoding semantics survive the widened signature unchanged: the map holds raw text because the
+      // table captured raw text (ADR-0019 §5).
+    }
+
+    @Test
+    void aStaticRouteDeliversAnEmptyMapSoTheHandlerNeedsNoSpecialCase() {
+      List<Integer> sizes = new ArrayList<>();
+      Handler records = (request, parameters) -> {
+        sizes.add(parameters.size());
+        return new Response(200, Headers.empty(), null);
+      };
+      Router router = Router.builder().route(HttpMethod.GET, "/healthz", records).build();
+
+      Request request = request(HttpMethod.GET, "/healthz");
+      RouteMatch found = router.match(request).orElseThrow();
+      found.handler().handle(request, found.parameters());
+
+      assertThat(sizes).containsExactly(0);
+    }
+
+    @Test
+    void aStaticRouteBeatsTheParameterRouteAndDeliversNoParameters() {
+      // §11's static-route check, on the delivery side: /users/me answers from the static route with an empty map, so
+      // the parameter route's name is not merely absent — the map itself says nothing was captured.
+      List<Map<String, String>> seen = new ArrayList<>();
+      Handler form = (request, parameters) -> {
+        seen.add(parameters);
+        return new Response(200, Headers.empty(), null);
+      };
+      Router router = Router.builder()
+          .route(HttpMethod.GET, "/users/{id}", READ_USER)
+          .route(HttpMethod.GET, "/users/me", form)
+          .build();
+
+      Request request = request(HttpMethod.GET, "/users/me");
+      RouteMatch found = router.match(request).orElseThrow();
+      found.handler().handle(request, found.parameters());
+
+      assertThat(found.handler()).isSameAs(form);
+      assertThat(seen).containsExactly(Map.of());
+    }
+
+    @Test
+    void aHandlerThatEditsItsMapCannotReachTheTableOrTheNextRequest() {
+      Router router = usersRouter();
+      Request first = request(HttpMethod.GET, "/users/42");
+      RouteMatch found = router.match(first).orElseThrow();
+
+      Handler attempts = (request, parameters) -> {
+        try {
+          parameters.put("id", "1");
+          return new Response(500, Headers.empty(), null);
+        } catch (UnsupportedOperationException refused) {
+          return new Response(200, Headers.empty(), null);
+        }
+      };
+
+      assertThat(attempts.handle(first, found.parameters()).status()).isEqualTo(200);
+
+      // The refused write was against the map this match produced; the table's answer for the same route is untouched,
+      // so the next request still sees the value its own client sent (ADR-0020 §7).
+      assertThat(router.match(request(HttpMethod.GET, "/users/42")).orElseThrow().parameters())
+          .containsExactly(Map.entry("id", "42"));
+      assertThat(router.match(request(HttpMethod.GET, "/users/7")).orElseThrow().parameters())
+          .containsExactly(Map.entry("id", "7"));
+    }
+
+    @Test
+    void concurrentRequestsOnOneRouteNeverSeeEachOthersParameters() throws Exception {
+      List<String> observed = new CopyOnWriteArrayList<>();
+      Handler echo = (request, parameters) -> {
+        observed.add(parameters.get("id"));
+        return new Response(200, Headers.empty(), null);
+      };
+      Router router = Router.builder().route(HttpMethod.GET, "/users/{id}", echo).build();
+
+      ExecutorService pool = Executors.newFixedThreadPool(9);
+      try {
+        List<Callable<Void>> work = new ArrayList<>();
+        for (int round = 0; round < 200; round++) {
+          for (String id : List.of("1", "2", "3")) {
+            work.add(() -> {
+              Request request = request(HttpMethod.GET, "/users/" + id);
+              RouteMatch found = router.match(request).orElseThrow();
+              found.handler().handle(request, found.parameters());
+              return null;
+            });
+          }
+        }
+        for (Future<Void> done : pool.invokeAll(work)) {
+          done.get(60, TimeUnit.SECONDS);
+        }
+      } finally {
+        pool.shutdownNow();
+      }
+
+      // 600 dispatches and every handler saw the id its own request carried: no null, no value from another thread.
+      // The map is built per match rather than stored on the router or the request, which is what makes a crossed
+      // parameter structurally impossible rather than merely unlikely (ADR-0020 §8).
+      assertThat(observed).hasSize(600);
+      assertThat(java.util.Collections.frequency(observed, "1")).isEqualTo(200);
+      assertThat(java.util.Collections.frequency(observed, "2")).isEqualTo(200);
+      assertThat(java.util.Collections.frequency(observed, "3")).isEqualTo(200);
+    }
+  }
+
+  @Nested
   @DisplayName("printing")
   class Printing {
 
@@ -932,7 +1101,7 @@ class RouterTest {
     void aSummaryNeverNamesAHandler() {
       Router router = Router.builder()
           .route(HttpMethod.GET, "/users",
-              request -> new Response(200, Headers.of("Set-Cookie", "secret"), null))
+              (request, ignored) -> new Response(200, Headers.of("Set-Cookie", "secret"), null))
           .build();
 
       String summary = router.toString();

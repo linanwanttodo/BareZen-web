@@ -20,6 +20,7 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Executable form of the Phase 2.7 boundary: HTTP is a contract here, and a server is something else.
@@ -363,11 +364,18 @@ class BarezenWebArchitectureTest {
    * it, because a type here that called it would be a router or a pipeline, and §10 refuses both. This is checkable
    * and not obvious from the file listing: {@code Request} and {@code Response} could each hold a
    * {@code Handler next} field and the module would still be five files.
+   *
+   * <p><b>Amended by Phase 2.8.1.</b> The target signature is now {@code handle(Request, Map)}. Writing the old
+   * {@code (Request)} parameter list would have left this rule perfectly green and perfectly empty —
+   * {@code callMethod} matches one exact signature rather than one name, so a rule that no longer names a real method
+   * measures nothing. That is the same failure this file's reflection rule lists every {@code Class} overload to avoid,
+   * and it is the reason {@code handler_receives_exactly_the_request_and_the_captured_parameters} below pins the
+   * signature itself: a rule about a call is only as live as the signature it names (ADR-0018 §10, ADR-0020 §6).
    */
   @ArchTest
   static final ArchRule nothing_in_the_contract_dispatches_a_handler = noClasses()
       .that(not(JavaClass.Predicates.equivalentTo(Handler.class)))
-      .should().callMethod(Handler.class, "handle", Request.class)
+      .should().callMethod(Handler.class, "handle", Request.class, Map.class)
       .as("the contract states the signature and never invokes it: dispatching a handler is routing, which is not in"
           + " this phase (ADR-0018 §10)");
 
@@ -416,6 +424,94 @@ class BarezenWebArchitectureTest {
   // The five below are ADR-0019's, each written against the router rather than the contract, each checked by a
   // violation that no other rule in this file reports — the probes are listed in ADR-0019.
   // --------------------------------------------------------------------------------------------------------------
+
+  // --------------------------------------------------------------------------------------------------------------
+  // Phase 2.8.1: closing the gap ADR-0019 §7 recorded widened Handler.handle by one argument, and two of the rules
+  // below exist because a probe proved the existing nineteen did not cover the new failure mode. See ADR-0020 §10.
+  // --------------------------------------------------------------------------------------------------------------
+
+  /**
+   * the handler signature is the request plus the captured parameters, and nothing else.
+   *
+   * <p>The corrected contract is the thing most likely to drift again, because the pressure that produced it — "the
+   * handler needs one more thing" — does not disappear when the first need is met. Pinning the parameter list turns that
+   * pressure into a build failure: a third argument is a context arriving one argument at a time, and an argument of type
+   * {@code RouteMatch} would hand a handler the handler it already is, which is the step from answering a request to
+   * dispatching one (ADR-0018 §10, ADR-0020 §6).
+   */
+  @ArchTest
+  static final ArchRule the_handler_signature_is_the_request_and_the_captured_parameters = methods()
+      .that(JavaMember.Predicates.declaredIn(JavaClass.Predicates.equivalentTo(Handler.class)))
+      .should(beHandleWithTheFrozenParameterList())
+      .as("handle(Request, Map) is the whole extension surface: one more argument is a context, and a RouteMatch argument"
+          + " would hand a handler its own identity (ADR-0020 §3, §6)");
+
+  private static ArchCondition<JavaMethod> beHandleWithTheFrozenParameterList() {
+    return new ArchCondition<JavaMethod>("be handle(Request, Map)") {
+      @Override
+      public void check(JavaMethod method, ConditionEvents events) {
+        List<String> parameters = method.getRawParameterTypes().stream()
+            .map(JavaClass::getName).sorted().toList();
+        List<String> frozen = List.of("com.barezen.web.Request", "java.util.Map").stream().sorted().toList();
+        boolean violates = !method.getName().equals("handle") || !parameters.equals(frozen);
+        events.add(violates
+            ? SimpleConditionEvent.violated(method, method.getFullName() + " takes " + parameters
+                + ". The handler is handed what the client sent and what routing decided, in exactly two arguments;"
+                    + " a third is a place to put anything, which is the shape ADR-0018 §9 refuses")
+            : SimpleConditionEvent.satisfied(method, "handle(Request, Map) is the frozen signature"));
+      }
+    };
+  }
+
+  /**
+   * {@code Request} carries what the client sent and nothing routing decided.
+   *
+   * <p>This rule exists because of a probe, not a worry. Handing the parameters to the handler as a request field —
+   * {@code request.routeParameters()}, plus a {@code withRouteParameters} copy to get them in — was implemented in full
+   * and passed all nineteen existing rules: the names are not lookup-shaped, {@code with} is the verb {@code Headers}
+   * already uses, no field was non-final, nothing dispatched a handler and nothing reflected. The one rule that would
+   * have caught it was not about names or mutability at all; it was the claim that a request is a record of the wire. So
+   * the claim is now mechanical, as an allow-list over the whole type: a new accessor on {@code Request} has to be an
+   * HTTP fact the client sent, and "the framework decided this value" fails it by construction.
+   *
+   * <p>Why an allow-list rather than a forbidden-name list. The rejected option's failure mode is not one bad name —
+   * remove {@code routeParameters} and the next draft calls it {@code matchContext}, or hands back an attribute map that
+   * fits none of the banned words. {@code attribute}, {@code service} and {@code context} are already refused by
+   * {@code nothing_takes_a_type_or_a_key_to_find_an_object}; what was unprotected is a genuinely immutable, genuinely
+   * well-named field carrying a framework-computed value, and only a closed set of legal accessors refuses that
+   * (ADR-0018 §9, ADR-0020 §4).
+   *
+   * <p>A real addition to this list will be needed one day — {@code scheme()}, {@code authority()}, the target of a
+   * {@code CONNECT} — and that is the correct cost: it is a change to what the contract says a request is, so it should
+   * fail a build and be argued about, and it stays an HTTP fact rather than becoming a place to stash one.
+   */
+  @ArchTest
+  static final ArchRule a_request_carries_only_what_the_client_sent = methods()
+      .that(JavaMember.Predicates.declaredIn(JavaClass.Predicates.equivalentTo(Request.class)))
+      .should(beAnHttpRequestFact())
+      .as("method, path, query, headers, body and a summary: a Request that also carries what the router decided stops"
+          + " being a record of the wire and becomes a place to put things (ADR-0018 §2, §9; ADR-0020 §4)");
+
+  private static ArchCondition<JavaMethod> beAnHttpRequestFact() {
+    List<String> allowed = List.of("method", "path", "query", "headers", "body", "toString");
+    return new ArchCondition<JavaMethod>("be one of the request facts the contract defines") {
+      @Override
+      public void check(JavaMethod method, ConditionEvents events) {
+        if (!method.getModifiers().contains(JavaModifier.PUBLIC)) {
+          events.add(SimpleConditionEvent.satisfied(method, method.getName() + " is private"));
+          return;
+        }
+        boolean constructor = method.getName().equals("<init>");
+        boolean violates = !constructor && !allowed.contains(method.getName());
+        events.add(violates
+            ? SimpleConditionEvent.violated(method, method.getFullName() + " is a public accessor on Request named "
+                + method.getName() + ", which is not one of " + allowed + ". Route parameters are not something the"
+                    + " client sent, so they belong in the call, not in the record of the call — the handler receives"
+                    + " them as an argument (ADR-0020 §4)")
+            : SimpleConditionEvent.satisfied(method, method.getName() + " is a request fact"));
+      }
+    };
+  }
 
   /**
    * The two types that route, named exactly.
