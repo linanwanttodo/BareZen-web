@@ -72,7 +72,8 @@ class BarezenCoreArchitectureTest {
   @ArchTest
   static final ArchRule core_has_no_web_or_persistence_concepts = noClasses()
       .should().dependOnClassesThat().resideInAnyPackage(
-          "com.barezen.api..", "com.barezen.web..", "com.barezen.security..", "com.barezen.data..",
+          "com.barezen.api..", "com.barezen.web..", "com.barezen.http..", "com.barezen.security..",
+          "com.barezen.data..",
           "com.barezen.plugin..", "com.barezen.app..",
           "com.sun.net.httpserver..", "jakarta..", "java.sql..", "javax.sql..",
           "org.springframework..", "com.fasterxml..", "org.hibernate..",
