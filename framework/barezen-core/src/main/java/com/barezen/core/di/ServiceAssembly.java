@@ -107,9 +107,23 @@ public final class ServiceAssembly implements Services, AutoCloseable {
       return;
     }
     closed = true;
+    List<Exception> failures = releaseAll(owned);
+    if (!failures.isEmpty()) {
+      throw aggregate(failures);
+    }
+  }
+
+  /**
+   * Closes every {@link AutoCloseable} in {@code created}, newest first, and collects what went wrong instead of
+   * throwing. Shared with the failed-build path in {@link Builder#build()} so "whoever created it releases it" has
+   * exactly one implementation of the order and the best-effort rule.
+   *
+   * @return the failures, in the order they happened
+   */
+  private static List<Exception> releaseAll(List<Object> created) {
     List<Exception> failures = new ArrayList<>();
-    for (int i = owned.size() - 1; i >= 0; i--) {
-      if (owned.get(i) instanceof AutoCloseable closeable) {
+    for (int i = created.size() - 1; i >= 0; i--) {
+      if (created.get(i) instanceof AutoCloseable closeable) {
         try {
           closeable.close();
         } catch (Exception e) {
@@ -117,14 +131,17 @@ public final class ServiceAssembly implements Services, AutoCloseable {
         }
       }
     }
-    if (!failures.isEmpty()) {
-      AssemblyException failure = new AssemblyException(
-          failures.size() + " instance(s) created by this assembly failed to close", failures.get(0));
-      for (int i = 1; i < failures.size(); i++) {
-        failure.addSuppressed(failures.get(i));
-      }
-      throw failure;
+    return failures;
+  }
+
+  /** One exception carrying the whole set: the first as the cause, the rest as suppressed. */
+  private static AssemblyException aggregate(List<Exception> failures) {
+    AssemblyException failure = new AssemblyException(
+        failures.size() + " instance(s) created by this assembly failed to close", failures.get(0));
+    for (int i = 1; i < failures.size(); i++) {
+      failure.addSuppressed(failures.get(i));
     }
+    return failure;
   }
 
   /**
@@ -184,10 +201,16 @@ public final class ServiceAssembly implements Services, AutoCloseable {
      * Creates every registered object and freezes the result.
      *
      * <p>Objects are created in registration order, and a dependency is created the moment something first asks
-     * for it, so creation order is always dependencies before dependents - which is what lets {@link #close()}
-     * release in reverse and be correct.
+     * for it, so creation order is always dependencies before dependents - which is what lets {@link
+     * ServiceAssembly#close()} release in reverse and be correct.
      *
-     * <p>A factory that throws is not wrapped: the application's own failure is the interesting part, and
+     * <p>If a factory fails, the objects this builder had already created are closed before the failure is
+     * rethrown, so an application that never started does not hold a half-built graph with no owner. The
+     * factory's own exception is what propagates; a failure during that cleanup is attached as suppressed rather
+     * than replacing it (ADR-0004). Without this, a factory that opens a file handle before throwing would leak it
+     * and hand the caller nothing to close, because no {@link ServiceAssembly} was ever returned.
+     *
+     * <p>A factory that throws is otherwise not wrapped: the application's own failure is the interesting part, and
      * burying it under an assembly error loses the stack trace that names the cause.
      *
      * @throws AssemblyException for a duplicate registration during {@code build()}, a missing dependency, a
@@ -200,7 +223,17 @@ public final class ServiceAssembly implements Services, AutoCloseable {
       }
       built = true;
       Resolution resolution = new Resolution(bindings);
-      resolution.createEverything();
+      try {
+        resolution.createEverything();
+      } catch (RuntimeException | Error failure) {
+        List<Exception> cleanupFailures = ServiceAssembly.releaseAll(resolution.owned());
+        if (!cleanupFailures.isEmpty()) {
+          AssemblyException cleanup = ServiceAssembly.aggregate(cleanupFailures);
+          cleanup.addSuppressed(failure);
+          failure.addSuppressed(cleanup);
+        }
+        throw failure;
+      }
       return new ServiceAssembly(resolution.instances(), resolution.owned());
     }
 

@@ -322,6 +322,83 @@ class ServiceAssemblyTest {
   }
 
   @Nested
+  class FailedBuild {
+
+    /**
+     * What a build failure must not leave behind. A {@code build()} that throws returns no assembly, so the caller
+     * has nothing to close: if the objects created before the failure were left open, a partially built
+     * application would hold a file handle, a socket or a pool nobody owns any more (ADR-0014).
+     */
+    @Test
+    @DisplayName("objects created before a failing factory are released before the failure propagates")
+    void aFailedBuildReleasesWhatItAlreadyCreated() {
+      IllegalStateException original = new IllegalStateException("the third factory is broken");
+
+      assertThatThrownBy(() -> ServiceAssembly.builder()
+          .factory(Pool.class, services -> new Pool())
+          .factory(Session.class, services -> new Session(services.require(Pool.class)))
+          .factory(Statement.class, services -> {
+            throw original;
+          })
+          .build()).isSameAs(original);
+
+      // Reverse creation order, exactly as a normal close() would do, so a session is never released against a
+      // pool that went first. The failure itself stays untouched: cleanup must not replace it.
+      assertThat(events).containsExactly(
+          "create pool", "create session", "close session, pool still open=true", "close pool");
+    }
+
+    @Test
+    @DisplayName("what the caller supplied survives a failed build, because the caller owns it")
+    void aFailedBuildLeavesCallerOwnedObjectsAlone() {
+      Pool callersPool = new Pool();
+      events.clear();
+
+      assertThatThrownBy(() -> ServiceAssembly.builder()
+          .instance(Pool.class, callersPool)
+          .factory(Statement.class, services -> {
+            throw new IllegalStateException("broken");
+          })
+          .build()).isInstanceOf(IllegalStateException.class);
+
+      assertThat(events).as("the assembly never created this object, so it never releases it").isEmpty();
+      assertThat(callersPool).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a release failure during a failed build is attached and does not replace the real failure")
+    void aCleanupFailureIsReportedAlongsideTheBuildFailure() {
+      IllegalStateException original = new IllegalStateException("cannot build the session");
+
+      Throwable thrown;
+      try {
+        ServiceAssembly.builder()
+            .factory(AutoCloseable.class, services -> (AutoCloseable) () -> {
+              throw new IllegalStateException("pool will not drain");
+            })
+            .factory(Statement.class, services -> {
+              throw original;
+            })
+            .build();
+        throw new AssertionError("expected the build to fail");
+      } catch (Throwable failure) {
+        thrown = failure;
+      }
+
+      // The factory's own failure is what propagates, and the cleanup failure rides with it rather than hiding
+      // it (ADR-0004). The reverse attachment is there too, so a reader who starts from the drain failure can
+      // still see what the application was doing when it happened.
+      assertThat(thrown).isSameAs(original);
+      assertThat(thrown.getSuppressed()).hasSize(1);
+      Throwable cleanup = thrown.getSuppressed()[0];
+      assertThat(cleanup).isInstanceOf(AssemblyException.class)
+          .hasMessageContaining("1 instance(s)")
+          .hasMessageContaining("failed to close");
+      assertThat(cleanup.getSuppressed()).containsExactly(original);
+    }
+  }
+
+  @Nested
   class Cycles {
 
     /** Two objects that need each other to be constructed, which is the only way to be in a cycle. */
@@ -587,6 +664,7 @@ class ServiceAssemblyTest {
     // the design has drifted and this test is where it shows up first.
     assertThat(java.util.Arrays.stream(ServiceAssembly.class.getDeclaredMethods())
         .filter(method -> !method.isSynthetic())
+        .filter(method -> java.lang.reflect.Modifier.isPublic(method.getModifiers()))
         .map(java.lang.reflect.Method::getName))
         .containsExactlyInAnyOrder("builder", "require", "find", "close");
     assertThat(java.util.Arrays.stream(ServiceAssembly.Builder.class.getDeclaredMethods())
