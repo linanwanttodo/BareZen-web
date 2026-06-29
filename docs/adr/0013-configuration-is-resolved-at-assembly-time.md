@@ -66,8 +66,9 @@ than its type. Each gets a record when a second implementation or a real validat
   arranges global state except `StandardConfigurationTest`, which exists precisely to prove the production wiring
   reads it.
 - Two consequences are guards rather than habits: only `com.barezen.core.config` may call `System.getenv` or
-  `System.getProperties`, and the layered ArchUnit rule makes `Config → Concurrent → Kernel` one directional, so
-  `concurrent` cannot reach back for a snapshot.
+  `System.getProperties`, nothing anywhere in core may call `System.setProperty` or `clearProperty`, and the
+  layered ArchUnit rule makes `Config → Concurrent → Kernel` one directional, so `concurrent` cannot reach back
+  for a snapshot. Each rule was checked against a deliberately leaking class before it was trusted.
 - A component cannot pick up a configuration change at runtime, which is intended: a running application's
   configuration is the one that was validated at startup.
 - Later phases that want a value add a key to a typed config record and pass the record in. The number of places

@@ -71,7 +71,8 @@ ADR-0011).
 with its key, its raw text and the source that supplied it rather than falling back to a default. Precedence is
 positional and fixed — key default &lt; `application.properties` &lt; environment variables &lt; system
 properties, with environment names mapped by the one rule `.` to `_` then uppercase — and only
-`com.barezen.core.config` reads the process environment or the property table, which ArchUnit enforces. A group
+`com.barezen.core.config` reads the process environment or the property table, while nothing in core writes
+them; ArchUnit enforces both. A group
 of keys binds to a record by hand (`RuntimeConfig.from(configuration)`): no annotations, no scanning, no
 reflection over components. Configuration resolves values and nothing else, so it is not a service locator, and
 the one setting core has today follows a single chain,

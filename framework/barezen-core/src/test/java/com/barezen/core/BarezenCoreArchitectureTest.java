@@ -31,7 +31,7 @@ class BarezenCoreArchitectureTest {
   private static final String CONFIG = "com.barezen.core.config..";
 
   /**
-   * Rule 1: core depends on nothing but the JDK and the SLF4J API.
+   * core depends on nothing but the JDK and the SLF4J API.
    *
    * <p>Red here means either a third party library entered the kernel, or core grew a concept that
    * belongs in a module of its own.
@@ -46,7 +46,7 @@ class BarezenCoreArchitectureTest {
   }
 
   /**
-   * Rule 2: the kernel knows nothing about HTTP, SQL, security or plugins.
+   * the kernel knows nothing about HTTP, SQL, security or plugins.
    *
    * <p>Several of these packages do not exist yet. The rule is written now so that introducing
    * {@code barezen-web} cannot quietly create a back dependency from core into a layer above it.
@@ -63,7 +63,7 @@ class BarezenCoreArchitectureTest {
       .allowEmptyShould(true);
 
   /**
-   * Rule 3: reaching for a Java API newer than the baseline is confined to the runtime probe.
+   * reaching for a Java API newer than the baseline is confined to the runtime probe.
    *
    * <p>The virtual thread {@code MethodHandle} is the single legitimate exception to compiling against
    * JDK 17. A second occurrence would mean the capability model needs an ADR rather than another probe.
@@ -75,7 +75,7 @@ class BarezenCoreArchitectureTest {
       .as("only com.barezen.core.runtime may use MethodHandle style runtime probing");
 
   /**
-   * Rule 4: Java 21 APIs are never referenced directly, which would break the JDK 17 baseline.
+   * Java 21 APIs are never referenced directly, which would break the JDK 17 baseline.
    *
    * <p>ScopedValue is excluded from the MVP explicitly, so a reference to it is a scope violation and not
    * merely a compatibility problem.
@@ -87,7 +87,7 @@ class BarezenCoreArchitectureTest {
       .as("ScopedValue and StructuredTaskScope are outside the JDK 17 baseline and outside the MVP")
       .allowEmptyShould(true);
 
-  /** Rule 5: capability, configuration and orchestration-support packages never depend on the kernel. */
+  /** capability, configuration and orchestration-support packages never depend on the kernel. */
   @ArchTest
   static final ArchRule capabilities_do_not_depend_on_the_kernel = noClasses()
       .that().resideInAnyPackage(CONCURRENT, RUNTIME, CONFIG)
@@ -95,28 +95,46 @@ class BarezenCoreArchitectureTest {
       .as("concurrent, runtime and config must stay usable without the lifecycle engine");
 
   /**
-   * Rule 6: only the config package may enumerate the process's configuration inputs.
+   * only the config package may enumerate the process's configuration inputs.
    *
    * <p>The framework rule "core depends on abstractions, not on concrete sources" needs a mechanical guard,
    * because the tempting shortcut is a {@code System.getenv} call inside some component that just needs one
-   * value. {@code System.getProperty} with a specific JVM key stays legal in {@code runtime}, which reports
-   * what the JVM is rather than what the operator configured.
+   * value. Each overload is listed separately: {@code callMethod(Class, String)} matches the no-argument
+   * signature only, so a rule written for {@code getenv()} leaves {@code getenv("KEY")} unguarded, which is the
+   * form a leak would actually take. {@code System.getProperty} with a specific JVM key stays legal in
+   * {@code runtime}, which reports what the JVM is rather than what the operator configured.
    */
   @ArchTest
   static final ArchRule only_config_reads_environment_and_property_tables = noClasses()
       .that().resideOutsideOfPackages(CONFIG)
       .should().callMethod(System.class, "getenv")
+      .orShould().callMethod(System.class, "getenv", String.class)
       .orShould().callMethod(System.class, "getProperties")
+      .orShould().callMethod(System.class, "setProperties", java.util.Properties.class)
       .as("configuration sources live only in com.barezen.core.config (ADR-0013)");
 
-  /** Rule 7: error and runtime are leaves of the internal dependency graph. */
+  /**
+   * nothing writes the property table, in the config package or anywhere else.
+   *
+   * <p>Configuration is an input. A component that called {@code System.setProperty} would be configuring
+   * another component through global state, which is the coupling the snapshot exists to prevent (ADR-0013),
+   * and it would make an immutable snapshot a lie. The only writers in the build are tests that arrange the
+   * real system properties {@code Configuration.standard} reads.
+   */
+  @ArchTest
+  static final ArchRule nobody_writes_the_property_table = noClasses()
+      .should().callMethod(System.class, "setProperty", String.class, String.class)
+      .orShould().callMethod(System.class, "clearProperty", String.class)
+      .as("configuration is read, never written, so one component cannot configure another through global state");
+
+  /** error and runtime are leaves of the internal dependency graph. */
   @ArchTest
   static final ArchRule error_and_runtime_packages_are_leaves = noClasses()
       .that().resideInAnyPackage(ERROR, RUNTIME)
       .should().dependOnClassesThat().resideInAnyPackage(KERNEL, CONCURRENT, CONFIG)
       .as("error and runtime must not reach back into kernel, concurrent or config");
 
-  /** Rule 8: the internal package graph is one directional and acyclic. */
+  /** the internal package graph is one directional and acyclic. */
   @ArchTest
   static final ArchRule core_is_free_of_cycles = Architectures.layeredArchitecture()
       .consideringOnlyDependenciesInAnyPackage("com.barezen.core..")
