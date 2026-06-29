@@ -1,14 +1,21 @@
 package com.barezen.core;
 
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideOutsideOfPackages;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaMember;
+import com.tngtech.archunit.core.domain.JavaMethod;
+import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.Architectures;
 
 /**
@@ -16,8 +23,8 @@ import com.tngtech.archunit.library.Architectures;
  *
  * <p>These are the constraints that turn the design claims into something verifiable: core stays free of any
  * third-party library beyond slf4j, stays free of HTTP and persistence concepts, confines reaching for a newer
- * JDK API to a single package, keeps reading configuration inputs inside the config package, and keeps package
- * dependencies one directional.
+ * JDK API to a single package, keeps reading configuration inputs inside the config package, keeps the assembly
+ * layer from becoming a service locator, and keeps package dependencies one directional.
  */
 @AnalyzeClasses(
     packages = "com.barezen.core",
@@ -29,6 +36,14 @@ class BarezenCoreArchitectureTest {
   private static final String RUNTIME = "com.barezen.core.runtime..";
   private static final String ERROR = "com.barezen.core.error..";
   private static final String CONFIG = "com.barezen.core.config..";
+  private static final String DI = "com.barezen.core.di..";
+
+  /**
+   * Method names that mean "ask me for an object by type". Kept as data, with the reasoning, so the list is
+   * reviewable rather than buried in a predicate.
+   */
+  private static final java.util.List<String> LOOKUP_NAMES =
+      java.util.List.of("get", "require", "find", "service", "lookup", "resolve", "bean", "instance");
 
   /**
    * core depends on nothing but the JDK and the SLF4J API.
@@ -134,6 +149,124 @@ class BarezenCoreArchitectureTest {
       .should().dependOnClassesThat().resideInAnyPackage(KERNEL, CONCURRENT, CONFIG)
       .as("error and runtime must not reach back into kernel, concurrent or config");
 
+  /**
+   * the assembly layer depends on nothing but the error taxonomy.
+   *
+   * <p>DI is a leaf on purpose. It does not know about lifecycle phases, thread providers, configuration or
+   * runtime capabilities, so it cannot start owning any of them. If it needed one of those, the correct fix is to
+   * pass the already-built object in from the application's assembly code, not to add the dependency here.
+   */
+  @ArchTest
+  static final ArchRule di_is_a_leaf_of_the_internal_graph = noClasses()
+      .that().resideInAnyPackage(DI)
+      .should().dependOnClassesThat().resideInAnyPackage(KERNEL, CONCURRENT, CONFIG, RUNTIME)
+      .as("com.barezen.core.di may only use the JDK and com.barezen.core.error (ADR-0014)");
+
+  /**
+   * nothing in core is allowed to reach for an object out of the container.
+   *
+   * <p>This is the mechanical half of the service-locator rule, and it is written now because the leak it prevents
+   * happens later. A {@code PluginContext}, an {@code HttpRequest} or a servlet-style accessor that takes a
+   * {@code Services} or {@code ServiceAssembly} is the exact shape that turns an assembler into
+   * {@code ApplicationContext}, and it is invisible to a reviewer until some component calls {@code require} on it.
+   * Since no type outside this package may depend on {@code di} at all, that growth is refused before it exists:
+   * wiring an assembled graph into the orchestrator goes through constructors, which is the only path left.
+   */
+  @ArchTest
+  static final ArchRule no_core_type_depends_on_the_assembler = noClasses()
+      .that().resideOutsideOfPackages(DI)
+      .should().dependOnClassesThat().resideInAnyPackage(DI)
+      .as("nothing outside com.barezen.core.di may hold Services or ServiceAssembly (ADR-0006, ADR-0014)");
+
+  /**
+   * no public method anywhere outside the assembler resolves an object by type.
+   *
+   * <p>The dependency rules above stop core from holding a container; this one stops core from <em>becoming</em>
+   * one, which is how the same mistake arrives without any container in sight: a context or registry object that
+   * grows {@code router(Class)}, {@code sql(Class)} or {@code service(Class)}. Name plus a {@code Class} parameter
+   * is what identifies that shape. It is deliberately narrow - a lookup-shaped method taking a
+   * {@code ConfigurationKey} or a {@code String} key, which {@code Configuration.get} and the configuration sources
+   * legitimately do, is not a service locator - and it applies to the whole framework, so the future {@code
+   * PluginContext} is covered by the same sentence as the current kernel.
+   *
+   * <p>What it cannot catch is a lookup with a name nobody thought to forbid. A mutation probe with both
+   * {@code service(Class)} and {@code router(Class)} fired on the first and passed the second, so this rule is a
+   * net over the common verbs, not a proof. The backstop is the dependency rule above: to hand out an assembled
+   * object a method has to reach the graph somehow, and nothing outside {@code di} is allowed to hold it.
+   */
+  @ArchTest
+  static final ArchRule nobody_exposes_a_type_lookup = methods()
+      .that(JavaMember.Predicates.declaredIn(resideOutsideOfPackages(DI)))
+      .should(notResolveAnObjectByType())
+      .as("no public method outside com.barezen.core.di may take a Class and hand back the object it names");
+  // Configuration.get(ConfigurationKey) and the sources' find(String) are keyed lookups of values, not object
+  // resolution by type, so they stay legal: the condition only fires when a Class parameter is involved.
+
+  /**
+   * Written as a condition rather than a predicate because "is this a locator?" needs three facts about a method
+   * at once - its name, its parameter types, and whether it is public surface - and the failure message has to say
+   * which of them made it a locator.
+   */
+  private static ArchCondition<JavaMethod> notResolveAnObjectByType() {
+    return new ArchCondition<JavaMethod>("not resolve an object by type") {
+      @Override
+      public void check(JavaMethod method, ConditionEvents events) {
+        boolean namedLikeALookup = LOOKUP_NAMES.contains(method.getName());
+        boolean takesAType = method.getRawParameterTypes().stream()
+            .anyMatch(parameter -> parameter.getName().equals("java.lang.Class"));
+        boolean publicSurface = method.getModifiers().contains(JavaModifier.PUBLIC);
+        boolean violates = namedLikeALookup && takesAType && publicSurface;
+        events.add(violates
+            ? SimpleConditionEvent.violated(method, method.getFullName()
+                + " is public and takes a Class, so it hands out the object that type names: that is the"
+                + " service locator shape this framework forbids outside the assembler (ADR-0006, ADR-0014)")
+            : SimpleConditionEvent.satisfied(method, method.getFullName() + " is not a type lookup"));
+      }
+    };
+  }
+
+  /**
+   * the assembler never reads a single configuration value.
+   *
+   * <p>The enumeration rule above already stops this package from listing the environment or the property table,
+   * and it deliberately leaves {@code System.getProperty("java.version")} legal in {@code runtime} because that is
+   * the JVM reporting itself rather than an operator's setting. This rule closes the remaining gap for DI:
+   * {@code System.getProperty("barezen.something")} inside a factory is the shortcut that would make the container
+   * read configuration behind its own signature. The correct chain is {@code Configuration -> typed config ->
+   * assembly -> constructor}, with the finished object handed in (ADR-0013, ADR-0014).
+   */
+  @ArchTest
+  static final ArchRule di_never_reads_a_configuration_value = noClasses()
+      .that().resideInAnyPackage(DI)
+      .should().callMethod(System.class, "getProperty", String.class)
+      .orShould().callMethod(System.class, "getProperty", String.class, String.class)
+      .as("dependencies are handed to the assembler as objects, never looked up from the environment");
+
+  /**
+   * the assembler does not scan for classes or reflect over them.
+   *
+   * <p>Registration is explicit in application code, so the container has no reason to name a package, load a
+   * class by name or pick a constructor. Each of these calls is a step towards discovering beans instead of being
+   * told about them; the whole phase is defined by not taking it (ADR-0014).
+   */
+  @ArchTest
+  static final ArchRule di_does_not_scan_or_reflect = noClasses()
+      .that().resideInAnyPackage(DI)
+      .should().dependOnClassesThat().resideInAnyPackage("java.lang.reflect..")
+      // Every overload of each of these is listed by hand. callMethod(Class, String) matches only the
+      // no-argument signature, so a rule written for one shape leaves the others unguarded, which is exactly how a
+      // Phase 2.2 rule turned out to be silently ineffective.
+      .orShould().callMethod(Class.class, "forName", String.class)
+      .orShould().callMethod(Class.class, "forName", String.class, boolean.class, ClassLoader.class)
+      .orShould().callMethod(Class.class, "getClassLoader")
+      .orShould().callMethod(Class.class, "getDeclaredConstructor", Class[].class)
+      .orShould().callMethod(Class.class, "getConstructors")
+      .orShould().callMethod(ClassLoader.class, "getResources", String.class)
+      .orShould().callMethod(ClassLoader.class, "getSystemResources", String.class)
+      .orShould().callMethod(java.util.ServiceLoader.class, "load", Class.class)
+      .orShould().callMethod(java.util.ServiceLoader.class, "load", Class.class, ClassLoader.class)
+      .as("com.barezen.core.di contains no reflection, class loading, scanning or SPI lookup");
+
   /** the internal package graph is one directional and acyclic. */
   @ArchTest
   static final ArchRule core_is_free_of_cycles = Architectures.layeredArchitecture()
@@ -142,11 +275,13 @@ class BarezenCoreArchitectureTest {
       .layer("Runtime").definedBy(RUNTIME)
       .layer("Config").definedBy(CONFIG)
       .layer("Concurrent").definedBy(CONCURRENT)
+      .layer("Di").definedBy(DI)
       .layer("Kernel").definedBy(KERNEL)
       .whereLayer("Kernel").mayNotBeAccessedByAnyLayer()
+      .whereLayer("Di").mayNotBeAccessedByAnyLayer()
       .whereLayer("Concurrent").mayOnlyBeAccessedByLayers("Kernel")
       .whereLayer("Config").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
       .whereLayer("Runtime").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
-      .whereLayer("Error").mayOnlyBeAccessedByLayers("Kernel", "Concurrent", "Config")
-      .as("core packages must form a one directional graph with kernel at the top");
+      .whereLayer("Error").mayOnlyBeAccessedByLayers("Kernel", "Concurrent", "Config", "Di")
+      .as("core packages must form a one directional graph with kernel and the assembler at the top");
 }

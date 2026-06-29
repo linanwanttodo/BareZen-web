@@ -18,3 +18,4 @@ names it. Code references ADRs by number in Javadoc, so a reader of the implemen
 | [0011](0011-thread-provider-is-a-factory-with-ownership.md) | ThreadProvider is a factory with ownership, not a registry | accepted |
 | [0012](0012-new-to-stopped-is-legal-and-idempotent.md) | NEW → STOPPED is legal and idempotent | accepted |
 | [0013](0013-configuration-is-resolved-at-assembly-time.md) | configuration is resolved once at assembly time and travels as typed values | accepted |
+| [0014](0014-dependency-injection-is-explicit-factory-registration.md) | DI is explicit factory registration, not reflective bean discovery | accepted |

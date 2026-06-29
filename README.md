@@ -6,14 +6,14 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.2 (Configuration) is implemented. Everything else is design only.
+Phase 2.3 (Minimal Dependency Injection) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
-| `framework/barezen-core` | 2.1–2.2 | lifecycle engine, thread capability, configuration |
+| `framework/barezen-core` | 2.1–2.3 | lifecycle engine, thread capability, configuration, dependency injection |
 | `barezen-web`, `barezen-http-jdk` | 3 | not created |
-| DI, Plugin Model, Discovery, Extension Points, EventBus | 2.3–2.7 | not created |
+| Plugin Model, Discovery, Extension Points, EventBus | 2.4–2.7 | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -45,8 +45,9 @@ CI proves compatibility, JDK 21 proves compatibility and quality.
 ```
 pom.xml                     barezen-parent: owns maven.compiler.release=17, versions, enforcer
 barezen-bom/                version contract consumed by applications
-framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration, errors
-docs/adr/                   architecture decision records, 0001-0013
+framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
+                            assembly (di), errors
+docs/adr/                   architecture decision records, 0001-0014
 scripts/                    build guards
 ```
 
@@ -88,3 +89,41 @@ LifecycleOrchestrator app = LifecycleOrchestrator.builder()
 
 `barezen.runtime.threads` accepts `auto` (default), `platform` or `virtual`. An unsupported explicit value fails
 startup; `auto` is the only policy allowed to fall back.
+
+## Phase 2.3 in one paragraph
+
+`ServiceAssembly` is the whole container: four public types and seven operations, no new dependency, no reflection,
+no scanning. An application registers each object either as an `instance(...)` it built itself, or as a
+`factory(...)` whose body writes the constructor call —
+`services -> new UserService(services.require(UserRepository.class))` — so a dependency stays readable at the line
+that states it, and the `Services` view a factory is handed stops answering once `build()` returns, which is what
+keeps it from being stored and used as a locator later (ADR-0014). `build()` creates everything eagerly,
+which is what moves a missing dependency, a duplicate registration of one type and a cycle out of the first request
+and into startup; a cycle is reported as the path it went through (`A -> B -> A`) rather than as a
+`StackOverflowError`. Scope is application-wide and singleton-only, `@Primary`, qualifiers and named bindings do not
+exist, and two implementations of one interface are two distinct registered types the assembly chooses between in
+code. Ownership follows creation: the assembly releases what its factories built, in reverse creation order, so a
+dependent always goes before what it depends on, and it never touches an object the caller supplied — which is why a
+`LifecycleParticipant` is registered as an instance, leaving `LifecycleOrchestrator` the only lifecycle engine
+(ADR-0003, ADR-0005). No type outside `com.barezen.core.di` depends on it and no public method outside it may take a
+`Class` under a lookup-shaped name, so the assembled graph cannot be reached as a service locator — not by a
+component today, and not by a future `PluginContext` (ADR-0006, ADR-0013).
+
+```java
+ServiceAssembly assembly = ServiceAssembly.builder()
+    .instance(DataSource.class, dataSource)                        // caller built it, caller owns it
+    .factory(UserRepository.class, services ->
+        new JdbcUserRepository(services.require(DataSource.class)))
+    .factory(UserService.class, services ->
+        new UserService(services.require(UserRepository.class)))
+    .build();
+
+// A participant is registered as an instance, so its stop() has exactly one owner: the orchestrator. Its
+// collaborators come out of the assembly, through a constructor.
+SearchService search = new SearchService(assembly.require(UserService.class));
+
+LifecycleOrchestrator app = LifecycleOrchestrator.builder()
+    .configuration(configuration)
+    .register("search", search)
+    .build();
+```
