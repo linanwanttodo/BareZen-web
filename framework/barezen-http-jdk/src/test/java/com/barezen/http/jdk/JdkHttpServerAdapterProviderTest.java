@@ -116,6 +116,17 @@ class JdkHttpServerAdapterProviderTest {
     }
 
     @Test
+    void theSummaryNamesTheIdAndNothingElse() {
+      // Discovery is a candidate list a human reads, so a provider has to say which one it is without holding
+      // anything. toString() is refused as a member beyond id() and create() nowhere, because the summary is a
+      // diagnostic rather than an operation — ADR-0025 §4 counts the declared surface as id, create and this
+      // sentence, so the sentence has to be tested rather than assumed.
+      assertThat(new JdkHttpServerAdapterProvider().toString())
+          .isEqualTo("JdkHttpServerAdapterProvider[jdk]")
+          .doesNotContain("null", "httpserver", "Router");
+    }
+
+    @Test
     void createBuildsAnAdapterForTheHostAndPortNamed() throws IOException {
       HttpServerAdapter adapter = new JdkHttpServerAdapterProvider().create("127.0.0.1", 0, ROUTES);
 

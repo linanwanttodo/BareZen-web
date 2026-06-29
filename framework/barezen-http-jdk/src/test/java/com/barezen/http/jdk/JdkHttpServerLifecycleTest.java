@@ -326,6 +326,94 @@ class JdkHttpServerLifecycleTest {
       }
     }
 
+    @Test
+    void aStartThatFailedAfterBindingSpendsTheAdapterAndClosesNothingItDidNotCreate() {
+      // The other half of start()'s catch: HttpServer.create() succeeded, so the JDK has a bound socket and a running
+      // idle-timeout timer, and then the borrowed provider refuses to hand out an executor. Nothing in this module
+      // throws at a moment of a test's choosing, so the collaborator is a hand-written provider rather than a mock
+      // (ADR-0024 §4, §7).
+      int bound = freePort();
+      RefusingProvider refusing = new RefusingProvider();
+      JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", bound), ROUTES,
+          refusing);
+
+      assertThatThrownBy(adapter::start)
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessage("no executor here");
+
+      // The refusal propagates unchanged — a provider's own exception is information the caller needs, not something to
+      // wrap — and the instance is spent rather than retryable.
+      assertThat(adapter.isRunning()).isFalse();
+      assertThat(adapter.port()).isEmpty();
+      assertThatThrownBy(adapter::start).isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("cannot be started again");
+
+      // And the borrowed provider was not closed: this adapter never owned it, whatever else the catch undid.
+      assertThat(refusing.closeCalls).isZero();
+      assertThat(refusing.executorRequests).isEqualTo(1);
+
+      // What the catch cannot do: release the socket. stop(0) cancels the JDK's own timer threads, but a server that
+      // never started keeps its listening socket bound — probed on Temurin 17.0.20.1 and 21.0.12.1, where the port
+      // stays out of use for the life of the JVM and /proc/net/tcp keeps the entry in LISTEN. Recorded as design debt
+      // (ADR-0024 §8) rather than asserted away: if a future JDK starts releasing it, this assertion fails and the debt
+      // entry is revisited.
+      assertThat(canBind(bound)).isFalse();
+    }
+
+    /** A borrowed provider that answers the one call {@code start()} makes with a refusal. */
+    private static final class RefusingProvider implements ThreadProvider {
+      int closeCalls;
+      int executorRequests;
+
+      @Override
+      public Kind kind() {
+        return Kind.PLATFORM;
+      }
+
+      @Override
+      public String name() {
+        return "refusing";
+      }
+
+      @Override
+      public boolean preferred() {
+        return false;
+      }
+
+      @Override
+      public java.util.concurrent.ExecutorService newBoundedExecutor(int maxConcurrency, String namePrefix) {
+        throw new IllegalStateException("no executor here");
+      }
+
+      @Override
+      public java.util.concurrent.ExecutorService newUnboundedExecutor(String namePrefix) {
+        executorRequests++;
+        throw new IllegalStateException("no executor here");
+      }
+
+      @Override
+      public void close() {
+        closeCalls++;
+      }
+    }
+
+    /** An ephemeral port the operating system just handed out and then released. */
+    private static int freePort() {
+      try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+        return probe.getLocalPort();
+      } catch (IOException unreachable) {
+        throw new AssertionError("the loopback stack is not answering", unreachable);
+      }
+    }
+
+    private static boolean canBind(int port) {
+      try (java.net.ServerSocket reuse = new java.net.ServerSocket(port)) {
+        return true;
+      } catch (IOException alreadyHeld) {
+        return false;
+      }
+    }
+
     private static List<String> concat(CapturedLogs... logs) {
       return java.util.Arrays.stream(logs)
           .flatMap(log -> log.events().stream())
