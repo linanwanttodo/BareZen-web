@@ -27,8 +27,14 @@
         <version>${project.version}</version>
       </dependency>
 
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-web</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
       <!--
-        Future modules are listed here as they are created (api, web, security, data, http-jdk,
+        Future modules are listed here as they are created (api, security, data, http-jdk,
         testkit, app, plugins). They are intentionally absent for now so that the bom never
         advertises an artifact that does not exist.
       -->

@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.barezen</groupId>
+    <artifactId>barezen-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>barezen-web</artifactId>
+  <packaging>jar</packaging>
+
+  <name>BareZen Web Contract</name>
+  <description>
+    The HTTP contract: request, response, headers and handler. Defines what a web component receives and
+    returns without naming a server. Contains no routing, no middleware, no servlet and no transport code.
+  </description>
+
+  <!--
+    Deliberately no <maven.compiler.release> override here. JDK 17 is the compatibility baseline of
+    the whole framework and is owned by the parent. See ADR-0002.
+  -->
+
+  <!--
+    No compile-scope dependency at all, including none on barezen-core. This is the phase's point: the HTTP
+    contract is a set of value types and one signature, and a contract that needed the lifecycle engine, the
+    assembler or a logging facade could not be implemented by a server that knows nothing about them
+    (ADR-0018). barezen-core remains the allowed direction of dependency - core <- web - but nothing in the
+    contract has a use for core yet, so the edge is not declared. When an HTTP server adapter is written as a
+    LifecycleParticipant it will need core, and that module, not this one, will declare it.
+
+    Test dependencies mirror barezen-core: the same JUnit, AssertJ and ArchUnit versions come from
+    barezen-parent. There is no logback dependency because nothing here logs, so there is no binding to
+    satisfy (ADR-0018).
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <!--
+        Same gate and same JDK 21 binding as barezen-core (ADR-0002). The contract is four public types with
+        no unreachable platform path in them, so there is no reason here - unlike the virtual thread provider -
+        for a lower bar on JDK 17.
+      -->
+      <id>coverage-gate</id>
+      <activation>
+        <jdk>[21,)</jdk>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>check-coverage</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+                <configuration>
+                  <rules>
+                    <rule>
+                      <element>BUNDLE</element>
+                      <limits>
+                        <limit>
+                          <counter>LINE</counter>
+                          <value>COVEREDRATIO</value>
+                          <minimum>0.85</minimum>
+                        </limit>
+                      </limits>
+                    </rule>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

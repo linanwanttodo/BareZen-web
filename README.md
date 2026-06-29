@@ -6,14 +6,15 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.6 (Event Model & EventBus) is implemented. Everything else is design only.
+Phase 2.7 (HTTP Core Contract) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
-| `barezen-web`, `barezen-http-jdk` | 3 | not created |
-| Discovery, Extension Points | 2.7 | not created |
+| `framework/barezen-web` | 2.7 | HTTP contract: `Handler`, `Request`, `Response`, `Headers`, `HttpMethod` — zero dependencies, no server, no router |
+| `barezen-http-jdk` | 3 | not created |
+| Discovery, Extension Points | later | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -34,9 +35,9 @@ mvn verify
 ./scripts/check-jdk-baseline.sh
 ```
 
-`mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core`.
-The gate runs on JDK 21 only: on JDK 17 the virtual thread provider is unreachable by construction, so that
-half of the bundle is not coverable there without asserting dead code is dead (ADR-0002, ADR-0010). JDK 17 in
+`mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core` and on
+`barezen-web`. The gate runs on JDK 21 only: on JDK 17 the virtual thread provider is unreachable by construction, so
+that half of the bundle is not coverable there without asserting dead code is dead (ADR-0002, ADR-0010). JDK 17 in
 CI proves compatibility, JDK 21 proves compatibility and quality.
 `.github/workflows/backend-ci.yml` runs the same build on both; green on both is the definition of compatible.
 
@@ -47,12 +48,15 @@ pom.xml                     barezen-parent: owns maven.compiler.release=17, vers
 barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
                             assembly (di), plugin SPI, events, errors
-docs/adr/                   architecture decision records, 0001-0017
+framework/barezen-web/      HTTP contract: handler, request, response, headers, method — no dependencies
+docs/adr/                   architecture decision records, 0001-0018
 scripts/                    build guards
 ```
 
 Dependency direction is fixed: `core` ← `framework` ← `plugins` ← `app`. Lower layers never import higher
-ones, and ArchUnit enforces it inside core today and across modules as they are created.
+ones, and ArchUnit enforces it inside core today and across modules as they are created. `barezen-web` goes one step
+further than the rule requires: it declares no compile dependency at all, not even on `barezen-core`, so the HTTP
+contract cannot reach the kernel and a server adapter is the only module allowed to know both (ADR-0018).
 
 ## Phase 2.1 in one paragraph
 
@@ -236,4 +240,35 @@ LifecycleOrchestrator app = LifecycleOrchestrator.builder()
 
 app.start();
 services.require(BillingService.class).charge("123");         // publish -> audit's handler, on this thread
+```
+
+## Phase 2.7 in one paragraph
+
+`framework/barezen-web` is the web layer's HTTP contract, and it has **zero dependencies** — not on Jetty, Netty or
+Servlet, and not on `barezen-core` either. Five public types: `Handler.handle(Request) → Response`, `Request`
+(method, raw path, raw query, headers, body), `Response` (status, headers, body), `Headers` (case-insensitive names,
+repeated fields kept as repeated fields, no `Map` in sight) and `HttpMethod` (nine shared constants, unknown methods
+keep the client's spelling). Everything is immutable and validated at construction, so a `Request` a handler received
+is the `Request` it passes on. No `Router`: binding a path to a handler means deciding trailing slashes, case,
+`%2F`, priority and capture names, and none of those has a consumer yet. No `Middleware`: the six questions a
+middleware type must answer are answered by decorating `Handler` with a lambda, which `HandlerTest` does for both
+timing and a `401` short-circuit. No `HttpContext`, no `request.service(...)`, no attributes, no `EventBus` inside a
+`Request` — a contract that can look things up stops being a contract. And nothing serves: `com.sun.net.httpserver`
+lives in the `barezen-http-jdk` adapter to come, which will implement `LifecycleParticipant`, own the port, read the
+body, catch the exception and choose the error format. Fourteen ArchUnit rules hold that line, each verified by a
+mutation probe that made it fail (ADR-0018).
+
+```java
+// An application writes handlers; the contract is all it needs to see.
+Handler reports = request -> request.headers().first("Authorization").isPresent()
+    ? new Response(200, Headers.of("Content-Type", "application/json"), json.toByteArray(UTF_8))
+    : new Response(401, Headers.empty(), null);                 // null body = an empty body, not a missing one
+
+Handler timed = request -> {                                    // "middleware" as decoration, no new type
+  long started = System.nanoTime();
+  Response answered = reports.handle(request);
+  return new Response(answered.status(),
+      answered.headers().with("X-Elapsed-Nanos", Long.toString(System.nanoTime() - started)),
+      answered.body());
+};
 ```

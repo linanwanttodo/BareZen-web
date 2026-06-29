@@ -11,7 +11,7 @@ names it. Code references ADRs by number in Javadoc, so a reader of the implemen
 | [0004](0004-startup-rollback-preserves-the-original-failure.md) | startup rolls back itself; the startup failure always wins | accepted |
 | [0005](0005-shutdown-is-best-effort-and-reported.md) | shutdown is best effort and reported, not thrown | accepted |
 | [0006](0006-plugin-context-is-not-a-service-locator.md) | PluginContext is not a service locator | accepted, prohibitions implemented in 2.4/2.5; proposed member list superseded by ADR-0016 |
-| [0007](0007-request-context-belongs-to-barezen-web.md) | RequestContext belongs to barezen-web | accepted, implemented in 3 |
+| [0007](0007-request-context-belongs-to-barezen-web.md) | RequestContext belongs to barezen-web | accepted, implemented in 3; placement assumed as given, existence refined by ADR-0018 |
 | [0008](0008-no-aggregator-pom-without-modules.md) | no aggregator POM without modules (`barezen-runtime` deleted) | accepted |
 | [0009](0009-lifecycle-exceptions-are-runtime-exceptions-pending-the-2-8-taxonomy.md) | lifecycle exceptions are runtime exceptions now, re-parented in 2.8 | accepted |
 | [0010](0010-runtime-capability-seam-scope.md) | RuntimeCapabilities is a 3-field snapshot, probe confined to one class | accepted |
@@ -22,3 +22,4 @@ names it. Code references ADRs by number in Javadoc, so a reader of the implemen
 | [0015](0015-application-assembly-is-a-responsibility-not-a-component.md) | application assembly is the application's responsibility, not a framework component | accepted, supersedes ADR-0013 item 6 |
 | [0016](0016-a-plugin-is-a-participant-not-a-container.md) | a plugin is a `LifecycleParticipant` that can name itself; no PluginContext, no registry, no discovery | accepted, refines ADR-0006 |
 | [0017](0017-the-event-bus-is-a-capability-not-a-context.md) | the event bus is a capability: synchronous, exact type, no lifecycle, no context | accepted |
+| [0018](0018-http-is-a-contract-not-a-server.md) | HTTP is a contract, not a server: five types, zero dependencies, no router, no middleware, no context | accepted |

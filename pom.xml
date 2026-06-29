@@ -18,6 +18,7 @@
   <modules>
     <module>barezen-bom</module>
     <module>framework/barezen-core</module>
+    <module>framework/barezen-web</module>
   </modules>
 
   <properties>
