@@ -4,6 +4,7 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideOutsid
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
+import com.barezen.core.kernel.LifecycleParticipant;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaMember;
@@ -37,6 +38,7 @@ class BarezenCoreArchitectureTest {
   private static final String ERROR = "com.barezen.core.error..";
   private static final String CONFIG = "com.barezen.core.config..";
   private static final String DI = "com.barezen.core.di..";
+  private static final String PLUGIN = "com.barezen.core.plugin..";
 
   /**
    * Method names that mean "ask me for an object by type". Kept as data, with the reasoning, so the list is
@@ -268,6 +270,58 @@ class BarezenCoreArchitectureTest {
       .as("com.barezen.core.di contains no reflection, class loading, scanning or SPI lookup");
 
   /**
+   * the plugin SPI depends on one type in the lifecycle engine, and on nothing else in core.
+   *
+   * <p>{@code Plugin extends LifecycleParticipant} is the single allowed edge into {@code kernel}, and it is what
+   * makes a plugin a participant rather than a second kind of component (ADR-0016). The rule is written at type level
+   * rather than as "plugin may depend on kernel" because the thing being forbidden is on the same package path as the
+   * thing being allowed: {@code LifecycleOrchestrator}. A plugin that could reach the orchestrator could register
+   * itself, drive another component's phases, or hand itself a lifecycle engine of its own, and a package level rule
+   * would let all three through. The layer rule covers the package shape; this one covers the type.
+   */
+  @ArchTest
+  static final ArchRule the_plugin_spi_reaches_only_the_participant_interface = noClasses()
+      .that().resideInAnyPackage(PLUGIN)
+      .should().dependOnClassesThat(dependencyOnKernelOtherThanTheParticipantInterface())
+      .as("com.barezen.core.plugin may use LifecycleParticipant and no other type in the kernel (ADR-0016)");
+
+  private static DescribedPredicate<JavaClass> dependencyOnKernelOtherThanTheParticipantInterface() {
+    return JavaClass.Predicates.resideInAnyPackage(KERNEL)
+        .and(DescribedPredicate.not(JavaClass.Predicates.equivalentTo(LifecycleParticipant.class)));
+  }
+
+  /**
+   * the plugin SPI knows nothing about the layers an application assembles.
+   *
+   * <p>Every type an application would pass to a plugin constructor lives below this package, so a dependency here
+   * is always the plugin going to fetch it instead. The four packages are named rather than "everything except
+   * kernel", because each forbids a distinct drift: {@code di} is {@code PluginContext.require(Class)} and a plugin
+   * holding the container, {@code config} is a plugin reading its own settings at runtime, {@code concurrent} is a
+   * plugin creating threads for itself, {@code runtime} is a plugin probing the JVM to decide its own behaviour
+   * (ADR-0006, ADR-0013, ADR-0015, ADR-0016).
+   */
+  @ArchTest
+  static final ArchRule plugins_do_not_reach_the_layers_the_application_assembles = noClasses()
+      .that().resideInAnyPackage(PLUGIN)
+      .should().dependOnClassesThat().resideInAnyPackage(DI, CONFIG, CONCURRENT, RUNTIME)
+      .as("a plugin's dependencies come from its constructor, supplied by the application (ADR-0006, ADR-0016)");
+
+  /**
+   * nothing else in core depends on the plugin SPI.
+   *
+   * <p>The kernel drives participants and stays indifferent to what else a participant is. If {@code kernel} learned
+   * about {@code Plugin} - a {@code PluginRegistry}, a {@code PluginManager}, an {@code instanceof} check that logs
+   * plugin ids - the SPI would have become a concept the lifecycle engine carries, and the next plugin feature would
+   * be requested as a kernel change instead of as an extension. The registration key stays a plain {@code String} for
+   * the same reason: that is what lets the orchestrator be driven by a plugin without naming one (ADR-0016).
+   */
+  @ArchTest
+  static final ArchRule no_core_type_depends_on_the_plugin_spi = noClasses()
+      .that().resideOutsideOfPackages(PLUGIN)
+      .should().dependOnClassesThat().resideInAnyPackage(PLUGIN)
+      .as("com.barezen.core.plugin must stay a leaf; the lifecycle engine has no plugin concept (ADR-0016)");
+
+  /**
    * the lifecycle engine does not read configuration.
    *
    * <p>Phase 2.2 left a {@code Builder.configuration(Configuration)} on the orchestrator, which made {@code kernel}
@@ -291,6 +345,12 @@ class BarezenCoreArchitectureTest {
    * rather than a reference it would have to interpret. {@code Runtime} stays reachable from both because it
    * reports what the JVM is instead of what the operator configured, and {@code Error} is the shared leaf.
    *
+   * <p>{@code Kernel} is reachable from {@code Plugin} and from nowhere else, and that is the entire plugin edge:
+   * {@code Plugin extends LifecycleParticipant}. A layer rule cannot say "one type from that package", so
+   * {@link #the_plugin_spi_reaches_only_the_participant_interface} narrows what it permits to a single interface,
+   * and {@code Di} stays sealed because a container that can reach lifecycle phases is a second lifecycle engine
+   * (ADR-0014, ADR-0015, ADR-0016).
+   *
    * <p>There is no {@code App} layer. The application's assembly code lives in the application, outside core, so
    * a layer for it here would describe a package that does not exist (ADR-0015).
    */
@@ -303,11 +363,13 @@ class BarezenCoreArchitectureTest {
       .layer("Concurrent").definedBy(CONCURRENT)
       .layer("Di").definedBy(DI)
       .layer("Kernel").definedBy(KERNEL)
-      .whereLayer("Kernel").mayNotBeAccessedByAnyLayer()
+      .layer("Plugin").definedBy(PLUGIN)
+      .whereLayer("Kernel").mayOnlyBeAccessedByLayers("Plugin")
       .whereLayer("Di").mayNotBeAccessedByAnyLayer()
+      .whereLayer("Plugin").mayNotBeAccessedByAnyLayer()
       .whereLayer("Concurrent").mayOnlyBeAccessedByLayers("Kernel")
       .whereLayer("Config").mayOnlyBeAccessedByLayers("Concurrent")
       .whereLayer("Runtime").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
       .whereLayer("Error").mayOnlyBeAccessedByLayers("Kernel", "Concurrent", "Config", "Di")
-      .as("core packages must form a one directional graph with kernel and the assembler at the top");
+      .as("core packages must form a one directional graph with kernel, the assembler and the plugin SPI at the top");
 }

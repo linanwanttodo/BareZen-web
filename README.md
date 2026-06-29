@@ -6,14 +6,14 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.4 (Application Assembly Boundary) is implemented. Everything else is design only.
+Phase 2.5 (Plugin Model) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
-| `framework/barezen-core` | 2.1–2.4 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary |
+| `framework/barezen-core` | 2.1–2.5 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI |
 | `barezen-web`, `barezen-http-jdk` | 3 | not created |
-| Plugin Model, Discovery, Extension Points, EventBus | 2.5–2.7 | not created |
+| Discovery, Extension Points, EventBus | 2.6–2.7 | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -46,8 +46,8 @@ CI proves compatibility, JDK 21 proves compatibility and quality.
 pom.xml                     barezen-parent: owns maven.compiler.release=17, versions, enforcer
 barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
-                            assembly (di), errors
-docs/adr/                   architecture decision records, 0001-0015
+                            assembly (di), plugin SPI, errors
+docs/adr/                   architecture decision records, 0001-0016
 scripts/                    build guards
 ```
 
@@ -166,4 +166,37 @@ app.start();
 // ... serve ...
 app.stop();     // participants first, while the pool is still open
 assembly.close();  // then what the assembly created
+```
+
+## Phase 2.5 in one paragraph
+
+A plugin is a `LifecycleParticipant` that can name itself: `com.barezen.core.plugin` ships two types — an interface
+with one method and a two-component record — and nothing else. `Plugin` inherits all four phases from the kernel and
+adds `descriptor()`, so there is one lifecycle path, driven by the same `LifecycleOrchestrator` as everything else;
+there is no `install()` beside `initialize()`, no `uninstall()` beside `stop()`, and no second engine. Dependencies
+arrive through the constructor — `new AuthPlugin(router, credentialStore, passwordHasher, tokenIssuer)` — never
+through a `PluginContext`, because every member such a context would carry either reopens the lookup surface ADR-0006
+and ADR-0014 refuse, hands a plugin the configuration handle ADR-0013 resolves at assembly time, reaches the
+orchestrator ADR-0015 gave to the application, or has no target yet. `PluginDescriptor(id, dependencies)` is metadata
+the application reads to pick its registration order; core verifies and orders nothing, since nothing in core holds a
+set of plugins — and that is recorded as a limitation rather than answered by a half-resolver. No discovery
+(`ServiceLoader`, scanning, `META-INF`), no `PluginManager`/`PluginRegistry`/`PluginContainer`, no extension point and
+no registry — an extension mechanism arrives with the first component that owns an extension point, where the real
+consumer can state its own rules. Ownership is unchanged from Phase 2.4: the application creates a plugin and releases
+it, the orchestrator only drives it, and `stop()` is the single release hook. Three new ArchUnit rules keep the shape —
+the SPI may reach `LifecycleParticipant` and no other kernel type, may not reach `di`/`config`/`concurrent`/`runtime`,
+and stays a leaf no core type depends on — while the layered rule now lets `Kernel` be reached by `Plugin` and by
+nothing else. Each was verified against a deliberately violating `PluginContext` and a `PluginRegistry` probe that were
+then deleted (ADR-0016).
+
+```java
+// The application decides which plugins exist, in what order, and what they are given.
+Plugin auth = new AuthPlugin(router, credentialStore, passwordHasher, tokenIssuer);
+Plugin users = new UserPlugin(userRepository, tokenIssuer);   // descriptor: id "user", dependencies ["auth"]
+
+LifecycleOrchestrator app = LifecycleOrchestrator.builder()
+    .threadPolicy(RuntimeConfig.from(configuration).threads())
+    .register(auth.descriptor().id(), auth)     // registration order is the startup order
+    .register(users.descriptor().id(), users)   // read after "auth" because it declares that dependency
+    .build();
 ```
