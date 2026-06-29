@@ -9,6 +9,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaField;
 import com.tngtech.archunit.core.domain.JavaMember;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaModifier;
@@ -206,6 +207,15 @@ class BarezenWebArchitectureTest {
    * {@code HandlerChain}, {@code Filter}, {@code Interceptor} all remain here — and {@code no_preemptive_routing_or_middleware_types}
    * below is the rule that keeps them banned while exactly one routing type, {@code Router}, is allowed to exist. The
    * alternative was renaming the type to dodge this list, which would have been this rule teaching the design.
+   *
+   * <p><b>Amended by Phase 2.9.</b> The forbidden suffix list ends in {@code Provider}, and {@link
+   * HttpServerAdapterProvider} ends in it. ADR-0025 §4 takes that one name back on one condition, which is now two more
+   * rules below rather than a deletion: a provider has {@code id()} and {@code create(...)} and nothing else, its
+   * parameters are the dependencies of the object it builds, and it stores nothing — so it cannot answer «give me the
+   * thing of type T», which is the sentence this suffix was written to refuse. {@code Context}, {@code Registry},
+   * {@code Manager}, {@code Locator}, {@code Factory}, {@code Container}, {@code Session} and the rest of the family
+   * stay banned for every other type in this package, and the rule still fails a build: the probe in ADR-0025 §10 is a
+   * second {@code ...Provider} type that keeps its {@code lookup} method.
    */
   @ArchTest
   static final ArchRule no_container_shaped_type_names = classes()
@@ -218,10 +228,13 @@ class BarezenWebArchitectureTest {
    * The container family, checked as a condition so the failure message can name the suffix that was hit.
    */
   private static ArchCondition<JavaClass> haveNameNotBelongingToTheContainerFamily() {
+    // "Provider" stays in the list, and exactly one name is exempted below. Deleting the suffix instead would have made
+    // the next XProvider type pass this rule silently, which is the failure mode ADR-0018 §9 was written against.
     List<String> forbiddenSuffixes = java.util.List.of(
         "Context", "Registry", "Manager", "Engine", "Pipeline", "Exchange", "Runtime", "Facade", "Broker", "Holder",
         "Scope", "Locator", "Provider", "Factory", "Container", "Session", "State", "Dispatcher", "Invoker",
         "Assembler", "Processor", "Resolver", "Support", "Helper", "Utils");
+    List<String> providerNamesAllowedDespiteTheSuffix = java.util.List.of("HttpServerAdapterProvider");
     // "Router" is the one entry ADR-0019 removes from this list; every other routing-shaped name stays.
     List<String> forbiddenNames = java.util.List.of(
         "Route", "RouteRegistry", "PathPattern", "RouteMatcher", "Middleware", "HandlerChain", "Filter",
@@ -231,15 +244,24 @@ class BarezenWebArchitectureTest {
       @Override
       public void check(JavaClass type, ConditionEvents events) {
         String name = type.getSimpleName();
+        boolean exemptFromTheSuffix = providerNamesAllowedDespiteTheSuffix.contains(name);
         String hitSuffix = forbiddenSuffixes.stream().filter(name::endsWith).findFirst().orElse(null);
+        if (hitSuffix != null && exemptFromTheSuffix) {
+          events.add(SimpleConditionEvent.satisfied(type, name
+              + " ends in " + hitSuffix + " and is the one type ADR-0025 §4 exempts, because"
+              + " a_provider_offers_only_an_id_and_a_creation and"
+              + " no_server_component_is_stored_by_the_contract police what that suffix could otherwise mean"));
+          return;
+        }
         boolean exactHit = forbiddenNames.contains(name);
         boolean violates = hitSuffix != null || exactHit;
         events.add(violates
             ? SimpleConditionEvent.violated(type, type.getName() + " is named " + name
                 + (hitSuffix != null ? ", ending in " + hitSuffix : ", which is a name this phase refuses")
                 + ". Nothing in the contract owns components, routes or a chain of execution (ADR-0018 §9, §10,"
-                + " §16; ADR-0019 §19, §20)")
-            : SimpleConditionEvent.satisfied(type, name + " is a value, a signature or the route table"));
+                + " §16; ADR-0019 §19, §20; ADR-0025 §4)")
+            : SimpleConditionEvent.satisfied(type, name + " is a value, a signature, the route table or the seam that"
+                + " names a server"));
       }
     };
   }
@@ -301,20 +323,28 @@ class BarezenWebArchitectureTest {
    * kept rather than loosened: it is still an allow-list, so a sixth <em>and now eighth</em> type fails the build, and
    * the reason it was renamed rather than left saying "five" is that a rule whose name disagrees with its list is a
    * rule nobody trusts when it does fail.
+   * <p><b>Amended by Phase 2.9.</b> ADR-0021 §3 adds {@code HttpServerAdapter} and ADR-0025 §2 adds
+   * {@code HttpServerAdapterProvider}, so the rule now names nine. Both have a consumer that already exists rather than
+   * one written for them: an application that wants to start a server needs a type to hold, and a build that wants to
+   * name its server needs a type to be found by. Still an allow-list, so a tenth type fails the build, and still renamed
+   * rather than left saying "five" or "seven" — the reason ADR-0019 §20 gave is that a rule whose name disagrees with its
+   * list is a rule nobody trusts when it does fail.
    */
   @ArchTest
-  static final ArchRule the_contract_is_exactly_the_seven_contracted_types = classes()
+  static final ArchRule the_contract_is_exactly_the_nine_contracted_types = classes()
       .that(JavaClass.Predicates.resideInAPackage(WEB)
           .and(JavaClass.Predicates.TOP_LEVEL_CLASSES))
-      .should(haveFullyQualifiedNameBeingOneOfTheSeven())
-      .as("ADR-0018 §16 froze Handler, Request, Response, Headers, HttpMethod; ADR-0019 §20 added Router and RouteMatch"
-          + " — anything else needs a consumer, which is the rule every earlier phase used");
+      .should(haveFullyQualifiedNameBeingOneOfTheNine())
+      .as("ADR-0018 §16 froze Handler, Request, Response, Headers, HttpMethod; ADR-0019 §20 added Router and RouteMatch;"
+          + " ADR-0021 §3 and ADR-0025 §2 added HttpServerAdapter and HttpServerAdapterProvider — anything else needs a"
+          + " consumer, which is the rule every earlier phase used");
 
-  private static ArchCondition<JavaClass> haveFullyQualifiedNameBeingOneOfTheSeven() {
+  private static ArchCondition<JavaClass> haveFullyQualifiedNameBeingOneOfTheNine() {
     List<String> allowed = java.util.List.of(
         "com.barezen.web.Handler", "com.barezen.web.Request", "com.barezen.web.Response", "com.barezen.web.Headers",
-        "com.barezen.web.HttpMethod", "com.barezen.web.Router", "com.barezen.web.RouteMatch");
-    return new ArchCondition<JavaClass>("be one of the seven contracted types") {
+        "com.barezen.web.HttpMethod", "com.barezen.web.Router", "com.barezen.web.RouteMatch",
+        "com.barezen.web.HttpServerAdapter", "com.barezen.web.HttpServerAdapterProvider");
+    return new ArchCondition<JavaClass>("be one of the nine contracted types") {
       @Override
       public void check(JavaClass type, ConditionEvents events) {
         boolean violates = !allowed.contains(type.getName());
@@ -509,6 +539,78 @@ class BarezenWebArchitectureTest {
                     + " client sent, so they belong in the call, not in the record of the call — the handler receives"
                     + " them as an argument (ADR-0020 §4)")
             : SimpleConditionEvent.satisfied(method, method.getName() + " is a request fact"));
+      }
+    };
+  }
+
+  /**
+   * a provider offers an id and a creation, and is not allowed a third member.
+   *
+   * <p>{@link HttpServerAdapterProvider} is the one type in this package whose job is to <em>produce</em> an object,
+   * which is exactly the shape a service locator arrives in. The difference is not in its name — the suffix was written
+   * for that risk — and not in its javadoc either. It is that a locator can be asked for something it was never handed,
+   * and this type cannot: {@code id()}, {@code create(String, int, Router)} and nothing else, with every input to the
+   * object it builds present in that parameter list. So the surface is an allow-list, which refuses {@code require(Class)},
+   * {@code lookup(String)}, {@code instance()}, {@code current()}, {@code available()} and {@code adapters()} by being
+   * silent about them rather than by a blacklist someone would have to think of in advance (ADR-0006, ADR-0025 §4, §7).
+   */
+  @ArchTest
+  static final ArchRule a_provider_offers_only_an_id_and_a_creation = methods()
+      .that(JavaMember.Predicates.declaredIn(JavaClass.Predicates.equivalentTo(HttpServerAdapterProvider.class)))
+      .should(beIdCreateOrNothing())
+      .as("HttpServerAdapterProvider names an adapter and builds one from arguments it is handed: a third member is a"
+          + " lookup, which is what ADR-0006 and ADR-0025 §4 refuse");
+
+  private static ArchCondition<JavaMethod> beIdCreateOrNothing() {
+    List<String> allowed = List.of("id", "create");
+    return new ArchCondition<JavaMethod>("be id() or create(...)") {
+      @Override
+      public void check(JavaMethod method, ConditionEvents events) {
+        boolean violates = !allowed.contains(method.getName());
+        events.add(violates
+            ? SimpleConditionEvent.violated(method, method.getFullName() + " is a third member on the adapter provider."
+                + " A provider that can be asked for an object it was never handed is a service locator wearing a"
+                + " factory's name (ADR-0025 §4)")
+            : SimpleConditionEvent.satisfied(method, method.getName() + " is one of the two provider operations"));
+      }
+    };
+  }
+
+  /**
+   * nothing in the contract stores an adapter or a provider — including in a static field.
+   *
+   * <p>The amendment to {@code no_container_shaped_type_names} is only safe if the sentence it weakens is still
+   * enforced some other way, and this is that way. A singleton holder would be one {@code static} field on
+   * {@code HttpServerAdapterProvider} ({@code INSTANCE}), one on {@code HttpServerAdapter}, or a {@code static}
+   * accessor returning one; this rule refuses the first two and {@code a_provider_offers_only_an_id_and_a_creation}
+   * refuses the third. Discovery is supposed to hand out a fresh provider per {@code ServiceLoader} instance, and an
+   * application is supposed to hold the adapter it started — a copy of either kept here would be a second, invisible
+   * owner of a server (ADR-0025 §4, §8).
+   *
+   * <p>Scoped to the two server types rather than to every collaborator, because {@code Router} and {@code Handler}
+   * <em>are</em> stored — by the route table and by a match, which is the whole design of Phase 2.8. What would be new
+   * here is a stored <em>runtime</em>, and that is the thing with no legitimate owner in a contract.
+   */
+  @ArchTest
+  static final ArchRule no_server_component_is_stored_by_the_contract = fields()
+      .that().areDeclaredInClassesThat().resideInAPackage(WEB)
+      .should(notHoldAServerComponent())
+      .as("the contract has no field of type HttpServerAdapter or HttpServerAdapterProvider: a stored runtime is a"
+          + " registry, and a static one is a global (ADR-0006, ADR-0025 §8)")
+      .allowEmptyShould(true);
+
+  private static ArchCondition<JavaField> notHoldAServerComponent() {
+    List<String> stored = List.of("com.barezen.web.HttpServerAdapter", "com.barezen.web.HttpServerAdapterProvider");
+    return new ArchCondition<JavaField>("not hold a server component") {
+      @Override
+      public void check(JavaField field, ConditionEvents events) {
+        String type = field.getRawType().getName();
+        boolean violates = stored.contains(type);
+        events.add(violates
+            ? SimpleConditionEvent.violated(field, field.getFullName() + " holds a " + type + ". A contract type that"
+                + " stores the runtime it describes is a singleton holder, and a singleton holder is how a test starts"
+                + " a server it never asked for (ADR-0025 §8)")
+            : SimpleConditionEvent.satisfied(field, field.getName() + " holds no runtime"));
       }
     };
   }
