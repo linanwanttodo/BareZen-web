@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    Standalone bill of materials: it deliberately has no parent, because barezen-parent imports it.
+    Giving it the parent as its own parent would create a resolution cycle.
+  -->
+  <groupId>com.barezen</groupId>
+  <artifactId>barezen-bom</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>BareZen Bill Of Materials</name>
+  <description>
+    Version alignment for BareZen artifacts. Applications import this pom so that framework modules
+    and plugins always move together.
+  </description>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
+        Future modules are listed here as they are created (api, web, security, data, http-jdk,
+        testkit, app, plugins). They are intentionally absent for now so that the bom never
+        advertises an artifact that does not exist.
+      -->
+    </dependencies>
+  </dependencyManagement>
+</project>

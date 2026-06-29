@@ -1,0 +1,62 @@
+name: backend-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pom.xml'
+      - 'barezen-bom/**'
+      - 'framework/**'
+      - 'scripts/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    paths:
+      - 'pom.xml'
+      - 'barezen-bom/**'
+      - 'framework/**'
+      - 'scripts/**'
+      - '.github/workflows/backend-ci.yml'
+
+jobs:
+  build:
+    name: verify on JDK ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # JDK 17 is the compatibility baseline, JDK 21 the recommended runtime (ADR-0002).
+        # A green build on both is the definition of "compatible", not a review question.
+        java: [17, 21]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      - name: Assert the compile baseline is still JDK 17
+        run: ./scripts/check-jdk-baseline.sh
+
+      - name: mvn verify
+        run: >
+          mvn -B -ntp verify
+          -Dmaven.test.failure.ignore=false
+
+      - name: Upload coverage report
+        if: matrix.java == 21
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-barezen-core
+          path: framework/barezen-core/target/site/jacoco
+          retention-days: 7
+
+      - name: Upload surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-jdk${{ matrix.java }}
+          path: framework/**/target/surefire-reports
+          retention-days: 7
