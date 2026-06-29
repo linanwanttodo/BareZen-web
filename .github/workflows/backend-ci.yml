@@ -41,16 +41,16 @@ jobs:
         run: ./scripts/check-jdk-baseline.sh
 
       - name: mvn clean verify
-        # The 85% coverage gate is activated by JDK 21+ inside barezen-core's pom, so this single
-        # command means "compatibility + quality" on 21 and "compatibility" on 17.
+        # Each module activates its own 85% line-coverage gate under a [21,) JDK profile, so this single
+        # command means "compatibility + quality" on 21 and "compatibility" on 17 (ADR-0002).
         run: mvn -B -ntp clean verify
 
       - name: Upload coverage report
         if: matrix.java == 21
         uses: actions/upload-artifact@v4
         with:
-          name: jacoco-barezen-core
-          path: framework/barezen-core/target/site/jacoco
+          name: jacoco-coverage
+          path: framework/**/target/site/jacoco
           retention-days: 7
 
       - name: Upload surefire reports on failure
