@@ -21,3 +21,4 @@ names it. Code references ADRs by number in Javadoc, so a reader of the implemen
 | [0014](0014-dependency-injection-is-explicit-factory-registration.md) | DI is explicit factory registration, not reflective bean discovery | accepted |
 | [0015](0015-application-assembly-is-a-responsibility-not-a-component.md) | application assembly is the application's responsibility, not a framework component | accepted, supersedes ADR-0013 item 6 |
 | [0016](0016-a-plugin-is-a-participant-not-a-container.md) | a plugin is a `LifecycleParticipant` that can name itself; no PluginContext, no registry, no discovery | accepted, refines ADR-0006 |
+| [0017](0017-the-event-bus-is-a-capability-not-a-context.md) | the event bus is a capability: synchronous, exact type, no lifecycle, no context | accepted |

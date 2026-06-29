@@ -6,14 +6,14 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.5 (Plugin Model) is implemented. Everything else is design only.
+Phase 2.6 (Event Model & EventBus) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
-| `framework/barezen-core` | 2.1–2.5 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI |
+| `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
 | `barezen-web`, `barezen-http-jdk` | 3 | not created |
-| Discovery, Extension Points, EventBus | 2.6–2.7 | not created |
+| Discovery, Extension Points | 2.7 | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -46,8 +46,8 @@ CI proves compatibility, JDK 21 proves compatibility and quality.
 pom.xml                     barezen-parent: owns maven.compiler.release=17, versions, enforcer
 barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
-                            assembly (di), plugin SPI, errors
-docs/adr/                   architecture decision records, 0001-0016
+                            assembly (di), plugin SPI, events, errors
+docs/adr/                   architecture decision records, 0001-0017
 scripts/                    build guards
 ```
 
@@ -199,4 +199,41 @@ LifecycleOrchestrator app = LifecycleOrchestrator.builder()
     .register(auth.descriptor().id(), auth)     // registration order is the startup order
     .register(users.descriptor().id(), users)   // read after "auth" because it declares that dependency
     .build();
+```
+
+## Phase 2.6 in one paragraph
+
+`com.barezen.core.event` is the first horizontal capability added to core, and it is the test Phase 2.5's design was
+waiting for: a component plugins genuinely need, delivered without a context. Three public types — `EventBus`
+(`subscribe`, `publish`), `EventHandler` (one method, no priority or executor knobs) and `Subscription` (one method,
+`cancel()`) — plus a package-private synchronous implementation. There is no `Event` interface: any object is an event,
+and `event.getClass()` is the routing key. The dispatch contract is stated rather than implied — publish is synchronous
+on the caller's thread, type matching is exact with no supertype walk, registration order is invocation order within an
+event type, the first handler failure ends that dispatch and propagates unchanged, `null` fails immediately at either
+method, and a handler may publish again. The bus is not a `LifecycleParticipant` and is not `AutoCloseable`: it owns no
+thread, socket, file or queue, so it has nothing to start or stop, and a subscription ends when its owner cancels it
+which is why `Plugin.stop()` calls `cancel()` on the handles it kept from `initialize()`. The bus does not know who
+subscribed, so `EventBus ↛ Plugin` and `EventBus ↛ anything in core` hold, and the reverse edges hold too — the package
+is a leaf in both directions. No `ExtensionPoint`, no `ExtensionRegistry`, no async mode, no handler discovery: an
+event bus is not a general extension mechanism, and an asynchronous model would be a different type with its own
+contract rather than a flag on this one (ADR-0017).
+
+```java
+// The application creates the bus and hands it to whoever needs it. Nothing looks anything up.
+EventBus events = EventBus.create();
+Plugin audit = new AuditPlugin(events);                       // subscribes in initialize, cancels in stop
+BillingService billing = new BillingService(events);          // publishes
+
+ServiceAssembly services = ServiceAssembly.builder()
+    .instance(EventBus.class, events)
+    .instance(BillingService.class, billing)
+    .build();
+
+LifecycleOrchestrator app = LifecycleOrchestrator.builder()
+    .threadPolicy(RuntimeConfig.from(configuration).threads())
+    .register(audit.descriptor().id(), audit)
+    .build();
+
+app.start();
+services.require(BillingService.class).charge("123");         // publish -> audit's handler, on this thread
 ```

@@ -39,6 +39,7 @@ class BarezenCoreArchitectureTest {
   private static final String CONFIG = "com.barezen.core.config..";
   private static final String DI = "com.barezen.core.di..";
   private static final String PLUGIN = "com.barezen.core.plugin..";
+  private static final String EVENT = "com.barezen.core.event..";
 
   /**
    * Method names that mean "ask me for an object by type". Kept as data, with the reasoning, so the list is
@@ -245,15 +246,18 @@ class BarezenCoreArchitectureTest {
       .as("dependencies are handed to the assembler as objects, never looked up from the environment");
 
   /**
-   * the assembler does not scan for classes or reflect over them.
+   * the assembler and the event bus do not scan for classes or reflect over them.
    *
-   * <p>Registration is explicit in application code, so the container has no reason to name a package, load a
-   * class by name or pick a constructor. Each of these calls is a step towards discovering beans instead of being
-   * told about them; the whole phase is defined by not taking it (ADR-0014).
+   * <p>Registration is explicit in application code, so neither the container nor the bus has any reason to name a
+   * package, load a class by name, pick a constructor or enumerate a service. Each of these calls is a step towards
+   * discovering components instead of being told about them; the whole design is defined by not taking it. For the
+   * event bus the temptation is specific and well known: a {@code ServiceLoader<EventHandler>} or a
+   * {@code @Subscribe} annotation scan is how the mainstream event systems avoid declaring their handlers, and both
+   * would need exactly the reflection this phase forbids (ADR-0014, ADR-0017).
    */
   @ArchTest
-  static final ArchRule di_does_not_scan_or_reflect = noClasses()
-      .that().resideInAnyPackage(DI)
+  static final ArchRule the_assembler_and_the_event_bus_do_not_scan_or_reflect = noClasses()
+      .that().resideInAnyPackage(DI, EVENT)
       .should().dependOnClassesThat().resideInAnyPackage("java.lang.reflect..")
       // Every overload of each of these is listed by hand. callMethod(Class, String) matches only the
       // no-argument signature, so a rule written for one shape leaves the others unguarded, which is exactly how a
@@ -267,7 +271,8 @@ class BarezenCoreArchitectureTest {
       .orShould().callMethod(ClassLoader.class, "getSystemResources", String.class)
       .orShould().callMethod(java.util.ServiceLoader.class, "load", Class.class)
       .orShould().callMethod(java.util.ServiceLoader.class, "load", Class.class, ClassLoader.class)
-      .as("com.barezen.core.di contains no reflection, class loading, scanning or SPI lookup");
+      .as("com.barezen.core.di and com.barezen.core.event contain no reflection, class loading, scanning or SPI"
+          + " lookup");
 
   /**
    * the plugin SPI depends on one type in the lifecycle engine, and on nothing else in core.
@@ -322,6 +327,72 @@ class BarezenCoreArchitectureTest {
       .as("com.barezen.core.plugin must stay a leaf; the lifecycle engine has no plugin concept (ADR-0016)");
 
   /**
+   * the event bus depends on nothing in core at all.
+   *
+   * <p>This is the strongest form the phase's acceptance picture asks for, and it is stated as one rule rather than
+   * four: {@code event} may not reach {@code di} ({@code eventBus.require(EventBus.class)} in reverse), may not reach
+   * {@code config} (a bus reading its own dispatch settings), may not reach {@code concurrent} or {@code runtime} (an
+   * executor for async handlers, a probe for a capability it does not need), and may not reach {@code kernel} — which
+   * is the one worth naming, because the two ways a bus grows a lifecycle are a {@code close()} the orchestrator calls
+   * and a subscription registry that notices when a participant stops. The bus is a capability with one dependency:
+   * the objects it routes (ADR-0017).
+   */
+  @ArchTest
+  static final ArchRule the_event_bus_depends_on_nothing_in_core = noClasses()
+      .that().resideInAnyPackage(EVENT)
+      .should().dependOnClassesThat().resideInAnyPackage(KERNEL, DI, CONFIG, CONCURRENT, RUNTIME, PLUGIN, ERROR)
+      .as("com.barezen.core.event must stay a standalone capability: no lifecycle, no container, no configuration,"
+          + " no threads, no plugin concept (ADR-0017)");
+
+  /**
+   * nothing else in core depends on the event bus.
+   *
+   * <p>The mirror of the rule above, and the one that keeps the phase's claim honest. The bus is used by plugins and
+   * by application services, both of which receive it through a constructor; if {@code kernel} or {@code plugin}
+   * imported it, then either the lifecycle engine had started caring about events or the plugin SPI had started
+   * naming its collaborators, and both would be the context-shaped coupling ADR-0016 refuses. {@code Plugin -> Event}
+   * is legal because it is an application's plugin reaching a capability; it simply never happens inside core, and no
+   * future plugin design should make it necessary.
+   */
+  @ArchTest
+  static final ArchRule no_core_type_depends_on_the_event_bus = noClasses()
+      .that().resideOutsideOfPackages(EVENT)
+      .should().dependOnClassesThat().resideInAnyPackage(EVENT)
+      .as("com.barezen.core.event must stay a leaf; nothing in core routes events for anybody (ADR-0017)");
+
+  /**
+   * the event bus owns no execution machinery.
+   *
+   * <p>The one risk the dependency rules above cannot see, because it arrives as a JDK import: an
+   * {@code ExecutorService} field, a {@code BlockingQueue} of pending events, a {@code ScheduledExecutorService} for
+   * retry. Phase 2.6 decided dispatch is synchronous, and the usual way that decision erodes is a bus that keeps a
+   * thread pool "for the async cases" while its signature still says {@code publish}. This rule is a dependency rule
+   * over JDK types rather than a blacklist of BareZen method names: the concurrent *collections* the implementation
+   * legitimately routes with ({@code ConcurrentHashMap}, {@code CopyOnWriteArrayList}) are not executors, threads,
+   * queues, timers or schedulers, so they stay legal, and everything that could turn a publish into a submission
+   * cannot (ADR-0017).
+   */
+  @ArchTest
+  static final ArchRule the_event_bus_owns_no_execution_machinery = noClasses()
+      .that().resideInAnyPackage(EVENT)
+      .should().dependOnClassesThat(dependOnExecutionMachinery())
+      .as("com.barezen.core.event must not hold an executor, thread, queue, timer or scheduler: dispatch is"
+          + " synchronous, so a bus that owns a thread owns a lifecycle it does not have (ADR-0017)");
+
+  private static DescribedPredicate<JavaClass> dependOnExecutionMachinery() {
+    // Folded rather than a regex: JavaClass.Predicates has simpleNameContaining but not simpleNameMatching, and a
+    // name list is reviewable in the way a pattern is not. Each fragment names a kind of machinery the synchronous
+    // contract rules out - a pool to submit to, a queue to park events in, a future to hand back instead of a result.
+    DescribedPredicate<JavaClass> machinery = null;
+    for (String fragment : java.util.List.of("Executor", "Thread", "Queue", "Future", "Timer", "Scheduler",
+        "Semaphore")) {
+      DescribedPredicate<JavaClass> candidate = JavaClass.Predicates.simpleNameContaining(fragment);
+      machinery = machinery == null ? candidate : machinery.or(candidate);
+    }
+    return JavaClass.Predicates.resideInAnyPackage("java.util.concurrent..").and(machinery);
+  }
+
+  /**
    * the lifecycle engine does not read configuration.
    *
    * <p>Phase 2.2 left a {@code Builder.configuration(Configuration)} on the orchestrator, which made {@code kernel}
@@ -351,6 +422,11 @@ class BarezenCoreArchitectureTest {
    * and {@code Di} stays sealed because a container that can reach lifecycle phases is a second lifecycle engine
    * (ADR-0014, ADR-0015, ADR-0016).
    *
+   * <p>{@code Event} is sealed for the opposite reason: it is a capability, and a capability that can reach the
+   * lifecycle engine or the assembler would be handed the application's ownership decisions. Nothing reaches it
+   * either, so the two rules about it are a conjunction of "no outgoing edges" and "no incoming edges", which is why
+   * the layer list below says {@code mayNotBeAccessedByAnyLayer} twice (ADR-0017).
+   *
    * <p>There is no {@code App} layer. The application's assembly code lives in the application, outside core, so
    * a layer for it here would describe a package that does not exist (ADR-0015).
    */
@@ -362,14 +438,17 @@ class BarezenCoreArchitectureTest {
       .layer("Config").definedBy(CONFIG)
       .layer("Concurrent").definedBy(CONCURRENT)
       .layer("Di").definedBy(DI)
+      .layer("Event").definedBy(EVENT)
       .layer("Kernel").definedBy(KERNEL)
       .layer("Plugin").definedBy(PLUGIN)
       .whereLayer("Kernel").mayOnlyBeAccessedByLayers("Plugin")
       .whereLayer("Di").mayNotBeAccessedByAnyLayer()
+      .whereLayer("Event").mayNotBeAccessedByAnyLayer()
       .whereLayer("Plugin").mayNotBeAccessedByAnyLayer()
       .whereLayer("Concurrent").mayOnlyBeAccessedByLayers("Kernel")
       .whereLayer("Config").mayOnlyBeAccessedByLayers("Concurrent")
       .whereLayer("Runtime").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
       .whereLayer("Error").mayOnlyBeAccessedByLayers("Kernel", "Concurrent", "Config", "Di")
-      .as("core packages must form a one directional graph with kernel, the assembler and the plugin SPI at the top");
+      .as("core packages must form a one directional graph with kernel, the assembler, the event bus and the plugin"
+          + " SPI at the top");
 }
