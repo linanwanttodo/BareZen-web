@@ -198,6 +198,13 @@ class BarezenWebArchitectureTest {
    * {@code HttpContext}, {@code HttpExchange}, {@code HttpRequestContext}, {@code HttpResponseContext},
    * {@code HttpPipeline}, {@code HttpEngine}, {@code HttpRuntime} and {@code HttpManager}; this rule covers those and
    * the suffix family that reaches the same place from a different word (ADR-0006, ADR-0018 §9, §16).
+   *
+   * <p><b>Amended by Phase 2.8.</b> ADR-0018 §16 put {@code Router} on this list, when routing was not in the phase.
+   * ADR-0019 §20 takes that entry back: the name stays banned for every <em>other</em> type it could smuggle in —
+   * {@code Route}, {@code RouteRegistry}, {@code PathPattern}, {@code RouteMatcher}, {@code Middleware},
+   * {@code HandlerChain}, {@code Filter}, {@code Interceptor} all remain here — and {@code no_preemptive_routing_or_middleware_types}
+   * below is the rule that keeps them banned while exactly one routing type, {@code Router}, is allowed to exist. The
+   * alternative was renaming the type to dodge this list, which would have been this rule teaching the design.
    */
   @ArchTest
   static final ArchRule no_container_shaped_type_names = classes()
@@ -214,8 +221,9 @@ class BarezenWebArchitectureTest {
         "Context", "Registry", "Manager", "Engine", "Pipeline", "Exchange", "Runtime", "Facade", "Broker", "Holder",
         "Scope", "Locator", "Provider", "Factory", "Container", "Session", "State", "Dispatcher", "Invoker",
         "Assembler", "Processor", "Resolver", "Support", "Helper", "Utils");
+    // "Router" is the one entry ADR-0019 removes from this list; every other routing-shaped name stays.
     List<String> forbiddenNames = java.util.List.of(
-        "Router", "Route", "RouteRegistry", "PathPattern", "RouteMatcher", "Middleware", "HandlerChain", "Filter",
+        "Route", "RouteRegistry", "PathPattern", "RouteMatcher", "Middleware", "HandlerChain", "Filter",
         "Interceptor", "HandlerAdapter", "HttpHandler", "HttpRequest", "HttpResponse", "HttpMessage",
         "BodyPublisher", "BodyReader", "BodyWriter", "StreamContext");
     return new ArchCondition<JavaClass>("not carry a container, router or pipeline name") {
@@ -229,8 +237,8 @@ class BarezenWebArchitectureTest {
             ? SimpleConditionEvent.violated(type, type.getName() + " is named " + name
                 + (hitSuffix != null ? ", ending in " + hitSuffix : ", which is a name this phase refuses")
                 + ". Nothing in the contract owns components, routes or a chain of execution (ADR-0018 §9, §10,"
-                + " §16)")
-            : SimpleConditionEvent.satisfied(type, name + " is a value or a signature"));
+                + " §16; ADR-0019 §19, §20)")
+            : SimpleConditionEvent.satisfied(type, name + " is a value, a signature or the route table"));
       }
     };
   }
@@ -280,32 +288,40 @@ class BarezenWebArchitectureTest {
   }
 
   /**
-   * the five types are the whole module, and no sixth is a container in disguise.
+   * the shipped types are the whole module, and none of the extras is a container in disguise.
    *
    * <p>Written against the compiled package directory rather than as a reflection over a class list, because a rule
    * over classes that exist cannot see the one that was just added. {@link ImportOption.DoNotIncludeTests} keeps test
    * fixtures out of the scan, so this measures the shipped surface.
+   *
+   * <p><b>Amended by Phase 2.8.</b> ADR-0018 §16 froze five names; ADR-0019 §20 adds two — {@code Router} because the
+   * phase's question («path + method → Handler») has no answer without a type that answers it, and {@code RouteMatch}
+   * because a captured path parameter is something a caller cannot rebuild from a handler or a request. The rule is
+   * kept rather than loosened: it is still an allow-list, so a sixth <em>and now eighth</em> type fails the build, and
+   * the reason it was renamed rather than left saying "five" is that a rule whose name disagrees with its list is a
+   * rule nobody trusts when it does fail.
    */
   @ArchTest
-  static final ArchRule the_contract_is_exactly_five_types = classes()
+  static final ArchRule the_contract_is_exactly_the_seven_contracted_types = classes()
       .that(JavaClass.Predicates.resideInAPackage(WEB)
           .and(JavaClass.Predicates.TOP_LEVEL_CLASSES))
-      .should(haveFullyQualifiedNameBeingOneOfTheFive())
-      .as("ADR-0018 §16 freezes the surface: Handler, Request, Response, Headers, HttpMethod — anything else needs a"
-          + " consumer, which is the rule every earlier phase used");
+      .should(haveFullyQualifiedNameBeingOneOfTheSeven())
+      .as("ADR-0018 §16 froze Handler, Request, Response, Headers, HttpMethod; ADR-0019 §20 added Router and RouteMatch"
+          + " — anything else needs a consumer, which is the rule every earlier phase used");
 
-  private static ArchCondition<JavaClass> haveFullyQualifiedNameBeingOneOfTheFive() {
+  private static ArchCondition<JavaClass> haveFullyQualifiedNameBeingOneOfTheSeven() {
     List<String> allowed = java.util.List.of(
         "com.barezen.web.Handler", "com.barezen.web.Request", "com.barezen.web.Response", "com.barezen.web.Headers",
-        "com.barezen.web.HttpMethod");
-    return new ArchCondition<JavaClass>("be one of the five contract types") {
+        "com.barezen.web.HttpMethod", "com.barezen.web.Router", "com.barezen.web.RouteMatch");
+    return new ArchCondition<JavaClass>("be one of the seven contracted types") {
       @Override
       public void check(JavaClass type, ConditionEvents events) {
         boolean violates = !allowed.contains(type.getName());
         events.add(violates
             ? SimpleConditionEvent.violated(type, type.getName()
-                + " is a sixth type in com.barezen.web; every public type must have a current consumer, and the"
-                + " contract's consumer is the handler signature it already has (ADR-0018 §16)")
+                + " is not one of the contracted types in com.barezen.web; every public type must have a current"
+                + " consumer, and the contract's consumer is the handler signature it already has (ADR-0018 §16,"
+                + " ADR-0019 §20)")
             : SimpleConditionEvent.satisfied(type, type.getSimpleName() + " is contracted"));
       }
     };
@@ -391,6 +407,181 @@ class BarezenWebArchitectureTest {
                 : " carries " + foreign + ", which describes a component the framework would have to find rather"
                     + " than be told about"))
             : SimpleConditionEvent.satisfied(type, type.getSimpleName() + " declares no annotation"));
+      }
+    };
+  }
+
+  // --------------------------------------------------------------------------------------------------------------
+  // Phase 2.8: the rules above are ADR-0018's, and adding a router to this package must not weaken one of them.
+  // The five below are ADR-0019's, each written against the router rather than the contract, each checked by a
+  // violation that no other rule in this file reports — the probes are listed in ADR-0019.
+  // --------------------------------------------------------------------------------------------------------------
+
+  /**
+   * The two types that route, named exactly.
+   *
+   * <p>{@code belongToAnyOf} would be the shorter call and is the wrong one: it includes member classes, so the rules
+   * below would be measuring {@code Router.Registration} — a private record inside the table — rather than the surface
+   * an application can call. {@code routerSurfaceTypes} adds the builder to the pair that has a public API to police.
+   */
+  private static DescribedPredicate<JavaClass> routerTypes() {
+    return JavaClass.Predicates.equivalentTo(Router.class).or(JavaClass.Predicates.equivalentTo(RouteMatch.class));
+  }
+
+  private static DescribedPredicate<JavaClass> routeTableTypes() {
+    return JavaClass.Predicates.equivalentTo(Router.class)
+        .or(JavaClass.Predicates.equivalentTo(Router.Builder.class));
+  }
+
+  /**
+   * the router answers "which handler" and never "what should the client be told".
+   *
+   * <p>The one boundary ADR-0019 §10 rests on. {@code 404} and {@code 405} are decisions the router informs by
+   * returning an empty match and a method set, and an adapter makes by writing a status, headers and a body. If
+   * {@code Router} could construct a {@code Response}, the next step is free: {@code return new Response(404, ...)}
+   * instead of {@code return Optional.empty()}, and with it an error format, a content type and a status policy inside
+   * the routing layer — the {@code GlobalExceptionHandler} that ADR-0018 §10 and this phase's §10 both defer. The rule
+   * is a dependency statement rather than a naming one, because the drift is an import.
+   */
+  @ArchTest
+  static final ArchRule the_router_never_answers_a_request_itself = noClasses()
+      .that(routerTypes())
+      .should().dependOnClassesThat().areAssignableTo(Response.class)
+      .as("a router that builds a response stops being able to say \"I don't know, adapter\" — 404 and 405 are the"
+          + " adapter's decisions, informed by an empty match and a method set (ADR-0019 §10)");
+
+  /**
+   * the public surface of the route table is the questions it answers, and nothing else.
+   *
+   * <p>Scoped to {@code Router} and {@code Router.Builder} rather than to every routing type, because
+   * {@link RouteMatch}'s public surface is two accessors and it is {@code RouteMatchTest.thereIsNothingElseToAsk}
+   * that holds it to exactly those — a rule here would have to allow {@code handler()} and {@code parameters()} by
+   * name, and an allow-list that carries a record's generated accessors is a rule about naming rather than about
+   * authority. What this rule polices is the type that owns the table.
+   *
+   * <p>An allow-list rather than a verb blacklist, which is the stronger statement and the one this phase needs: §13
+   * promises a table that cannot change after {@code build()}, and the cheapest way to break that promise is not a
+   * method called {@code clear()} — which ADR-0018's {@code no_method_writes_or_mutates} already refuses — but one
+   * called {@code replace}, {@code reload} or {@code unregister}, none of which starts with any banned prefix. An
+   * allow-list refuses the whole family, and refuses {@code size()} and {@code routes()} with it: methods that would
+   * turn a table into something an application inspects, orders, or merges (ADR-0019 §13, §19).
+   */
+  @ArchTest
+  static final ArchRule the_route_table_exposes_only_the_questions_it_answers = methods()
+      .that(JavaMember.Predicates.declaredIn(routeTableTypes()))
+      .should(beAPublicMethodOnTheAllowedList())
+      .as("Router answers match and methodsFor; Router.Builder registers and builds. Anything else — unregister,"
+          + " replace, reload, size, routes — is a route registry with precedence rules, which ADR-0019 §13 defers");
+
+  private static ArchCondition<JavaMethod> beAPublicMethodOnTheAllowedList() {
+    List<String> allowed = java.util.List.of("builder", "match", "methodsFor", "toString", "route", "build");
+    return new ArchCondition<JavaMethod>("be one of the allowed router operations") {
+      @Override
+      public void check(JavaMethod method, ConditionEvents events) {
+        if (!method.getModifiers().contains(JavaModifier.PUBLIC)) {
+          // A private helper is not surface; the rules that matter for it are the dependency ones.
+          events.add(SimpleConditionEvent.satisfied(method, method.getName() + " is private"));
+          return;
+        }
+        boolean violates = !allowed.contains(method.getName());
+        events.add(violates
+            ? SimpleConditionEvent.violated(method, method.getFullName()
+                + " is a public table operation outside the allowed set " + allowed + ". A router with a mutator is"
+                + " a router a request thread can race, and a router with an inspection method is a route registry"
+                + " (ADR-0019 §13, §19)")
+            : SimpleConditionEvent.satisfied(method, method.getName() + " is an allowed router question"));
+      }
+    };
+  }
+
+  /**
+   * the router implements nothing, so it is not a participant, a subscriber, or a handler.
+   *
+   * <p>§12 decided a router is not a {@code LifecycleParticipant}: it owns no thread, socket, executor or queue, so
+   * there is nothing to start and nothing to stop, and a type frozen by the object that builds it has no phase to be in.
+   * The way that erodes is an {@code implements} clause rather than a field — {@code implements LifecycleParticipant}
+   * "so routes can be reloaded", or {@code AutoCloseable} "for symmetry". Core's rules already stop the first from ever
+   * compiling here (test scope is not a compile classpath); this stops both inside the contract, where the JDK
+   * interfaces are reachable (ADR-0019 §13, §14).
+   */
+  @ArchTest
+  static final ArchRule the_router_implements_no_interface = classes()
+      .that(routerTypes())
+      .should(implementNothingAtAll())
+      .as("implementing a lifecycle, closeable or subscriber interface would give a route table a phase to be in, and"
+          + " a route table has no resource to start or stop (ADR-0019 §14)");
+
+  private static ArchCondition<JavaClass> implementNothingAtAll() {
+    return new ArchCondition<JavaClass>("implement no interface") {
+      @Override
+      public void check(JavaClass type, ConditionEvents events) {
+        List<String> implemented = type.getRawInterfaces().stream()
+            .map(JavaClass::getName).sorted().toList();
+        boolean violates = !implemented.isEmpty();
+        events.add(violates
+            ? SimpleConditionEvent.violated(type, type.getName() + " implements " + implemented
+                + ". A router that is a participant, a closeable or a handler has acquired a phase or a resource,"
+                + " which this phase refuses (ADR-0019 §14)")
+            : SimpleConditionEvent.satisfied(type, type.getSimpleName() + " implements nothing"));
+      }
+    };
+  }
+
+  /**
+   * routing reads the method and the path, and no other part of a request.
+   *
+   * <p>§4 and §20 as one mechanical statement. {@code Request.body()}, {@code Request.headers()} and
+   * {@code Request.query()} are all reachable from a router without any new import, and each opens a door the phase
+   * closed: headers is content negotiation and version routing, query is a match on a filter, body is a match that has
+   * to read what the client sent before deciding who handles it — which is also a router that cannot route a request it
+   * has not already buffered. Naming the three calls is enough because they are the whole surface a router could read
+   * beyond the two it does (ADR-0019 §4).
+   */
+  @ArchTest
+  static final ArchRule routing_decides_on_method_and_path_only = noClasses()
+      .that(routerTypes())
+      .should().callMethod(Request.class, "body")
+      .orShould().callMethod(Request.class, "headers")
+      // query() returns Optional<String>, whose signature mentions java.util — listed by hand for the same reason the
+      // reflection rule above lists every Class overload: callMethod matches one signature, not one name.
+      .orShould().callMethod(Request.class, "query")
+      .as("a router that reads Accept is doing content negotiation, one that reads a version header is doing version"
+          + " routing, and one that reads a body cannot answer until it has buffered it (ADR-0019 §4)");
+
+  /**
+   * no routing or middleware type exists before it has a consumer.
+   *
+   * <p>§20's forbidden-name list, kept as a rule rather than as a paragraph, because the names on it are exactly the
+   * ones a later phase reaches for first: a {@code Route} to inspect, a {@code PathMatcher} to reuse, a
+   * {@code RouteRegistry} to merge plugin tables, a {@code MiddlewareChain} to wrap a handler, a
+   * {@code RouteParameterMap} to bind values. Checking member classes too is the part that matters — the honest place
+   * for {@code Router$RouteNode} is inside {@code Router}, and the honest failure is the one that finds it there
+   * (ADR-0019 §16, §19, and ADR-0018 §16 for the same rule about middleware).
+   */
+  @ArchTest
+  static final ArchRule no_preemptive_routing_or_middleware_types = classes()
+      .that().resideInAnyPackage(WEB)
+      .should(haveNoNameThisPhaseRefusedInAdvance())
+      .as("Router and RouteMatch are the routing types with consumers today: Route, RouteDefinition, RoutePattern,"
+          + " PathPattern, PathMatcher, RouteRegistry, RouteTree, RouteNode, RouteParameter, RouteParameterMap,"
+          + " Middleware, MiddlewareChain, Pipeline, Filter and Interceptor all need a test first (ADR-0019 §19)");
+
+  private static ArchCondition<JavaClass> haveNoNameThisPhaseRefusedInAdvance() {
+    List<String> refused = java.util.List.of(
+        "Route", "RouteDefinition", "RoutePattern", "PathPattern", "PathMatcher", "RouteMatcher", "RouteRegistry",
+        "RouteTree", "RouteNode", "RouteParameter", "RouteParameterMap", "RouteMatchResult", "RoutingContext",
+        "Middleware", "MiddlewareChain", "Pipeline", "Filter", "Interceptor", "HandlerChain", "ParameterBinder",
+        "ParameterConverter", "PathParameterResolver", "ParameterRegistry");
+    return new ArchCondition<JavaClass>("not be a routing or middleware type nobody has asked for") {
+      @Override
+      public void check(JavaClass type, ConditionEvents events) {
+        String name = type.getSimpleName();
+        boolean violates = refused.contains(name);
+        events.add(violates
+            ? SimpleConditionEvent.violated(type, type.getName() + " is named " + name
+                + ", a type this phase refuses until a test shows Router and RouteMatch are not enough. Every one of"
+                    + " these is a step towards the routing framework the maxim stops (ADR-0019 §4, §7, §16, §19)")
+            : SimpleConditionEvent.satisfied(type, name + " has a consumer"));
       }
     };
   }

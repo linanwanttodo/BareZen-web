@@ -6,13 +6,13 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.7 (HTTP Core Contract) is implemented. Everything else is design only.
+Phase 2.8 (Router) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
-| `framework/barezen-web` | 2.7 | HTTP contract: `Handler`, `Request`, `Response`, `Headers`, `HttpMethod` — zero dependencies, no server, no router |
+| `framework/barezen-web` | 2.7–2.8 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`) and an immutable route table (`Router`, `RouteMatch`) — no server, no middleware, no context |
 | `barezen-http-jdk` | 3 | not created |
 | Discovery, Extension Points | later | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
@@ -48,15 +48,19 @@ pom.xml                     barezen-parent: owns maven.compiler.release=17, vers
 barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
                             assembly (di), plugin SPI, events, errors
-framework/barezen-web/      HTTP contract: handler, request, response, headers, method — no dependencies
-docs/adr/                   architecture decision records, 0001-0018
+framework/barezen-web/      HTTP contract and route table: handler, request, response, headers, method, router —
+                            no shipped dependency, no server
+docs/adr/                   architecture decision records, 0001-0019
 scripts/                    build guards
 ```
 
 Dependency direction is fixed: `core` ← `framework` ← `plugins` ← `app`. Lower layers never import higher
 ones, and ArchUnit enforces it inside core today and across modules as they are created. `barezen-web` goes one step
-further than the rule requires: it declares no compile dependency at all, not even on `barezen-core`, so the HTTP
-contract cannot reach the kernel and a server adapter is the only module allowed to know both (ADR-0018).
+further than the rule requires: the jar it ships declares no compile dependency at all, not even on `barezen-core`, so
+the HTTP contract and the route table cannot reach the kernel and a server adapter is the only module allowed to know
+both (ADR-0018). Phase 2.8 added one test-scope dependency on `barezen-core` so a plugin can be assembled in a test
+against the real lifecycle engine; it is scope `test`, so it never reaches the shipped artifact and the compile-boundary
+claim is still enforced by javac itself — a main-source import of core does not compile (ADR-0019).
 
 ## Phase 2.1 in one paragraph
 
@@ -244,13 +248,14 @@ services.require(BillingService.class).charge("123");         // publish -> audi
 
 ## Phase 2.7 in one paragraph
 
-`framework/barezen-web` is the web layer's HTTP contract, and it has **zero dependencies** — not on Jetty, Netty or
-Servlet, and not on `barezen-core` either. Five public types: `Handler.handle(Request) → Response`, `Request`
+`framework/barezen-web` is the web layer's HTTP contract, and it has **zero dependencies in the jar it ships** — not on
+Jetty, Netty or Servlet, and not on `barezen-core` either (Phase 2.8 later put core on the *test* classpath only).
+Five public types: `Handler.handle(Request) → Response`, `Request`
 (method, raw path, raw query, headers, body), `Response` (status, headers, body), `Headers` (case-insensitive names,
 repeated fields kept as repeated fields, no `Map` in sight) and `HttpMethod` (nine shared constants, unknown methods
 keep the client's spelling). Everything is immutable and validated at construction, so a `Request` a handler received
-is the `Request` it passes on. No `Router`: binding a path to a handler means deciding trailing slashes, case,
-`%2F`, priority and capture names, and none of those has a consumer yet. No `Middleware`: the six questions a
+is the `Request` it passes on. No `Router` yet: binding a path to a handler means deciding trailing slashes, case,
+`%2F`, priority and capture names, and none of those had a consumer at the time. No `Middleware`: the six questions a
 middleware type must answer are answered by decorating `Handler` with a lambda, which `HandlerTest` does for both
 timing and a `401` short-circuit. No `HttpContext`, no `request.service(...)`, no attributes, no `EventBus` inside a
 `Request` — a contract that can look things up stops being a contract. And nothing serves: `com.sun.net.httpserver`
@@ -271,4 +276,36 @@ Handler timed = request -> {                                    // "middleware" 
       answered.headers().with("X-Elapsed-Nanos", Long.toString(System.nanoTime() - started)),
       answered.body());
 };
+```
+
+## Phase 2.8 in one paragraph
+
+`Router` answers one question — given an HTTP method and a raw path, which `Handler` should run — and it never answers
+the request itself: it imports no `Response`, so a route table cannot decide a status, write a header or catch an
+exception. A route is `(HttpMethod, pattern)`; a pattern is matched segment by segment against the path as the client
+sent it, so `%2F` stays one segment, `%2e%2e` is never normalized, a trailing slash is exact rather than redirected, and
+`{id}` captures one non-empty raw segment with no decoding and no converter. Literal segments beat parameters, which
+makes the more specific route a total order — so `GET /users` registered twice fails at registration with the message
+naming both patterns and the shape they share, and registration order never decides a winner. `build()` freezes the
+table with `List.copyOf`, which is why there is no `built` flag, no `unregister`, no hot reload and no synchronisation
+in the matching path: concurrency is answered by immutability, not by locks. `RouteMatch` exists for one reason — a
+captured parameter has nowhere else to go — and it carries the handler plus an unmodifiable map of raw values; the
+matching gap it exposes is recorded honestly: `Handler.handle(Request)` cannot receive it, so a handler re-derives its
+id from `request.path()` until ADR-0020 settles whether the contract grows. A `Router` is not a
+`LifecycleParticipant` and not a container: it owns no thread, socket or file, and a plugin takes `Router.Builder` in
+its constructor, which is why `barezen-core` is on the test classpath and nowhere in the shipped jar. `Router` is also
+the first name ADR-0018 forbade that this phase allowed, so two of its fourteen rules were amended rather than deleted
+and five new rules hold the new line — nineteen in total, each fired by at least one mutation probe (ADR-0019).
+
+```java
+Router routes = Router.builder()
+    .route(HttpMethod.GET, "/users", listUsers)              // most literal segments win
+    .route(HttpMethod.POST, "/users", createUser)
+    .route(HttpMethod.GET, "/users/{id}", readUser)          // one non-empty raw segment, undecoded
+    .build();                                               // immutable from here on
+
+Request request = new Request(HttpMethod.GET, "/users/42", null, Headers.empty(), null);
+routes.match(request)                                        // empty -> 404, non-empty -> dispatch
+    .ifPresent(match -> match.handler().handle(request));    // the adapter dispatches; the router never did
+Set<HttpMethod> allowed = routes.methodsFor("/users");       // empty -> no route, non-empty -> 405
 ```

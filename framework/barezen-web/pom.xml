@@ -16,8 +16,9 @@
 
   <name>BareZen Web Contract</name>
   <description>
-    The HTTP contract: request, response, headers and handler. Defines what a web component receives and
-    returns without naming a server. Contains no routing, no middleware, no servlet and no transport code.
+    The HTTP contract: request, response, headers, handler, and the route table that maps a method and a path to
+    a handler. Defines what a web component receives and returns without naming a server. Contains no middleware,
+    no servlet and no transport code.
   </description>
 
   <!--
@@ -33,11 +34,34 @@
     contract has a use for core yet, so the edge is not declared. When an HTTP server adapter is written as a
     LifecycleParticipant it will need core, and that module, not this one, will declare it.
 
-    Test dependencies mirror barezen-core: the same JUnit, AssertJ and ArchUnit versions come from
-    barezen-parent. There is no logback dependency because nothing here logs, so there is no binding to
-    satisfy (ADR-0018).
+    Phase 2.8 qualifies that paragraph rather than replacing it: the compile scope is still empty, and the test
+    classpath now carries barezen-core, to prove that a Plugin can register routes through constructor injection and
+    be driven by the real LifecycleOrchestrator (ADR-0019 §15). The distinction is load-bearing rather than cosmetic:
+
+      - barezen-web.jar still ships with zero dependencies, which is what an adapter and an application
+        consume, so nothing about the contract's portability changed;
+      - the two architecture rules that read the package (the_contract_depends_only_on_java_lang_and_java_util
+        and the_contract_does_not_reach_into_core) import with DoNotIncludeTests, so they measure the shipped
+        surface and stay green - which is also exactly why a violation of them would be invisible in a test;
+      - a main source file that imports com.barezen.core fails to compile, because test scope does not reach
+        the compile classpath. The boundary is enforced by javac, not by a rule.
+
+    There is still no logback dependency, and adding one was the other option here. barezen-core logs on startup,
+    so the plugin test's JVM prints SLF4J's "no providers were found" notice to stderr and defaults to a no-op
+    logger. That is the honest outcome rather than a problem to paper over: nothing in barezen-web logs, so a
+    binding on its test classpath would only make the contract's test run quieter by giving it an implementation to
+    write to, and a three-line notice is a better price for that than a dependency a reviewer has to ask about.
+
+    Test dependencies otherwise mirror barezen-core: the same JUnit, AssertJ and ArchUnit versions come from
+    barezen-parent.
   -->
   <dependencies>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

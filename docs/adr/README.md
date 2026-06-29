@@ -22,4 +22,5 @@ names it. Code references ADRs by number in Javadoc, so a reader of the implemen
 | [0015](0015-application-assembly-is-a-responsibility-not-a-component.md) | application assembly is the application's responsibility, not a framework component | accepted, supersedes ADR-0013 item 6 |
 | [0016](0016-a-plugin-is-a-participant-not-a-container.md) | a plugin is a `LifecycleParticipant` that can name itself; no PluginContext, no registry, no discovery | accepted, refines ADR-0006 |
 | [0017](0017-the-event-bus-is-a-capability-not-a-context.md) | the event bus is a capability: synchronous, exact type, no lifecycle, no context | accepted |
-| [0018](0018-http-is-a-contract-not-a-server.md) | HTTP is a contract, not a server: five types, zero dependencies, no router, no middleware, no context | accepted |
+| [0018](0018-http-is-a-contract-not-a-server.md) | HTTP is a contract, not a server: five types, zero dependencies, no router, no middleware, no context | accepted, contract types and zero-compile-dependency stance unchanged; "no router" qualified by ADR-0019, and two of its ArchUnit rules amended there |
+| [0019](0019-router-semantics.md) | routing is one question — method and raw path to a handler — decided by an immutable table that never answers a request | accepted, amends two ArchUnit rules of ADR-0018 |
