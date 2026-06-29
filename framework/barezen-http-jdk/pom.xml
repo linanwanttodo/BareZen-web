@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.barezen</groupId>
+    <artifactId>barezen-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>barezen-http-jdk</artifactId>
+  <packaging>jar</packaging>
+
+  <name>BareZen HTTP Adapter: JDK HttpServer</name>
+  <description>
+    The first implementation of the barezen-web server contract, built on com.sun.net.httpserver. Owns a bound port,
+    an executor and a thread provider; translates an HttpExchange into a Request, dispatches it through the Router,
+    and translates the Response back. Contains no routing rules, no middleware, no error format beyond the minimal
+    one the contract cannot express, and no HTTP parser of its own.
+  </description>
+
+  <!--
+    Deliberately no <maven.compiler.release> override here. com.sun.net.httpserver is a JDK 11 API and the
+    adapter uses nothing newer, so this module is the first one that could have tempted an author to raise the
+    baseline for no reason at all. See ADR-0002 and ADR-0021.
+  -->
+
+  <!--
+    Three compile dependencies, and the shape of them is the phase's claim: web (the contract it implements),
+    core (ThreadProvider, which it borrows or creates), slf4j-api (a handler failure has to be recorded somewhere,
+    and ADR-0001 already chose the facade). Nothing else reaches this module — no Netty, no Jetty, no Servlet, no
+    JSON library — because an adapter that needed them would stop being replaceable, which is the only reason the
+    contract exists (ADR-0018 §12, ADR-0021).
+
+    The direction is one way. barezen-web declares no dependency on this module and barezen-core declares none on
+    either, so an application that wants a different server deletes this artifact from its build and changes one
+    string. The rules that make that mechanical are in BarezenHttpJdkArchitectureTest, which is the first test in
+    the reactor that imports all three modules' classes at once.
+
+    No logback in the compile scope, for the same reason barezen-web has none: the production code depends on the
+    SLF4J facade only (ADR-0001). Test scope is the exception, and it is a real one rather than a preference -
+    ADR-0023 §4 says a handler failure goes to the log and not to the socket, and the socket half of that claim is
+    a response-body assertion while the log half needs a binding to observe at all. Without one SLF4J silently
+    discards every event, so a test could not tell "recorded" from "swallowed". barezen-core already carries
+    logback as a test dependency for exactly this reason; the shipped jar still has no implementation in it.
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-web</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <!--
+        Same gate and same JDK 21 binding as barezen-core and barezen-web (ADR-0002). Unlike them, this module has
+        one genuinely platform-conditional line: the thread provider it creates resolves to virtual threads on 21
+        and platform threads on 17, and the JDK's own executor plumbing is identical either way. So there is no
+        unreachable half of the bundle here, and no reason for a lower bar on 17 — 17 verifies compatibility, 21
+        verifies compatibility and quality.
+      -->
+      <id>coverage-gate</id>
+      <activation>
+        <jdk>[21,)</jdk>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>check-coverage</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+                <configuration>
+                  <rules>
+                    <rule>
+                      <element>BUNDLE</element>
+                      <limits>
+                        <limit>
+                          <counter>LINE</counter>
+                          <value>COVEREDRATIO</value>
+                          <minimum>0.85</minimum>
+                        </limit>
+                      </limits>
+                    </rule>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

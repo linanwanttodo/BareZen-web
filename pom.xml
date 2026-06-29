@@ -19,6 +19,7 @@
     <module>barezen-bom</module>
     <module>framework/barezen-core</module>
     <module>framework/barezen-web</module>
+    <module>framework/barezen-http-jdk</module>
   </modules>
 
   <properties>

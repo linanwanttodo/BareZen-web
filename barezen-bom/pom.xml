@@ -34,7 +34,18 @@
       </dependency>
 
       <!--
-        Future modules are listed here as they are created (api, security, data, http-jdk,
+        The first implementation of the web contract, and the only artifact in this build allowed to name
+        com.sun.net.httpserver (ADR-0021). An application that imports it gets a server it can start by id; an
+        application that does not still compiles, because barezen-web declares no dependency on it.
+      -->
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-http-jdk</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
+        Future modules are listed here as they are created (api, security, data,
         testkit, app, plugins). They are intentionally absent for now so that the bom never
         advertises an artifact that does not exist.
       -->
