@@ -40,10 +40,10 @@ jobs:
       - name: Assert the compile baseline is still JDK 17
         run: ./scripts/check-jdk-baseline.sh
 
-      - name: mvn verify
-        run: >
-          mvn -B -ntp verify
-          -Dmaven.test.failure.ignore=false
+      - name: mvn clean verify
+        # The 85% coverage gate is activated by JDK 21+ inside barezen-core's pom, so this single
+        # command means "compatibility + quality" on 21 and "compatibility" on 17.
+        run: mvn -B -ntp clean verify
 
       - name: Upload coverage report
         if: matrix.java == 21
