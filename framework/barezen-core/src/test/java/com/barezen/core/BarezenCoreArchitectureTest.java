@@ -267,7 +267,33 @@ class BarezenCoreArchitectureTest {
       .orShould().callMethod(java.util.ServiceLoader.class, "load", Class.class, ClassLoader.class)
       .as("com.barezen.core.di contains no reflection, class loading, scanning or SPI lookup");
 
-  /** the internal package graph is one directional and acyclic. */
+  /**
+   * the lifecycle engine does not read configuration.
+   *
+   * <p>Phase 2.2 left a {@code Builder.configuration(Configuration)} on the orchestrator, which made {@code kernel}
+   * depend on {@code config} and put a live configuration handle inside the lifecycle engine. ADR-0015 removed it:
+   * an application resolves its snapshot in its own assembly code and hands over a {@code ThreadPolicy}, so the
+   * engine receives a decision instead of a bag of keys it could go back to. The same rule stops it being added
+   * back under a different name, and it is the {@code kernel} half of the boundary ADR-0013 describes; the
+   * {@code di} half is {@link #di_is_a_leaf_of_the_internal_graph}.
+   */
+  @ArchTest
+  static final ArchRule the_lifecycle_engine_does_not_read_configuration = noClasses()
+      .that().resideInAnyPackage(KERNEL)
+      .should().dependOnClassesThat().resideInAnyPackage(CONFIG)
+      .as("com.barezen.core.kernel may not depend on com.barezen.core.config (ADR-0013, ADR-0015)");
+
+  /**
+   * the internal package graph is one directional and acyclic.
+   *
+   * <p>{@code Config} is reachable only from {@code Concurrent}, and {@code Concurrent} only from {@code Kernel}:
+   * that is the assembly chain written as a layer rule, where each step hands a decided value to the step below it
+   * rather than a reference it would have to interpret. {@code Runtime} stays reachable from both because it
+   * reports what the JVM is instead of what the operator configured, and {@code Error} is the shared leaf.
+   *
+   * <p>There is no {@code App} layer. The application's assembly code lives in the application, outside core, so
+   * a layer for it here would describe a package that does not exist (ADR-0015).
+   */
   @ArchTest
   static final ArchRule core_is_free_of_cycles = Architectures.layeredArchitecture()
       .consideringOnlyDependenciesInAnyPackage("com.barezen.core..")
@@ -280,7 +306,7 @@ class BarezenCoreArchitectureTest {
       .whereLayer("Kernel").mayNotBeAccessedByAnyLayer()
       .whereLayer("Di").mayNotBeAccessedByAnyLayer()
       .whereLayer("Concurrent").mayOnlyBeAccessedByLayers("Kernel")
-      .whereLayer("Config").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
+      .whereLayer("Config").mayOnlyBeAccessedByLayers("Concurrent")
       .whereLayer("Runtime").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
       .whereLayer("Error").mayOnlyBeAccessedByLayers("Kernel", "Concurrent", "Config", "Di")
       .as("core packages must form a one directional graph with kernel and the assembler at the top");

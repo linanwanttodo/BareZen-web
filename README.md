@@ -6,14 +6,14 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.3 (Minimal Dependency Injection) is implemented. Everything else is design only.
+Phase 2.4 (Application Assembly Boundary) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
-| `framework/barezen-core` | 2.1–2.3 | lifecycle engine, thread capability, configuration, dependency injection |
+| `framework/barezen-core` | 2.1–2.4 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary |
 | `barezen-web`, `barezen-http-jdk` | 3 | not created |
-| Plugin Model, Discovery, Extension Points, EventBus | 2.4–2.7 | not created |
+| Plugin Model, Discovery, Extension Points, EventBus | 2.5–2.7 | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -47,7 +47,7 @@ pom.xml                     barezen-parent: owns maven.compiler.release=17, vers
 barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
                             assembly (di), errors
-docs/adr/                   architecture decision records, 0001-0014
+docs/adr/                   architecture decision records, 0001-0015
 scripts/                    build guards
 ```
 
@@ -77,12 +77,14 @@ them; ArchUnit enforces both. A group
 of keys binds to a record by hand (`RuntimeConfig.from(configuration)`): no annotations, no scanning, no
 reflection over components. Configuration resolves values and nothing else, so it is not a service locator, and
 the one setting core has today follows a single chain,
-`Configuration → RuntimeConfig → ThreadPolicy → ThreadProviders.create(...)` (ADR-0013).
+`Configuration → RuntimeConfig → ThreadPolicy → ThreadProviders.create(...)` (ADR-0013). The chain ends where an
+application picks up the resolved policy — `threadPolicy(RuntimeConfig.from(configuration).threads())` — because
+`kernel` may not depend on `config` (ADR-0015).
 
 ```java
 Configuration configuration = Configuration.standard(Path.of("config/application.properties"));
 LifecycleOrchestrator app = LifecycleOrchestrator.builder()
-    .configuration(configuration)          // reads barezen.runtime.threads
+    .threadPolicy(RuntimeConfig.from(configuration).threads())   // barezen.runtime.threads
     .register("http", httpRuntime)
     .build();
 ```
@@ -123,7 +125,45 @@ ServiceAssembly assembly = ServiceAssembly.builder()
 SearchService search = new SearchService(assembly.require(UserService.class));
 
 LifecycleOrchestrator app = LifecycleOrchestrator.builder()
-    .configuration(configuration)
+    .threadPolicy(RuntimeConfig.from(configuration).threads())
     .register("search", search)
     .build();
+```
+
+## Phase 2.4 in one paragraph
+
+Phase 2.4 adds no capability and no public type; it settles who is responsible for what is already there.
+`ServiceAssembly` creates objects, `LifecycleOrchestrator` drives them, and **application assembly is a
+responsibility held by the application's own code** — BareZen ships no `Application`, `ApplicationBuilder`,
+`ApplicationContext` or `ApplicationBootstrap`, and `barezen-app` stays an uncreated planned module (ADR-0015). So
+the order is stated rather than provided: load configuration, detect runtime capabilities, build the assembly,
+create the orchestrator with the finished participants, `start()`. Shutdown runs the two release paths in the same
+direction — `orchestrator.stop()` first, because a participant may still use assembled infrastructure while it is
+cleaning up, then `assembly.close()` — and neither mechanism reaches into the other on a failure: a `build()` that
+throws releases what it had already created before the factory's own exception propagates, while a `start()` that
+throws rolls back the participants and leaves the assembly for the application to close (ADR-0004, ADR-0005). Two
+public methods went as part of settling this. `threadKind()` existed only so a test could read the resolved thread
+provider back, and a getter whose only caller is a test is not application programming; what the policy decided is
+observable where it matters, because an unsatisfiable request fails `build()`.
+`Builder.configuration(Configuration)` saved an application one line — the line that is the assembly responsibility
+itself — while making `kernel` depend on `config`, so an application now hands over a resolved
+`ThreadPolicy` instead. Three ArchUnit rules hold the boundary: `kernel` may not depend on `config`, `Config` is
+reachable only from `Concurrent`, and `di` stays a leaf nothing in core depends on.
+
+```java
+// The application's own assembly code: the only place allowed to know about both layers.
+ServiceAssembly assembly = ServiceAssembly.builder()
+    .factory(ConnectionPool.class, services -> new ConnectionPool())
+    .factory(Reporter.class, services -> new Reporter(services.require(ConnectionPool.class)))
+    .build();
+
+LifecycleOrchestrator app = LifecycleOrchestrator.builder()
+    .threadPolicy(RuntimeConfig.from(configuration).threads())
+    .register("reporter", assembly.require(Reporter.class))
+    .build();
+
+app.start();
+// ... serve ...
+app.stop();     // participants first, while the pool is still open
+assembly.close();  // then what the assembly created
 ```

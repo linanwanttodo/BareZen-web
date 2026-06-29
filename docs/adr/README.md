@@ -19,3 +19,4 @@ names it. Code references ADRs by number in Javadoc, so a reader of the implemen
 | [0012](0012-new-to-stopped-is-legal-and-idempotent.md) | NEW → STOPPED is legal and idempotent | accepted |
 | [0013](0013-configuration-is-resolved-at-assembly-time.md) | configuration is resolved once at assembly time and travels as typed values | accepted |
 | [0014](0014-dependency-injection-is-explicit-factory-registration.md) | DI is explicit factory registration, not reflective bean discovery | accepted |
+| [0015](0015-application-assembly-is-a-responsibility-not-a-component.md) | application assembly is the application's responsibility, not a framework component | accepted, supersedes ADR-0013 item 6 |

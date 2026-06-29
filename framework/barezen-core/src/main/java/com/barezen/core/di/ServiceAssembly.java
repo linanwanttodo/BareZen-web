@@ -95,6 +95,12 @@ public final class ServiceAssembly implements Services, AutoCloseable {
    * Releases the instances this assembly created, newest first, so an object is released before the objects that
    * depend on it. Instances registered already built stay with their caller and are not touched.
    *
+   * <p>This is the second of the two release paths, and the order between them is not free: an application stops its
+   * {@code LifecycleOrchestrator} first and closes this assembly afterwards, because a participant finishing work
+   * during {@code stop()} may still be using the infrastructure assembled here. Nothing here enforces that order and
+   * nothing here can: the assembly has no knowledge of lifecycle, and the application's own assembly code is the
+   * place that knows both (ADR-0015).
+   *
    * <p>Best effort, in the shape the lifecycle engine uses for shutdown: every instance is attempted even if one
    * throws, and the failures are reported together once the rest have been tried.
    *

@@ -1,11 +1,9 @@
 package com.barezen.core.kernel;
 
-import com.barezen.core.concurrent.RuntimeConfig;
 import com.barezen.core.concurrent.ThreadCapabilityUnavailableException;
 import com.barezen.core.concurrent.ThreadPolicy;
 import com.barezen.core.concurrent.ThreadProvider;
 import com.barezen.core.concurrent.ThreadProviders;
-import com.barezen.core.config.Configuration;
 import com.barezen.core.error.LifecycleException;
 import com.barezen.core.kernel.StartupException.Phase;
 import com.barezen.core.runtime.RuntimeCapabilities;
@@ -33,6 +31,13 @@ import org.slf4j.LoggerFactory;
  * <p>Registration order is startup order, and reverse registration order is shutdown order. Deciding
  * that order belongs to the assembler, for example from a dependency graph, so this class carries no
  * priority field.
+ *
+ * <p>This class drives objects; it does not create them. It holds no container, reads no configuration
+ * snapshot, and knows nothing about {@code com.barezen.core.di}: participants arrive already constructed,
+ * handed over by the application's assembly code, which is the only place allowed to know about both
+ * layers (ADR-0015). An application that assembled objects and then failed to start them has a release
+ * path here and a separate one in the assembler, in that order, and neither mechanism reaches into the
+ * other.
  *
  * <p>Guarantees:
  * <ul>
@@ -101,15 +106,6 @@ public final class LifecycleOrchestrator implements AutoCloseable {
     } finally {
       lock.unlock();
     }
-  }
-
-  /**
-   * @return the thread model the owned provider produces. The only observation point for the
-   *     configuration-to-provider decision, so a deployment can log what {@code barezen.runtime.threads}
-   *     resolved to instead of inferring it from thread dumps
-   */
-  public ThreadProvider.Kind threadKind() {
-    return threads.kind();
   }
 
   /**
@@ -320,29 +316,14 @@ public final class LifecycleOrchestrator implements AutoCloseable {
      * Chooses the thread model the owned provider is resolved from. Ignored when
      * {@link #threads(ThreadProvider)} supplied one.
      *
-     * <p>Prefer {@link #configuration(Configuration)} when the application has a configuration snapshot:
-     * hard-coding a policy here silently overrides whatever the operator set.
+     * <p>This is where an application that has already resolved its configuration hands the decision over:
+     * {@code RuntimeConfig.from(configuration).threads()} then {@code threadPolicy(policy)}. Reading the snapshot
+     * here instead would put a configuration handle inside the lifecycle engine, which is the coupling ADR-0013
+     * exists to prevent and which ADR-0015 rules out mechanically: {@code kernel} may not depend on
+     * {@code config}.
      */
     public Builder threadPolicy(ThreadPolicy policy) {
       this.threadPolicy = Objects.requireNonNull(policy, "threadPolicy");
-      return this;
-    }
-
-    /**
-     * Reads {@link RuntimeConfig} from a configuration snapshot and applies the thread policy it resolves to.
-     *
-     * <p>This is the intended entry point for the setting, and the only place in the lifecycle path where a
-     * configuration value becomes a thread decision. The provider itself never reads a property or an
-     * environment variable, so {@link ThreadProvider} stays a pure infrastructure component (ADR-0013).
-     *
-     * <p>Resolution is not validation: a snapshot saying {@code barezen.runtime.threads=virtual} is accepted
-     * here and rejected at {@link #build()} only if the runtime cannot provide it, which is where capabilities
-     * are known. A bad value fails with the key, the value and the source that supplied it; an unavailable one
-     * fails as {@link ThreadCapabilityUnavailableException}. Neither ever degrades to another policy.
-     */
-    public Builder configuration(Configuration configuration) {
-      Objects.requireNonNull(configuration, "configuration");
-      this.threadPolicy = RuntimeConfig.from(configuration).threads();
       return this;
     }
 

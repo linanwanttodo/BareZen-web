@@ -194,8 +194,10 @@ class ConfigurationToThreadsTest {
     void orchestratorRefusesToBuildOnAnUnsatisfiableRequest() {
       List<String> events = new ArrayList<>();
 
+      // The application's assembly code resolves the snapshot to a policy; the orchestrator only ever sees a
+      // policy. kernel may not depend on config, so no part of this chain happens inside the builder (ADR-0015).
       assertThatThrownBy(() -> builder(JDK_17)
-          .configuration(threadsSetTo("virtual"))
+          .threadPolicy(policyOf(threadsSetTo("virtual")))
           .register("worker", new RecordingParticipant("worker", events))
           .build())
           .isInstanceOf(ThreadCapabilityUnavailableException.class);
@@ -205,12 +207,14 @@ class ConfigurationToThreadsTest {
 
     @Test
     void orchestratorBuildsWhenTheRequestIsSatisfiable() {
-      LifecycleOrchestrator app = builder(JDK_21)
-          .configuration(threadsSetTo("virtual"))
-          .build();
-
-      assertThat(app.threadKind()).isEqualTo(Kind.VIRTUAL);
-      app.close();
+      // A satisfied request simply builds, and closing it is legal without starting it first. What kind the
+      // provider ended up being is the provider's own assertion (the cases above); the orchestrator keeps it
+      // private rather than exposing a diagnostic getter no application was asking for (ADR-0015).
+      try (LifecycleOrchestrator app = builder(JDK_21)
+          .threadPolicy(policyOf(threadsSetTo("virtual")))
+          .build()) {
+        assertThat(app.state()).isEqualTo(ApplicationState.NEW);
+      }
     }
   }
 
@@ -226,11 +230,14 @@ class ConfigurationToThreadsTest {
     @DisplayName("auto yields the provider this JVM prefers")
     void autoFollowsTheHostCapability() {
       RuntimeCapabilities host = RuntimeCapabilities.detect();
-      LifecycleOrchestrator app = builder(host)
-          .configuration(Configuration.inMemory(Map.of()))
-          .build();
+      ThreadPolicy policy = policyOf(Configuration.inMemory(Map.of()));
 
-      assertThat(app.threadKind()).isEqualTo(host.virtualThreads() ? Kind.VIRTUAL : Kind.PLATFORM);
+      Kind resolved = ThreadProviders.create(policy, host).kind();
+      assertThat(resolved).isEqualTo(host.virtualThreads() ? Kind.VIRTUAL : Kind.PLATFORM);
+      // The same policy the host resolves to builds an orchestrator without refusing, so the default chain
+      // cannot strand an application on a host the probe already accepted.
+      LifecycleOrchestrator app = builder(host).threadPolicy(policy).build();
+      assertThat(app.state()).isEqualTo(ApplicationState.NEW);
       app.close();
     }
 
@@ -240,7 +247,7 @@ class ConfigurationToThreadsTest {
       assumeTrue(!RuntimeCapabilities.detect().virtualThreads(), "host provides virtual threads");
 
       assertThatThrownBy(() -> builder(RuntimeCapabilities.detect())
-          .configuration(threadsSetTo("virtual"))
+          .threadPolicy(policyOf(threadsSetTo("virtual")))
           .build())
           .isInstanceOf(ThreadCapabilityUnavailableException.class);
     }
@@ -250,11 +257,13 @@ class ConfigurationToThreadsTest {
     void virtualSucceedsWhereItIsAvailable() {
       assumeTrue(RuntimeCapabilities.detect().virtualThreads(), "host lacks virtual threads");
 
+      // Honoured means the host accepts the request rather than degrading it, which is what a satisfiable
+      // build proves; the kind itself is the provider's own assertion above.
       LifecycleOrchestrator app = builder(RuntimeCapabilities.detect())
-          .configuration(threadsSetTo("virtual"))
+          .threadPolicy(policyOf(threadsSetTo("virtual")))
           .build();
 
-      assertThat(app.threadKind()).isEqualTo(Kind.VIRTUAL);
+      assertThat(app.state()).isEqualTo(ApplicationState.NEW);
       app.close();
     }
 
@@ -263,12 +272,11 @@ class ConfigurationToThreadsTest {
     void platformRunsAWholeLifecycleOnTheHost() {
       List<String> events = new ArrayList<>();
       LifecycleOrchestrator app = builder(RuntimeCapabilities.detect())
-          .configuration(threadsSetTo("platform"))
+          .threadPolicy(policyOf(threadsSetTo("platform")))
           .register("worker", new RecordingParticipant("worker", events))
           .build();
       app.start();
 
-      assertThat(app.threadKind()).isEqualTo(Kind.PLATFORM);
       assertThat(app.state()).isEqualTo(ApplicationState.RUNNING);
       assertThat(app.stop().clean()).isTrue();
       assertThat(events).containsExactly("worker.initialize", "worker.start", "worker.stop");
