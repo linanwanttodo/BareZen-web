@@ -6,14 +6,14 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.8.1 (Route Parameters Contract) is implemented. Everything else is design only.
+Phase 2.9 (HTTP Runtime — JDK adapter) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
-| `framework/barezen-web` | 2.7–2.8.1 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`) and an immutable route table (`Router`, `RouteMatch`) — no server, no middleware, no context |
-| `barezen-http-jdk` | 2.9 | not created |
+| `framework/barezen-web` | 2.7–2.9 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context |
+| `framework/barezen-http-jdk` | 2.9–2.9.4 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider |
 | Discovery, Extension Points | later | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
@@ -35,9 +35,10 @@ mvn verify
 ./scripts/check-jdk-baseline.sh
 ```
 
-`mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core` and on
-`barezen-web`. The gate runs on JDK 21 only: on JDK 17 the virtual thread provider is unreachable by construction, so
-that half of the bundle is not coverable there without asserting dead code is dead (ADR-0002, ADR-0010). JDK 17 in
+`mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core`, on
+`barezen-web` and on `barezen-http-jdk`. The gate runs on JDK 21 only: on JDK 17 the virtual thread provider is
+unreachable by construction, so that half of the bundle is not coverable there without asserting dead code is dead
+(ADR-0002, ADR-0010). JDK 17 in
 CI proves compatibility, JDK 21 proves compatibility and quality.
 `.github/workflows/backend-ci.yml` runs the same build on both; green on both is the definition of compatible.
 
@@ -49,18 +50,22 @@ barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
                             assembly (di), plugin SPI, events, errors
 framework/barezen-web/      HTTP contract and route table: handler, request, response, headers, method, router,
-                            route match — no shipped dependency, no server
-docs/adr/                   architecture decision records, 0001-0020
+                            route match, server adapter contract — no shipped dependency, no server
+framework/barezen-http-jdk/ the JDK adapter: the only module that may name com.sun.net.httpserver, and the only
+                            one that registers a ServiceLoader provider
+docs/adr/                   architecture decision records, 0001-0025
 scripts/                    build guards
 ```
 
 Dependency direction is fixed: `core` ← `framework` ← `plugins` ← `app`. Lower layers never import higher
 ones, and ArchUnit enforces it inside core today and across modules as they are created. `barezen-web` goes one step
 further than the rule requires: the jar it ships declares no compile dependency at all, not even on `barezen-core`, so
-the HTTP contract and the route table cannot reach the kernel and a server adapter is the only module allowed to know
-both (ADR-0018). Phase 2.8 added one test-scope dependency on `barezen-core` so a plugin can be assembled in a test
-against the real lifecycle engine; it is scope `test`, so it never reaches the shipped artifact and the compile-boundary
-claim is still enforced by javac itself — a main-source import of core does not compile (ADR-0019).
+the HTTP contract and the route table cannot reach the kernel (ADR-0018). Phase 2.8 added one test-scope dependency on
+`barezen-core` so a plugin can be assembled in a test against the real lifecycle engine; it is scope `test`, so it never
+reaches the shipped artifact and the compile-boundary claim is still enforced by javac itself — a main-source import of
+core does not compile (ADR-0019). Phase 2.9 added two more public types to the same jar — `HttpServerAdapter` and
+`HttpServerAdapterProvider` — and neither names a server, so the shipped jar still has zero compile dependencies: an
+adapter is allowed to know core and web, and web is allowed to know nothing (ADR-0021 §3, ADR-0025 §2).
 
 ## Phase 2.1 in one paragraph
 
@@ -260,8 +265,9 @@ is the `Request` it passes on. No `Router` yet: binding a path to a handler mean
 middleware type must answer are answered by decorating `Handler` with a lambda, which `HandlerTest` does for both
 timing and a `401` short-circuit. No `HttpContext`, no `request.service(...)`, no attributes, no `EventBus` inside a
 `Request` — a contract that can look things up stops being a contract. And nothing serves: `com.sun.net.httpserver`
-lives in the `barezen-http-jdk` adapter to come, which will implement `LifecycleParticipant`, own the port, read the
-body, catch the exception and choose the error format. Fourteen ArchUnit rules held that line at the time, each verified
+lives in the `barezen-http-jdk` adapter to come, which ADR-0018 expected to implement `LifecycleParticipant`, own the
+port, read the body, catch the exception and choose the error format. Phase 2.9 kept three of those four and refused the
+first: an adapter is not a participant (ADR-0024 §2). Fourteen ArchUnit rules held that line at the time, each verified
 by a mutation probe that made it fail (ADR-0018); Phase 2.8 amended two of them and added five, and Phase 2.8.1 amended
 one more and added two (ADR-0019, ADR-0020).
 
@@ -340,4 +346,51 @@ methods. And editing the argument list had **silently voided** `nothing_in_the_c
 handler stayed green under the old rule text and fired under the corrected one. Twenty-one rules now, and 213 web tests,
 including a delivery group that dispatches 600 concurrent requests over three paths and gets 200 of each id. Encoding
 semantics are untouched — `/users/a%2Fb` still delivers `id = "a%2Fb"` — and the contract is now frozen with the hole
-closed, which is what makes the 2.9 adapter safe to write once (ADR-0020).
+closed, which is what makes the 2.9 adapter safe to write once (ADR-0020). Phase 2.9 amended two more web rules and
+added two: the contracted-types rule now counts nine, and the container-shaped-name rule keeps its ban on the `Provider`
+suffix while exempting exactly one name, policed by the two new rules rather than by a deletion (ADR-0025 §10).
+Twenty-three rules and 215 web tests now, plus one more forbidden package — `com.barezen.http..` — in core's
+`core_has_no_web_or_persistence_concepts`.
+
+## Phase 2.9 in one paragraph
+
+`framework/barezen-http-jdk` is the server, and it is still an adapter rather than a layer: two public types —
+`JdkHttpServerAdapter` (`start`, `stop`, `isRunning`, `port`, `close`) and `JdkHttpServerAdapterProvider` (`id`,
+`create`) — with the bridge, the dispatcher and the adapter's state machine all package-private and final (ADR-0021 §4,
+§6). It binds `127.0.0.1` on port 0 and reports the ephemeral port, registers one context at `/` with no JDK `Filter`
+chain, and takes its threads from a `ThreadProvider` instead of constructing a pool, so `stop()` can close exactly the
+executor it created and leave a borrowed provider running (ADR-0021 §5, ADR-0024 §4). A second `start()` and a
+`start→stop→start` both fail, because one instance is one server lifecycle and a restarted server may hold a different
+port; `stop()` is idempotent, never throws and waits the JDK's own 3 seconds for in-flight exchanges rather than sleeping
+(ADR-0024 §5, §6). The exchange bridge hands the contract what the wire actually said — `getRawPath()` never
+`getPath()`, `getRawQuery()` with absent kept distinct from empty, the body read fully into a `byte[]` and closed — so
+`/users/a%2Fb` stays one segment and `/users/%2e%2e/admin` is never normalized (ADR-0022 §2–§4). Two honest limitations
+are asserted as tests rather than glossed: `com.sun.net.httpserver.Headers` canonicalizes field names
+(`X-MixedCase` arrives as `X-mixedcase`) and is hash-backed, so arrival order is gone before the bridge reads it
+(ADR-0022 §5); and a HEAD response carries fields and no body and no `Content-Length`, so a HEAD client cannot discover a
+representation's size through this adapter (ADR-0022 §7). Errors are responses: 404 names no path, 405 carries a stable
+adapter-local `Allow`, a handler's `RuntimeException` is logged with its throwable and answered with `Internal Server
+Error` alone, a target the contract refuses or a body that stops arriving is a 400 before anything is committed, and a
+write that fails after the status line is logged once at DEBUG and never answered with a second status (ADR-0023 §2–§6).
+`OPTIONS *` never reaches the dispatcher — the JDK answers it and logs `No context found for request` — which is recorded
+as design debt rather than fixed by changing the frozen `Router` contract (ADR-0023 §9). Discovery is the last piece: the
+module registers its provider in `META-INF/services`, `ServiceLoader` finds it, `id()` is `"jdk"`, `create` hands back a
+fresh unstarted adapter each call, and nothing in this module calls `ServiceLoader` itself, because discovery may only
+ever *discover* — the selection stays in application assembly (ADR-0025 §1–§8). 116 tests, 24 ArchUnit rules over package
+boundaries rather than class names, an 85% line-coverage gate on JDK 21, and all eleven mutation probes fired; 2.9.1–2.9.4
+are the request/response bridge, the error semantics and the provider, delivered with 2.9 as one runtime
+(ADR-0021–ADR-0025).
+
+```java
+// Application assembly is the only place that knows both the contract and the adapter.
+Router routes = Router.builder()
+    .route(HttpMethod.GET, "/users/{id}", readUser)
+    .build();
+
+HttpServerAdapter server = new JdkHttpServerAdapter(
+    new InetSocketAddress("127.0.0.1", 0), routes, threads);   // threads borrowed: stop() will not close them
+server.start();
+int port = server.port().getAsInt();
+// ... serve ...
+server.close();                                                  // close() == stop(): idempotent, never throws
+```
