@@ -69,7 +69,7 @@ public final class ThreadProviders {
     if (!runtime.virtualThreads()) {
       // Explicit request only: AUTO never lands here, since it resolves to platform instead.
       throw new ThreadCapabilityUnavailableException(
-          policy, "this runtime does not expose virtual threads");
+          policy, runtime, "virtual threads are not supported by this JVM");
     }
     return new VirtualThreadProvider(runtime, millis);
   }

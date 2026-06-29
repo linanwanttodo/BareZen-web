@@ -68,14 +68,14 @@ class ThreadProvidersTest {
   }
 
   /**
-   * The message may only name the request and the runtime. A reference to a configuration key here would
-   * be a Phase 2.1 error message depending on the Phase 2.2 API it describes.
+   * The message may name only the request and the runtime. Naming a configuration key would make a Phase 2.1
+   * lifecycle failure depend on the API that supplies it (ADR-0013).
    */
   @Test
-  void failureMessageDoesNotReferenceConfigurationThatDoesNotExistYet() {
+  void failureMessageDescribesTheRequestAndRuntimeOnly() {
     assertThatThrownBy(() -> ThreadProviders.create(ThreadPolicy.VIRTUAL, JDK17))
         .isInstanceOf(ThreadCapabilityUnavailableException.class)
-        .hasMessageContaining("java.version=")
+        .hasMessageContaining("runtime=RuntimeCapabilities[jdk=17")
         .satisfies(error -> assertThat(error.getMessage()).doesNotContainIgnoringCase("barezen."));
   }
 
