@@ -12,11 +12,12 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.library.Architectures;
 
 /**
- * Executable form of the Phase 2.1 architecture rules.
+ * Executable form of the Phase 2 architecture rules.
  *
- * <p>These are the constraints that turn the design claims into something verifiable: the kernel stays
- * free of HTTP and persistence concepts, reaching for a newer JDK API is confined to a single class, and
- * package dependencies stay one directional.
+ * <p>These are the constraints that turn the design claims into something verifiable: core stays free of any
+ * third-party library beyond slf4j, stays free of HTTP and persistence concepts, confines reaching for a newer
+ * JDK API to a single package, keeps reading configuration inputs inside the config package, and keeps package
+ * dependencies one directional.
  */
 @AnalyzeClasses(
     packages = "com.barezen.core",
@@ -27,6 +28,7 @@ class BarezenCoreArchitectureTest {
   private static final String CONCURRENT = "com.barezen.core.concurrent..";
   private static final String RUNTIME = "com.barezen.core.runtime..";
   private static final String ERROR = "com.barezen.core.error..";
+  private static final String CONFIG = "com.barezen.core.config..";
 
   /**
    * Rule 1: core depends on nothing but the JDK and the SLF4J API.
@@ -85,31 +87,48 @@ class BarezenCoreArchitectureTest {
       .as("ScopedValue and StructuredTaskScope are outside the JDK 17 baseline and outside the MVP")
       .allowEmptyShould(true);
 
-  /** Rule 5: capability packages never depend on the orchestration package. */
+  /** Rule 5: capability, configuration and orchestration-support packages never depend on the kernel. */
   @ArchTest
   static final ArchRule capabilities_do_not_depend_on_the_kernel = noClasses()
-      .that().resideInAnyPackage(CONCURRENT, RUNTIME)
+      .that().resideInAnyPackage(CONCURRENT, RUNTIME, CONFIG)
       .should().dependOnClassesThat().resideInAnyPackage(KERNEL)
-      .as("concurrent and runtime must stay usable without the lifecycle engine");
+      .as("concurrent, runtime and config must stay usable without the lifecycle engine");
 
-  /** Rule 6: error and runtime are leaves of the internal dependency graph. */
+  /**
+   * Rule 6: only the config package may enumerate the process's configuration inputs.
+   *
+   * <p>The framework rule "core depends on abstractions, not on concrete sources" needs a mechanical guard,
+   * because the tempting shortcut is a {@code System.getenv} call inside some component that just needs one
+   * value. {@code System.getProperty} with a specific JVM key stays legal in {@code runtime}, which reports
+   * what the JVM is rather than what the operator configured.
+   */
+  @ArchTest
+  static final ArchRule only_config_reads_environment_and_property_tables = noClasses()
+      .that().resideOutsideOfPackages(CONFIG)
+      .should().callMethod(System.class, "getenv")
+      .orShould().callMethod(System.class, "getProperties")
+      .as("configuration sources live only in com.barezen.core.config (ADR-0013)");
+
+  /** Rule 7: error and runtime are leaves of the internal dependency graph. */
   @ArchTest
   static final ArchRule error_and_runtime_packages_are_leaves = noClasses()
       .that().resideInAnyPackage(ERROR, RUNTIME)
-      .should().dependOnClassesThat().resideInAnyPackage(KERNEL, CONCURRENT)
-      .as("error and runtime must not reach back into kernel or concurrent");
+      .should().dependOnClassesThat().resideInAnyPackage(KERNEL, CONCURRENT, CONFIG)
+      .as("error and runtime must not reach back into kernel, concurrent or config");
 
-  /** Rule 7: the internal package graph is one directional and acyclic. */
+  /** Rule 8: the internal package graph is one directional and acyclic. */
   @ArchTest
   static final ArchRule core_is_free_of_cycles = Architectures.layeredArchitecture()
       .consideringOnlyDependenciesInAnyPackage("com.barezen.core..")
       .layer("Error").definedBy(ERROR)
       .layer("Runtime").definedBy(RUNTIME)
+      .layer("Config").definedBy(CONFIG)
       .layer("Concurrent").definedBy(CONCURRENT)
       .layer("Kernel").definedBy(KERNEL)
       .whereLayer("Kernel").mayNotBeAccessedByAnyLayer()
       .whereLayer("Concurrent").mayOnlyBeAccessedByLayers("Kernel")
+      .whereLayer("Config").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
       .whereLayer("Runtime").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
-      .whereLayer("Error").mayOnlyBeAccessedByLayers("Kernel", "Concurrent")
+      .whereLayer("Error").mayOnlyBeAccessedByLayers("Kernel", "Concurrent", "Config")
       .as("core packages must form a one directional graph with kernel at the top");
 }

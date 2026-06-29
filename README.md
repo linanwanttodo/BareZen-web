@@ -6,14 +6,14 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.1 (Application Lifecycle) is implemented. Everything else is design only.
+Phase 2.2 (Configuration) is implemented. Everything else is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
-| `framework/barezen-core` | 2.1 | lifecycle engine, thread capability |
+| `framework/barezen-core` | 2.1–2.2 | lifecycle engine, thread capability, configuration |
 | `barezen-web`, `barezen-http-jdk` | 3 | not created |
-| Configuration, DI, Plugin Model, Discovery, Extension Points, EventBus | 2.2–2.7 | not created |
+| DI, Plugin Model, Discovery, Extension Points, EventBus | 2.3–2.7 | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -45,8 +45,8 @@ CI proves compatibility, JDK 21 proves compatibility and quality.
 ```
 pom.xml                     barezen-parent: owns maven.compiler.release=17, versions, enforcer
 barezen-bom/                version contract consumed by applications
-framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, errors
-docs/adr/                   architecture decision records, 0001-0012
+framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration, errors
+docs/adr/                   architecture decision records, 0001-0013
 scripts/                    build guards
 ```
 
@@ -63,3 +63,27 @@ to hold in try-with-resources (ADR-0012). `ThreadProvider` is an executor factor
 not a thread pool registry — and resolves from a `ThreadPolicy` plus a three-field `RuntimeCapabilities`
 snapshot, with the only Java 21 reference in the codebase confined to one `MethodHandle` probe (ADR-0010,
 ADR-0011).
+
+## Phase 2.2 in one paragraph
+
+`Configuration` is an immutable snapshot assembled from ordered `ConfigurationSource`s and read through typed
+`ConfigurationKey<T>`s, so a value's type is checked at compile time and a value that cannot be converted fails
+with its key, its raw text and the source that supplied it rather than falling back to a default. Precedence is
+positional and fixed — key default &lt; `application.properties` &lt; environment variables &lt; system
+properties, with environment names mapped by the one rule `.` to `_` then uppercase — and only
+`com.barezen.core.config` reads the process environment or the property table, which ArchUnit enforces. A group
+of keys binds to a record by hand (`RuntimeConfig.from(configuration)`): no annotations, no scanning, no
+reflection over components. Configuration resolves values and nothing else, so it is not a service locator, and
+the one setting core has today follows a single chain,
+`Configuration → RuntimeConfig → ThreadPolicy → ThreadProviders.create(...)` (ADR-0013).
+
+```java
+Configuration configuration = Configuration.standard(Path.of("config/application.properties"));
+LifecycleOrchestrator app = LifecycleOrchestrator.builder()
+    .configuration(configuration)          // reads barezen.runtime.threads
+    .register("http", httpRuntime)
+    .build();
+```
+
+`barezen.runtime.threads` accepts `auto` (default), `platform` or `virtual`. An unsupported explicit value fails
+startup; `auto` is the only policy allowed to fall back.

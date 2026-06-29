@@ -1,8 +1,11 @@
 package com.barezen.core.kernel;
 
+import com.barezen.core.concurrent.RuntimeConfig;
+import com.barezen.core.concurrent.ThreadCapabilityUnavailableException;
 import com.barezen.core.concurrent.ThreadPolicy;
 import com.barezen.core.concurrent.ThreadProvider;
 import com.barezen.core.concurrent.ThreadProviders;
+import com.barezen.core.config.Configuration;
 import com.barezen.core.error.LifecycleException;
 import com.barezen.core.kernel.StartupException.Phase;
 import com.barezen.core.runtime.RuntimeCapabilities;
@@ -98,6 +101,15 @@ public final class LifecycleOrchestrator implements AutoCloseable {
     } finally {
       lock.unlock();
     }
+  }
+
+  /**
+   * @return the thread model the owned provider produces. The only observation point for the
+   *     configuration-to-provider decision, so a deployment can log what {@code barezen.runtime.threads}
+   *     resolved to instead of inferring it from thread dumps
+   */
+  public ThreadProvider.Kind threadKind() {
+    return threads.kind();
   }
 
   /**
@@ -307,9 +319,30 @@ public final class LifecycleOrchestrator implements AutoCloseable {
     /**
      * Chooses the thread model the owned provider is resolved from. Ignored when
      * {@link #threads(ThreadProvider)} supplied one.
+     *
+     * <p>Prefer {@link #configuration(Configuration)} when the application has a configuration snapshot:
+     * hard-coding a policy here silently overrides whatever the operator set.
      */
     public Builder threadPolicy(ThreadPolicy policy) {
       this.threadPolicy = Objects.requireNonNull(policy, "threadPolicy");
+      return this;
+    }
+
+    /**
+     * Reads {@link RuntimeConfig} from a configuration snapshot and applies the thread policy it resolves to.
+     *
+     * <p>This is the intended entry point for the setting, and the only place in the lifecycle path where a
+     * configuration value becomes a thread decision. The provider itself never reads a property or an
+     * environment variable, so {@link ThreadProvider} stays a pure infrastructure component (ADR-0013).
+     *
+     * <p>Resolution is not validation: a snapshot saying {@code barezen.runtime.threads=virtual} is accepted
+     * here and rejected at {@link #build()} only if the runtime cannot provide it, which is where capabilities
+     * are known. A bad value fails with the key, the value and the source that supplied it; an unavailable one
+     * fails as {@link ThreadCapabilityUnavailableException}. Neither ever degrades to another policy.
+     */
+    public Builder configuration(Configuration configuration) {
+      Objects.requireNonNull(configuration, "configuration");
+      this.threadPolicy = RuntimeConfig.from(configuration).threads();
       return this;
     }
 

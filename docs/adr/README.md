@@ -17,5 +17,4 @@ names it. Code references ADRs by number in Javadoc, so a reader of the implemen
 | [0010](0010-runtime-capability-seam-scope.md) | RuntimeCapabilities is a 3-field snapshot, probe confined to one class | accepted |
 | [0011](0011-thread-provider-is-a-factory-with-ownership.md) | ThreadProvider is a factory with ownership, not a registry | accepted |
 | [0012](0012-new-to-stopped-is-legal-and-idempotent.md) | NEW → STOPPED is legal and idempotent | accepted |
-
-Phase 2.2 (Configuration) starts at 0013.
+| [0013](0013-configuration-is-resolved-at-assembly-time.md) | configuration is resolved once at assembly time and travels as typed values | accepted |
