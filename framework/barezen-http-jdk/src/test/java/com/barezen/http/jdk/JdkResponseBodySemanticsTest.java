@@ -71,7 +71,7 @@ class JdkResponseBodySemanticsTest {
    */
   @Nested
   @DisplayName("a 200 with an empty body")
-  class EmptyBody {
+  class EmptyBodies {
 
     @Test
     void anEmptyByteArrayArrivesAsZeroLengthAndNoBytes() throws IOException {

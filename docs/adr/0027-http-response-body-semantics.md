@@ -362,7 +362,7 @@ concurrency suite (directive §19's "OPTIONS \*/HEAD/GET/204/304 must not pollut
 | `FramingFields.refusesAnEmptyValueForThoseNamesToo` | `Content-Length: ""` is still a framing field |
 | `FramingFields.letsEveryOtherFieldThroughIncludingItsOwnLengthsAndTypes` | `ETag`, `Content-Type`, `Content-Location`, `X-Length` pass — the refusal is two names, not a category |
 | `FramingFields.namesTheStatusAndTheFieldRatherThanGuessingAtADrop` | the message carries the status, the field and the value |
-| `EmptyBody.anEmptyByteArrayArrivesAsZeroLengthAndNoBytes` / `aNullBodyArrivesIdentically` / `aNonEmptyBodyArrivesWithItsLengthAndItsBytes` | §3's concept 1 on the wire: `Content-length: 0` vs `: 5`, no chunked |
+| `EmptyBodies.anEmptyByteArrayArrivesAsZeroLengthAndNoBytes` / `aNullBodyArrivesIdentically` / `aNonEmptyBodyArrivesWithItsLengthAndItsBytes` | §3's concept 1 on the wire: `Content-length: 0` vs `: 5`, no chunked |
 | `TwoOhFour.aTwoOhFourIsWrittenWithNoBodyAndNoLength` + `aHandlerCannotGiveATwoOhFourABody` + `aRealClientAcceptsATwoOhFourAndKeepsTheConnection` | §4's `204` triple: no length, refusal at construction, and a keep-alive client sequence that completes |
 | `ThreeOhFour.…(4 tests)` | §4's `304` triple plus `anUnconditionalGetNeverBecomesAThreeOhFourByItself` — a `304` is an answer this adapter writes only when a handler returns it |
 | `HeadResponses.…(8 tests)` | §6's rows 1-8: own handler, own route, length with zero bytes, `405` keeps `Allow`, `204`/`304` state neither, keep-alive usable after a `HEAD`, and the lowercase-token asymmetry |
@@ -387,7 +387,7 @@ Mutation probes that fired (each applied, run, reverted; the five mutated files 
 | E | `304` dropped from `carriesNoBody` | `refusesEveryStatusThatCarriesNoBodyWhenBytesWereGiven`, `refuses304BecauseItsBodyWouldNeverArrive`, `ThreeOhFour.aHandlerCannotGiveAThreeOhFourABody` — 3 |
 | F | bridge treats `HEAD` like `GET`: declares the length and hands the bytes | `HeadResponses.aMethodTokenThatIsNotTheUpperCaseHeadIsNotAHeadRequestToTheJdk`, `NoServerSideCorrection.noFramingShapeMakesTheServerLogAWarning` — 2 |
 | F2 | dispatcher's `writesBody` returns `true` for every method (the stronger form of F) | 8: the five `HeadResponses` length tests, `aMethodTokenThatIsNotTheUpperCaseHead…`, `NoServerSideCorrection…`, `JdkHeaderAndBodyTest$ResponseHeaders.aHeadResponseHasFieldsAndTheRepresentationLengthButNoBody`, `JdkHttpServerConcurrencyTest.mixedShapesUnderConcurrencyStayOnTheirOwnRequests` |
-| G | `declared` passes `body.length` for an empty body (the `-1` branch gone) | `JdkHeaderAndBodyTest$ResponseHeaders.anEmptyBodyIsDeclaredAsZeroBytesAndNotChunked`, `EmptyBody.anEmptyByteArrayArrivesAsZeroLengthAndNoBytes`, `EmptyBody.aNullBodyArrivesIdentically` — 3 |
+| G | `declared` passes `body.length` for an empty body (the `-1` branch gone) | `JdkHeaderAndBodyTest$ResponseHeaders.anEmptyBodyIsDeclaredAsZeroBytesAndNotChunked`, `EmptyBodies.anEmptyByteArrayArrivesAsZeroLengthAndNoBytes`, `EmptyBodies.aNullBodyArrivesIdentically` — 3 |
 | H | dispatcher answers a post-commitment `IOException` with a second status | `JdkErrorSemanticsTest$CommittedResponses.aClientThatHangsUpMidWriteLogsOnceAndNeverProducesASecondStatus` — 1 (ADR-0023 §6's regression, kept in the phase's probe set because directive §14 lists it) |
 | I | adapter's `mayCarryABody` allows `204` (the two lists disagree) | `HeadResponses.aHeadOfATwoOhFourStatesNoLength` — 1 |
 
