@@ -426,11 +426,29 @@ class JdkHttpServerLifecycleTest {
   @DisplayName("the thread model requests actually run on")
   class ThreadModel {
 
-    /** Threads still alive with the name prefix this adapter hands to its provider. */
-    private static long liveRequestThreads() {
-      return Thread.getAllStackTraces().keySet().stream()
-          .filter(candidate -> candidate.getName().startsWith("barezen-http-jdk-"))
-          .count();
+    /**
+     * Threads still alive with the name prefix this adapter hands to its provider, sampled until the set empties.
+     *
+     * <p>The sampling is not a courtesy to a leak — it is what makes the assertion mean the same thing on both runtimes.
+     * A provider whose executor was shut down has stopped handing out work, but the worker threads of a JDK 17 platform
+     * pool end their own {@code run()} when the pool's idle timeout expires, and the VM drops a finished thread from the
+     * live list only once the native side reports its termination. That report can land one scheduling tick after
+     * {@code close()} returns, which is measured rather than assumed: an instantaneous count right after the adapter
+     * closed was still reporting one thread in roughly one run in thirty, on a server that provably answers nothing on
+     * the line below. A thread the adapter actually leaked stays in the list forever, so the deadline expiring with a
+     * non-zero count fails exactly as it should.
+     */
+    private static long liveRequestThreads() throws InterruptedException {
+      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+      while (true) {
+        long live = Thread.getAllStackTraces().keySet().stream()
+            .filter(candidate -> candidate.getName().startsWith("barezen-http-jdk-"))
+            .count();
+        if (live == 0 || System.nanoTime() >= deadline) {
+          return live;
+        }
+        Thread.sleep(10);
+      }
     }
 
     @Test
@@ -485,7 +503,7 @@ class JdkHttpServerLifecycleTest {
     }
 
     @Test
-    void aStoppedAdapterLeavesNoRequestThreadBehind() throws IOException {
+    void aStoppedAdapterLeavesNoRequestThreadBehind() throws IOException, InterruptedException {
       AtomicReference<String> observed = new AtomicReference<>();
       Router router = Router.builder()
           .route(HttpMethod.GET, "/who", (request, parameters) -> {
