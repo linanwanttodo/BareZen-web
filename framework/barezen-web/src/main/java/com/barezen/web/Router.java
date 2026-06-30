@@ -199,7 +199,10 @@ public final class Router {
         "the request to route; with no request there is no method and no path, which is all a match needs");
     if (request.path().equals("*")) {
       // An OPTIONS * request asks about the server rather than a resource, and no pattern can name it. Empty is the
-      // honest answer; what to reply instead is the adapter's decision, not a routing one.
+      // honest answer; what to reply instead is the adapter's decision, not a routing one. On the shipped adapter this
+      // branch is a contract statement rather than a request path: the JDK refuses the target before a handler exists,
+      // so no socket reaches it here — ADR-0026 §3, §4 records that, and a second adapter that does deliver the
+      // asterisk gets this answer, which is the reason the branch stays.
       return Optional.empty();
     }
     List<String> path = segmentsOf(request.path());

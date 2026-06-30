@@ -174,16 +174,20 @@ class JdkErrorSemanticsTest {
   }
 
   @Nested
-  @DisplayName("OPTIONS * never arrives, which is this phase's design debt")
+  @DisplayName("OPTIONS * is answered by the server, not by these five statuses")
   class StarTarget {
 
     /**
-     * Recorded rather than asserted as working: the JDK answers {@code OPTIONS *} itself and never creates an exchange
-     * for it, so the dispatcher's {@code "*"} branch cannot be reached from a socket (ADR-0023 §9).
+     * The one claim this suite keeps about the asterisk: a target the server refuses never reaches the dispatcher, so
+     * none of the five statuses above can be produced by it. The full evidence — the server's own body and field
+     * spelling, the handler counters, the keep-alive consequence, and the {@code OPTIONS /} and {@code OPTIONS
+     * /users/42} neighbours that do get routed — is in {@link JdkOptionsStarTest}, which is where ADR-0026's limitation
+     * is pinned.
      *
-     * <p>The assertion is written against what the server actually does, which is a 404 with the JDK's own HTML body —
-     * not this adapter's {@code Not Found}. That difference is the evidence: a response this module did not write
-     * arrived, which is only possible if the request never got here.
+     * <p>Left here because the distinction is an error-semantics distinction as much as a routing one: the 404 a client
+     * gets for {@code OPTIONS *} is written by {@code ServerImpl} and carries HTML, while the 404 in
+     * {@link NotFoundAndNotAllowed} is written by this adapter and carries four words. A test that only looked at the
+     * status could not tell the two writers apart.
      */
     @Test
     void optionsStarIsAnsweredByTheJdkBeforeTheAdapterSeesIt() throws IOException {
@@ -201,17 +205,22 @@ class JdkErrorSemanticsTest {
         assertThat(answer.status()).isEqualTo(404);
         // The JDK's own text, so this proves the answer came from the server rather than from JdkRequestDispatcher.
         assertThat(answer.body()).contains("No context found for request");
+        assertThat(answer.body()).doesNotContain("ok");
         assertThat(handled.get()).isZero();
       }
     }
 
     @Test
     void aRequestForTheAsteriskTargetIsNotSilentlyTurnedIntoADifferentPath() throws IOException {
-      // The same finding restated from the contract's side: no request line in this test family produced a handler call
-      // for "*", and nothing here invents an Allow list for the server as a whole. A later phase that wants
-      // OPTIONS * answered has to change how requests reach the dispatcher, not just add a route.
+      // The same finding from the other side: nothing here invents a server-wide Allow, and no handler runs. A later
+      // phase that wants OPTIONS * answered has to change how requests reach the dispatcher, not just add a route
+      // (ADR-0026 §4, §5).
+      AtomicInteger handled = new AtomicInteger();
       try (JdkHttpServerAdapter adapter = on(Router.builder()
-          .route(HttpMethod.GET, "/users", (request, parameters) -> text("users"))
+          .route(HttpMethod.GET, "/users", (request, parameters) -> {
+            handled.incrementAndGet();
+            return text("users");
+          })
           .build())) {
         int port = start(adapter);
 
@@ -219,6 +228,8 @@ class JdkErrorSemanticsTest {
 
         assertThat(answer.status()).isEqualTo(404);
         assertThat(answer.body()).doesNotContain("users");
+        assertThat(answer.valuesOf("Allow")).isEmpty();
+        assertThat(handled.get()).isZero();
       }
     }
   }
