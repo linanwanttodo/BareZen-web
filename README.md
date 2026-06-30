@@ -6,14 +6,15 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.9 (HTTP Runtime — JDK adapter) is implemented. Everything else is design only.
+Phase 2.9 (HTTP Runtime — JDK adapter), including the 2.9.5–2.9.6 contract audit, is implemented. Everything else
+is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
-| `framework/barezen-web` | 2.7–2.9 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context |
-| `framework/barezen-http-jdk` | 2.9–2.9.4 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider |
+| `framework/barezen-web` | 2.7–2.9.6 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context |
+| `framework/barezen-http-jdk` | 2.9–2.9.6 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider |
 | Discovery, Extension Points | later | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
@@ -53,7 +54,7 @@ framework/barezen-web/      HTTP contract and route table: handler, request, res
                             route match, server adapter contract — no shipped dependency, no server
 framework/barezen-http-jdk/ the JDK adapter: the only module that may name com.sun.net.httpserver, and the only
                             one that registers a ServiceLoader provider
-docs/adr/                   architecture decision records, 0001-0025
+docs/adr/                   architecture decision records, 0001-0027
 scripts/                    build guards
 ```
 
@@ -367,19 +368,57 @@ port; `stop()` is idempotent, never throws and waits the JDK's own 3 seconds for
 `/users/a%2Fb` stays one segment and `/users/%2e%2e/admin` is never normalized (ADR-0022 §2–§4). Two honest limitations
 are asserted as tests rather than glossed: `com.sun.net.httpserver.Headers` canonicalizes field names
 (`X-MixedCase` arrives as `X-mixedcase`) and is hash-backed, so arrival order is gone before the bridge reads it
-(ADR-0022 §5); and a HEAD response carries fields and no body and no `Content-Length`, so a HEAD client cannot discover a
-representation's size through this adapter (ADR-0022 §7). Errors are responses: 404 names no path, 405 carries a stable
-adapter-local `Allow`, a handler's `RuntimeException` is logged with its throwable and answered with `Internal Server
-Error` alone, a target the contract refuses or a body that stops arriving is a 400 before anything is committed, and a
-write that fails after the status line is logged once at DEBUG and never answered with a second status (ADR-0023 §2–§6).
-`OPTIONS *` never reaches the dispatcher — the JDK answers it and logs `No context found for request` — which is recorded
-as design debt rather than fixed by changing the frozen `Router` contract (ADR-0023 §9). Discovery is the last piece: the
-module registers its provider in `META-INF/services`, `ServiceLoader` finds it, `id()` is `"jdk"`, `create` hands back a
-fresh unstarted adapter each call, and nothing in this module calls `ServiceLoader` itself, because discovery may only
-ever *discover* — the selection stays in application assembly (ADR-0025 §1–§8). 116 tests, 24 ArchUnit rules over package
-boundaries rather than class names, an 85% line-coverage gate on JDK 21, and all eleven mutation probes fired; 2.9.1–2.9.4
-are the request/response bridge, the error semantics and the provider, delivered with 2.9 as one runtime
-(ADR-0021–ADR-0025).
+(ADR-0022 §5); and a method token that is not the exact uppercase `HEAD` is not a HEAD request to the JDK, so it gets a
+`Content-length: 0` where `HEAD` gets the representation's length (ADR-0027 §9). Errors are responses: 404 names no path,
+405 carries a stable adapter-local `Allow`, a handler's `RuntimeException` is logged with its throwable and answered with
+`Internal Server Error` alone, a target the contract refuses or a body that stops arriving is a 400 before anything is
+committed, and a write that fails after the status line is logged once at DEBUG and never answered with a second status
+(ADR-0023 §2–§6). Discovery is the last piece: the module registers its provider in `META-INF/services`, `ServiceLoader`
+finds it, `id()` is `"jdk"`, `create` hands back a fresh unstarted adapter each call, and nothing in this module calls
+`ServiceLoader` itself, because discovery may only ever *discover* — the selection stays in application assembly
+(ADR-0025 §1–§8). 152 tests, 24 ArchUnit rules over package boundaries rather than class names, an 85% line-coverage gate
+on JDK 21, and every mutation probe fired; 2.9.1–2.9.4 are the request/response bridge, the error semantics and the
+provider, delivered with 2.9 as one runtime (ADR-0021–ADR-0025).
+
+## Phase 2.9.5–2.9.6 in one paragraph
+
+A contract audit, not a feature phase: two questions opened, `OPTIONS *` and what `Response(status, Headers, byte[])` is
+allowed to hold, and the code was measured before it was written. **`OPTIONS *` is not supported, and that is now a
+measurement rather than a label.** `ServerImpl` resolves the target with `new URI("*")`, whose path is `"*"` with no
+leading slash, looks for a context whose path is a prefix of it, and finds none — because `HttpContextImpl`'s constructor
+refuses any path that does not start with `/` — so it writes its own 404 and closes the connection before a filter, an
+exchange or a handler exists. There is no public API that changes that: `createContext("*")` is
+`IllegalArgumentException: Illegal value for path or protocol`, `removeContext("*")` refuses, JDK 21's
+`create(addr, backlog, path, handler, filters)` overload (the only surface difference between the two JDKs, `@since 18`)
+calls `createContext` internally and refuses the same way, and `Filter` can only run after a lookup succeeds. ADR-0023 §9
+called this design debt; debt implies a deferred fix, and there is none, so ADR-0026 replaces the label with the mechanism
+and with ten socket tests that fail if it changes. They pin the fingerprint of *who wrote the answer* rather than the
+status code — the server's reply carries `<h1>404 Not Found</h1>No context found for request`, an uppercase-`L`
+`Content-Length` and no `Date`, while anything through an exchange carries the canonicalized lowercase spelling and a
+`Date` — plus the finding that this is not an OPTIONS rule: ten method tokens naming `*`, including `PURGE`, get the
+identical answer, and a counted route table shows a resource handler called zero times. No synthetic handling exists,
+`OPTIONS *` is not `OPTIONS /`, `"*"` is not a route, and `methodsFor("*")` returns nothing; `Router` was not widened.
+
+**Response body semantics moved, because three concepts had been collapsed into one.** An empty `byte[]`, a status that
+forbids a body, and a HEAD's representation length are three facts, and the pre-audit shape treated them as one: a handler
+could hand a `204` bytes, which the JDK discarded while logging `rCode = 204: forcing contentLen = -1` and telling nobody,
+and could set `Content-Length` itself, which on the bare JDK makes `java.net.http.HttpClient` fail the response with
+`unexpected content length header with 204 response` and leaves two length lines on a `304` or a HEAD. Both are now
+refused in `Response`'s constructor — `1xx`/`204`/`304` get no bytes, and `Content-Length`/`Transfer-Encoding` are not
+response fields on any status — because a silent disagreement between what a handler returned and what a client received is
+the failure this contract exists to prevent, and the earliest place to name it is the line the developer wrote. A HEAD now
+states the length of the body it does not send, derived by the adapter and declared as `-1`, which closes ADR-0022 §7's
+limitation without a server-side warning: the twelve-shape wire table is byte-identical on 17.0.20.1 and 21.0.12.1 modulo
+`Date`, and a JUL handler on the server logger captures none. `byte[]` stayed, and no `BodyMode`, `NoBody`,
+`Representation`, `StreamingBody` or `Optional<byte[]>` was added, so the directive's four-part proof for a new public type
+was never triggered (ADR-0027). What the uniform rule costs is recorded rather than hidden: **a `304` through this
+framework cannot state the stored representation's length**, and that is design debt with a named reason.
+
+227 web tests and 152 adapter tests, both green on JDK 17 and JDK 21 with `mvn -o -B -ntp clean verify`; 23 and 24 ArchUnit
+rules, unchanged and unweakened; line coverage 98.9% and 99.4%; ten mutation probes (A–I plus a stronger F) and every one
+of them broke a named test, with the mutated sources verified byte-identical after each revert; public API surface
+unchanged — the two rules are private statics inside `Response` and the HEAD length is derived inside a package-private
+bridge.
 
 ```java
 // Application assembly is the only place that knows both the contract and the adapter.
