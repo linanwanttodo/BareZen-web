@@ -87,6 +87,21 @@ class ResponseTest {
     void treatsNullAsNoBody() {
       assertThat(new Response(204, Headers.empty(), null).body()).isEmpty();
       assertThat(new Response(204, Headers.empty(), new byte[0]).body()).isEmpty();
+      assertThat(new Response(200, Headers.empty(), null).body()).isEmpty();
+      assertThat(new Response(200, Headers.empty(), new byte[0]).body()).isEmpty();
+    }
+
+    @Test
+    void keepsAnEmptyBodyAndNoBodyAsTheSameFactToTheContract() {
+      // Two spellings of "nothing to send", one meaning to this type. The wire distinguishes them anyway — an adapter
+      // writes Content-Length: 0 for both — which is why Response does not carry a third state for "deliberately empty"
+      // versus "absent" (ADR-0027 §3, and the reason there is no noBody()).
+      byte[] empty = new byte[0];
+
+      assertThat(new Response(200, Headers.empty(), null).body()).isEqualTo(empty);
+      assertThat(new Response(200, Headers.empty(), empty).body()).isEqualTo(empty);
+      assertThat(new Response(200, Headers.empty(), empty)).hasToString("Response[200, 0 body bytes, 0 fields]");
+      assertThat(new Response(200, Headers.empty(), null)).hasToString("Response[200, 0 body bytes, 0 fields]");
     }
 
     @Test
@@ -165,6 +180,145 @@ class ResponseTest {
       assertThat(new Response(200, Headers.empty(), null).toString()).isEqualTo("Response[200, 0 body bytes, 0 fields]");
       assertThat(new Response(200, Headers.of("A", "1").with("B", "2"), new byte[1]).toString())
           .isEqualTo("Response[200, 1 body byte, 2 fields]");
+    }
+  }
+
+  /**
+   * A status that has no place for a body is not given one, and a framing field is not the handler's to write
+   * (ADR-0027 §4, §5).
+   *
+   * <p>These refusals exist because the alternative was measured on this framework's own adapter rather than argued from
+   * the specification: a {@code 204} carrying bytes is written, then discarded by the server with a warning in the server
+   * log and nothing in the client's answer; a {@code 204} carrying a {@code Content-Length} makes
+   * {@code java.net.http.HttpClient} abandon the response; and a {@code 304} or {@code HEAD} response with a handler-set
+   * length arrives with two of them. A contract that permits a shape the wire cannot honour is a contract that decides
+   * the failure happens somewhere the developer is not looking.
+   */
+  @Nested
+  @DisplayName("a status with no body cannot be given one")
+  class BodylessStatuses {
+
+    /** The three families HTTP defines as carrying no message body. */
+    private static final int[] NO_BODY = {100, 101, 103, 199, 204, 304};
+
+    @Test
+    void refusesEveryStatusThatCarriesNoBodyWhenBytesWereGiven() {
+      byte[] body = "hello".getBytes(StandardCharsets.UTF_8);
+
+      for (int status : NO_BODY) {
+        assertThatThrownBy(() -> new Response(status, Headers.empty(), body))
+            .as("a %d response with a body must be refused at construction", status)
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("cannot carry a body")
+            .hasMessageContaining("5 body bytes");
+      }
+    }
+
+    @Test
+    void acceptsTheSameStatusesWithNoBodyAtAll() {
+      // Empty is not the thing being refused — a 204 with nothing in it is the correct answer, and refusing it would
+      // make the status unusable.
+      for (int status : NO_BODY) {
+        assertThat(new Response(status, Headers.empty(), null).body()).isEmpty();
+        assertThat(new Response(status, Headers.empty(), new byte[0]).body()).isEmpty();
+      }
+    }
+
+    @Test
+    void refuses204RatherThanLetTheServerDropTheBodySilently() {
+      // The specific case the phase's directive names: the JDK logs
+      // "sendResponseHeaders: rCode = 204: forcing contentLen = -1" and the client gets a 204 with none of the bytes the
+      // handler returned. A refusal here means the developer sees the line they wrote; a drop there means the next
+      // person reads a socket that disagrees with the code.
+      assertThatThrownBy(() -> new Response(204, Headers.of("Content-Type", "text/plain"),
+          "deleted".getBytes(StandardCharsets.UTF_8)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("204")
+          .hasMessageContaining("silent disagreement");
+    }
+
+    @Test
+    void refuses304BecauseItsBodyWouldNeverArrive() {
+      // Measured: the JDK suppresses the body of a 304 whatever it is handed, and warns only when a length was declared
+      // through its own API. A handler that returns a full representation with a 304 has been answered something else.
+      assertThatThrownBy(() -> new Response(304, Headers.of("ETag", "\"7\""),
+          "the whole representation".getBytes(StandardCharsets.UTF_8)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("304")
+          .hasMessageContaining("no message body");
+    }
+
+    @Test
+    void stillAllowsABodyForEveryStatusThatHasAPlaceForOne() {
+      byte[] body = "hello".getBytes(StandardCharsets.UTF_8);
+
+      // 200, 201, 206, 301, 400, 404, 405, 500 and the rest are ordinary: none of them is in the no-body family, and a
+      // rule that over-refuses is as wrong as one that under-refuses — it would make a 200 empty answer impossible.
+      for (int status : new int[] {200, 201, 203, 206, 300, 301, 302, 400, 404, 405, 418, 451, 500, 503, 599}) {
+        assertThat(new Response(status, Headers.empty(), body).body()).isEqualTo(body);
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("framing fields belong to the writer, not the handler")
+  class FramingFields {
+
+    @Test
+    void refusesContentLengthOnAResponse() {
+      assertThatThrownBy(() -> new Response(200, Headers.of("Content-Length", "5"),
+          "hello".getBytes(StandardCharsets.UTF_8)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not carry Content-Length");
+    }
+
+    @Test
+    void refusesTransferEncodingOnAResponse() {
+      // Measured: a handler-written "Transfer-Encoding: chunked" reaches the wire beside an identity-encoded body,
+      // which is the contradictory-framing shape a downstream proxy desynchronises on.
+      assertThatThrownBy(() -> new Response(200, Headers.of("Transfer-Encoding", "chunked"),
+          "hello".getBytes(StandardCharsets.UTF_8)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not carry Transfer-Encoding");
+    }
+
+    @Test
+    void refusesBothNamesInAnyCaseAndOnAnyStatus() {
+      // Case-insensitive because that is how a field name is matched everywhere else in this contract, and on every
+      // status because the field is wrong for the type rather than for one code: the 304 and HEAD cases were the ones
+      // that produced a duplicate length on the wire, and the 204 case was the one that broke a real client.
+      for (int status : new int[] {200, 204, 304, 404}) {
+        assertThatThrownBy(() -> new Response(status, Headers.of("content-length", "0"), null))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Response(status, Headers.of("TRANSFER-ENCODING", "gzip"), null))
+            .isInstanceOf(IllegalArgumentException.class);
+      }
+    }
+
+    @Test
+    void refusesAnEmptyValueForThoseNamesToo() {
+      // "Content-Length:" is still a Content-Length, and an empty value would be sent as an empty field line that some
+      // clients read as a zero length. Presence is what is refused, not a particular number.
+      assertThatThrownBy(() -> new Response(200, Headers.of("Content-Length", ""), null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void letsEveryOtherFieldThroughIncludingItsOwnLengthsAndTypes() {
+      // The refusal is about two names, not about sizing information in general: Content-Range, Content-Type and
+      // X-Total-Count all describe an answer, while the refused pair describes the connection.
+      Response response = new Response(200, Headers.of("Content-Type", "text/plain; charset=utf-8")
+          .with("Content-Range", "bytes 0-4/5").with("X-Total-Count", "5"), "hello".getBytes(StandardCharsets.UTF_8));
+
+      assertThat(response.headers().first("X-Total-Count")).contains("5");
+    }
+
+    @Test
+    void namesTheStatusAndTheFieldRatherThanGuessingAtADrop() {
+      assertThatThrownBy(() -> new Response(304, Headers.of("Content-Length", "12"), null))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("on a 304 response")
+          .hasMessageContaining("derives Content-Length from the body");
     }
   }
 }
