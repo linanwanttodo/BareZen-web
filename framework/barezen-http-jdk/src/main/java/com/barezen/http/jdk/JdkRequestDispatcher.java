@@ -53,9 +53,16 @@ import org.slf4j.LoggerFactory;
  *
  * <p><b>What this class does not do:</b> it does not parse HTTP — the JDK owns low-level parsing and refuses a malformed
  * request line, an illegal header and an unknown framing before an exchange is created (ADR-0023 §7); it does not answer
- * {@code OPTIONS *} as a server-wide capability list, which ADR-0023 §9 records as this phase's design debt and
- * {@link #route} explains; and it does not log one line per request, which is access logging and has no consumer yet.
- * Nor does it catch {@link Error}: an {@code OutOfMemoryError} inside a handler is not a condition a {@code 500} answers.
+ * {@code OPTIONS *} — not because this phase declined to write the code, but because a request line naming {@code *} as
+ * its target can never reach this handler on this server, which {@link #route} walks through and ADR-0026 records as a
+ * limitation with the mechanism behind it rather than as a feature; and it does not log one line per request, which is
+ * access logging and has no consumer yet. Nor does it catch {@link Error}: an {@code OutOfMemoryError} inside a handler is
+ * not a condition a {@code 500} answers.
+ *
+ * <p><b>Framing fields are not this class's to write.</b> {@code Content-Length} and {@code Transfer-Encoding} are
+ * derived by {@link JdkExchangeBridge#send} from the body it is handed, and {@link Response} refuses both names so no
+ * handler can add a second, contradictory statement (ADR-0027 §5). The one field this class does write is {@code Allow},
+ * because its value comes from the route table rather than from the bytes.
  *
  * <p>One instance serves every request concurrently and holds nothing but the route table, so there is no per-request
  * state to leak and no lock on the request path.
@@ -135,12 +142,13 @@ final class JdkRequestDispatcher implements HttpHandler {
    * once: {@link JdkExchangeBridge#send} is the commitment point, so a failure at or after it is logged rather than
    * answered.
    *
-   * <p>An {@code OPTIONS *} request — the request line that names the server rather than a resource — reaches this
-   * method with {@code path()} of {@code "*"}, which {@link Request} allows and {@link Router#match(Request)} answers
-   * with an empty match, so it is answered {@code 404} here. That is the honest reading of a route table that has no
-   * server-wide capability in it, and the alternative was inventing one for a request no client in this phase sends.
-   * ADR-0023 §9 records it as design debt; the {@code JDK} server does not deliver {@code OPTIONS *} to a handler at
-   * all, so no socket test can reach this branch.
+   * <p>An {@code OPTIONS *} request line — the one that names the server rather than a resource — never reaches this
+   * method. The JDK resolves the target {@code "*"} against the address, asks its context list for a context whose path
+   * is a prefix of it, and finds none, because {@code createContext} only accepts a path that starts with {@code /}. The
+   * server answers {@code 404 "No context found for request"} itself, before a handler and therefore before this class
+   * exists for that request (ADR-0026 §2, §3). So there is no {@code "*"} branch to test from a socket, and there is no
+   * synthetic answer here either: a server-wide {@code Allow} would have to come from a registry this framework does not
+   * have, and inventing one for a request the server already answered is the kind of surface this phase exists to remove.
    */
   private void route(HttpExchange exchange, Request request) {
     Optional<RouteMatch> found = router.match(request);

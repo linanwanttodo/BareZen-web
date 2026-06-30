@@ -350,16 +350,17 @@ class JdkHeaderAndBodyTest {
     }
 
     /**
-     * A HEAD response carries the fields and no body, and — the recorded limitation — no Content-Length either.
+     * A HEAD response carries the fields a GET would have produced, the length of that representation, and no body.
      *
-     * <p>Probed: whatever length this adapter declares for a HEAD response, the JDK omits both the body and the field,
-     * and logs a warning when handed a positive one. The adapter therefore declares no body and writes nothing, which is
-     * the behaviour HTTP's HEAD needs for correctness of framing but not for size discovery. ADR-0022 §7 records that a
-     * HEAD client cannot learn a representation's size through this adapter; a real fix belongs with a server that
-     * implements HEAD's semantics rather than in a bridge that hides the JDK's.
+     * <p>The length is the point of this test and it is the sentence ADR-0022 §7 recorded as impossible. "No body" and
+     * "no length" are different statements: HTTP defines HEAD as the GET's fields without its bytes, which means a
+     * correct HEAD answer keeps {@code Content-Length} and drops the body — and the two were measured separately on JDK
+     * 17 and JDK 21, because the JDK's own {@code HEAD} branch suppresses the body while never writing a length of its
+     * own. The adapter therefore writes the length into the response fields and declares {@code -1} to the JDK, which
+     * leaves exactly one {@code Content-Length} line and no bytes (ADR-0027 §6).
      */
     @Test
-    void aHeadResponseHasFieldsAndNoBodyAndNoLength() throws IOException {
+    void aHeadResponseHasFieldsAndTheRepresentationLengthButNoBody() throws IOException {
       byte[] body = "hello".getBytes(StandardCharsets.UTF_8);
       Router router = Router.builder()
           .route(HttpMethod.HEAD, "/doc", (request, parameters) ->
@@ -374,8 +375,8 @@ class JdkHeaderAndBodyTest {
         assertThat(answer.firstOf("Content-Type")).isEqualTo("text/plain");
         assertThat(answer.firstOf("ETag")).isEqualTo("W/\"7\"");
         assertThat(answer.body()).isEmpty();
-        // The limitation, asserted so that a future JDK change is noticed: no length for a HEAD.
-        assertThat(answer.valuesOf("Content-Length")).isEmpty();
+        // The five bytes a GET would have sent, stated without sending them.
+        assertThat(answer.valuesOf("Content-Length")).containsExactly("5");
       }
     }
 

@@ -165,6 +165,178 @@ class JdkHttpServerConcurrencyTest {
     }
   }
 
+  /**
+   * The response shapes this phase changed, interleaved across threads: 8 threads, 50 rounds each, on one server.
+   *
+   * <p>The shapes are the ones ADR-0027 gives each a different wire footprint: a {@code 200} with bytes, a {@code 200}
+   * with none, a {@code 204}, a {@code 304}, a {@code HEAD} that states a length without bytes, a {@code 405} with
+   * {@code Allow}, a {@code 404}, and an {@code OPTIONS *} that this server answers before a handler exists. Each shape
+   * is asserted by its own field lines and body, which is what makes the test a pollution check rather than a load test:
+   * a framing decision taken on one exchange and remembered by the next would show up as a length on the 204, bytes on
+   * the HEAD, or an {@code Allow} that arrived on a 404.
+   *
+   * <p>The counters close the phase's §19 requirements. No resource handler may run for the asterisk — that is the
+   * pollution rule, tested under concurrency rather than one request at a time — and the GET and HEAD handlers must each
+   * be called exactly as often as their own requests, because "HEAD and GET share mutable response state" is only
+   * refutable by counting both of them separately.
+   */
+  @Test
+  @DisplayName("8 threads x 50 rounds of every response shape, and no shape leaks into another")
+  void mixedShapesUnderConcurrencyStayOnTheirOwnRequests() throws Exception {
+    int threads = 8;
+    int rounds = 50;
+    java.util.concurrent.atomic.AtomicInteger parametrizedCalls = new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger getCalls = new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger headCalls = new java.util.concurrent.atomic.AtomicInteger();
+    byte[] body = "hello".getBytes(StandardCharsets.UTF_8);
+    Router router = Router.builder()
+        .route(HttpMethod.GET, "/users/{id}", (request, parameters) -> {
+          parametrizedCalls.incrementAndGet();
+          String id = parameters.get("id");
+          if (id.equals("gone")) {
+            return new Response(204, Headers.empty(), null);
+          }
+          if (id.equals("stale")) {
+            return new Response(304, Headers.of("ETag", "\"7\""), null);
+          }
+          if (id.equals("nothing")) {
+            return new Response(200, Headers.of("Content-Type", "text/plain"), new byte[0]);
+          }
+          return new Response(200, Headers.of("Content-Type", "text/plain"),
+              (id + "|" + request.headers().first("X-Marker").orElse("<none>")).getBytes(StandardCharsets.UTF_8));
+        })
+        .route(HttpMethod.GET, "/doc", (request, parameters) -> {
+          getCalls.incrementAndGet();
+          return new Response(200, Headers.of("Content-Type", "text/plain"), body);
+        })
+        .route(HttpMethod.HEAD, "/doc", (request, parameters) -> {
+          headCalls.incrementAndGet();
+          return new Response(200, Headers.of("Content-Type", "text/plain"), body);
+        })
+        .route(HttpMethod.POST, "/doc", (request, parameters) -> {
+          throw new AssertionError("the 405 for /doc must never reach a handler");
+        })
+        .build();
+
+    List<String> failures = new ArrayList<>();
+    try (JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", 0), router)) {
+      adapter.start();
+      int port = adapter.port().orElseThrow();
+
+      ExecutorService clients = Executors.newFixedThreadPool(threads);
+      List<Future<Integer>> futures = new ArrayList<>();
+      for (int thread = 0; thread < threads; thread++) {
+        final int index = thread;
+        futures.add(clients.submit(() -> {
+          int correct = 0;
+          for (int round = 0; round < rounds; round++) {
+            String marker = "t" + index + "r" + round;
+            try {
+              // 1. a body, its own parameter, its own marker
+              RawHttp.Response named = RawHttp.request(port, "GET", "/users/42", List.of("X-Marker: " + marker), null);
+              if (named.status() == 200 && named.bodyUtf8().equals("42|" + marker)
+                  && named.valuesOf("Content-Length").equals(List.of(Integer.toString(marker.length() + 3)))
+                  && named.valuesOf("Allow").isEmpty()) {
+                correct++;
+              } else {
+                record(failures, "named: " + named.status() + " [" + named.body() + "] " + named.fieldLines());
+              }
+
+              // 2. a 200 with no bytes: a zero length and no transfer-encoding
+              RawHttp.Response empty = RawHttp.request(port, "GET", "/users/nothing", List.of(), null);
+              if (empty.status() == 200 && empty.body().isEmpty()
+                  && empty.valuesOf("Content-Length").equals(List.of("0"))
+                  && empty.valuesOf("Transfer-Encoding").isEmpty()) {
+                correct++;
+              } else {
+                record(failures, "empty: " + empty.status() + " " + empty.fieldLines());
+              }
+
+              // 3. a 204: no length at all, which is the shape a neighbouring 200's length must not leak into
+              RawHttp.Response none = RawHttp.request(port, "GET", "/users/gone", List.of(), null);
+              if (none.status() == 204 && none.body().isEmpty() && none.valuesOf("Content-Length").isEmpty()) {
+                correct++;
+              } else {
+                record(failures, "204: " + none.status() + " " + none.fieldLines());
+              }
+
+              // 4. a 304: no length, no body, and the ETag the handler set on this request only
+              RawHttp.Response stale = RawHttp.request(port, "GET", "/users/stale", List.of(), null);
+              if (stale.status() == 304 && stale.body().isEmpty() && stale.valuesOf("Content-Length").isEmpty()
+                  && stale.valuesOf("ETag").equals(List.of("\"7\""))) {
+                correct++;
+              } else {
+                record(failures, "304: " + stale.status() + " " + stale.fieldLines());
+              }
+
+              // 5. HEAD of the same resource: five bytes stated, zero bytes sent
+              RawHttp.Response head = RawHttp.request(port, "HEAD", "/doc", List.of(), null);
+              if (head.status() == 200 && head.body().isEmpty()
+                  && head.countOf("Content-Length") == 1
+                  && head.valuesOf("Content-Length").equals(List.of("5"))) {
+                correct++;
+              } else {
+                record(failures, "head: " + head.status() + " [" + head.body() + "] " + head.fieldLines());
+              }
+
+              // 6. GET of it: the same single length, plus the bytes
+              RawHttp.Response get = RawHttp.request(port, "GET", "/doc", List.of(), null);
+              if (get.status() == 200 && get.body().equals("hello")
+                  && get.countOf("Content-Length") == 1 && get.valuesOf("Content-Length").equals(List.of("5"))) {
+                correct++;
+              } else {
+                record(failures, "get: " + get.status() + " [" + get.body() + "] " + get.fieldLines());
+              }
+
+              // 7. 405 with Allow, and 404 without it — the two route-table answers must not trade fields
+              RawHttp.Response notAllowed = RawHttp.request(port, "DELETE", "/doc", List.of(), null);
+              if (notAllowed.status() == 405 && notAllowed.valuesOf("Allow").equals(List.of("GET, HEAD, POST"))) {
+                correct++;
+              } else {
+                record(failures, "405: " + notAllowed.status() + " " + notAllowed.fieldLines());
+              }
+              RawHttp.Response missing = RawHttp.request(port, "GET", "/nowhere" + index, List.of(), null);
+              if (missing.status() == 404 && missing.body().equals("Not Found")
+                  && missing.valuesOf("Allow").isEmpty()) {
+                correct++;
+              } else {
+                record(failures, "404: " + missing.status() + " [" + missing.body() + "]");
+              }
+
+              // 8. the asterisk, interleaved: answered by the server, and not by any of the handlers above
+              RawHttp.Response star = RawHttp.request(port, "OPTIONS", "*", List.of(), null);
+              if (star.status() == 404 && star.body().contains("No context found for request")) {
+                correct++;
+              } else {
+                record(failures, "star: " + star.status() + " [" + star.body() + "]");
+              }
+            } catch (IOException arrived) {
+              record(failures, "socket failure for " + marker + ": " + arrived);
+              return correct;
+            }
+          }
+          return correct;
+        }));
+      }
+
+      int answered = 0;
+      for (Future<Integer> future : futures) {
+        answered += future.get(120, TimeUnit.SECONDS);
+      }
+      clients.shutdown();
+      assertThat(clients.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+
+      assertThat(failures).isEmpty();
+      assertThat(answered).isEqualTo(threads * rounds * 9);
+      // Four GETs per round on this route, and none of them the asterisk: the handler count is the
+      // evidence that OPTIONS * polluted nothing, and that a 204 or a 304 did not swallow or duplicate a call.
+      assertThat(parametrizedCalls).hasValue(threads * rounds * 4);
+      assertThat(getCalls).hasValue(threads * rounds);
+      assertThat(headCalls).hasValue(threads * rounds);
+      assertThat(adapter.isRunning()).isTrue();
+    }
+  }
+
   private static synchronized void record(List<String> failures, String description) {
     if (failures.size() < 20) {
       // Capped, because a leak that fails 1600 assertions buries the first one.

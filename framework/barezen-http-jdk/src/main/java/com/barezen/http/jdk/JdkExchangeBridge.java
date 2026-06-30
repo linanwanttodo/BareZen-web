@@ -15,7 +15,7 @@ import java.util.Objects;
 /**
  * The translation between what {@code com.sun.net.httpserver} hands over and what the contract names, in both
  * directions: {@link #toRequest(HttpExchange)} reads an exchange into a {@link Request}, {@link #send(HttpExchange,
- * HttpMethod, Response)} writes a {@link Response} out of it.
+ * boolean, Response)} writes a {@link Response} out of it.
  *
  * <p>Package private on purpose. This is not an API an application calls; it is the JDK side of a boundary whose
  * <em>shape</em> is already public — {@link Request}'s and {@link Response}'s constructors. Making the bridge public
@@ -115,8 +115,8 @@ final class JdkExchangeBridge {
   /**
    * Write a response to an exchange, exactly once.
    *
-   * <p>The framing rules below are the JDK's, measured rather than assumed, and they are the reason this method exists
-   * instead of three lines in the caller (ADR-0022 §6):
+   * <p>The framing rules below are the JDK's, measured on JDK 17 and JDK 21 rather than assumed, and they are the reason
+   * this method exists instead of three lines in the caller (ADR-0022 §6, ADR-0027 §6):
    *
    * <ul>
    *   <li>{@code sendResponseHeaders(code, length)} with {@code length > 0} writes that exact {@code Content-Length}
@@ -126,37 +126,53 @@ final class JdkExchangeBridge {
    *   <li>{@code length == 0} means <em>chunked</em> to this JDK, not "empty body": a probed {@code 200} sent
    *       {@code Transfer-encoding: chunked} for it. So an empty body is declared as {@code -1}, which writes
    *       {@code Content-Length: 0} and no body, which is what a zero-length response is;
-   *   <li>for a {@code HEAD} request nothing is written at all, so {@code HEAD} declares {@code -1} too. The JDK
-   *       suppresses both the body and the {@code Content-Length} of a HEAD response whatever it is handed, and logs
-   *       {@code WARNING: being invoked with a content length for a HEAD request} when a positive length is declared;
-   *       writing the body anyway would produce exactly the bytes it then discards. A {@code HEAD} client therefore
-   *       cannot learn a representation's size through this adapter, which ADR-0022 §7 records as a limitation rather
-   *       than as working behaviour;
+   *   <li>{@code -1} means "no body follows" and, for a status that may carry one, writes {@code Content-Length: 0}. For
+   *       a {@code 1xx}, {@code 204} or {@code 304} the JDK writes no {@code Content-Length} at all, which is what those
+   *       statuses require;
+   *   <li><b>a {@code HEAD} response is the one case the declaration cannot express</b>, because HEAD needs the length of
+   *       the representation and none of its bytes. The JDK's {@code HEAD} branch suppresses the body and writes no
+   *       {@code Content-Length} of its own — and warns if a positive length was declared — so the length is written into
+   *       the response fields directly here, and {@code -1} is declared. Measured: the field reaches the client and the
+   *       body does not, which is exactly what HTTP asks of HEAD, and no server-side warning is logged. This is what
+   *       closes the limitation ADR-0022 §7 recorded; "no body" and "no length" are different statements, and a HEAD
+   *       needs the second one to be the length a GET would have sent;
    *   <li>field lines are added one per value, so two {@code Set-Cookie} values leave as two lines. The JDK canonicalizes
    *       and re-orders names on the way out, which is recorded with the same honesty as the request side
    *       (ADR-0022 §5, §6).
    * </ul>
    *
+   * <p><b>{@code Content-Length} and {@code Transfer-Encoding} are written here or not at all.</b> {@link Response}
+   * refuses both fields (ADR-0027 §5), which is what makes the single {@code Content-Length} on the wire this method's,
+   * derived from the array it was handed. The measured reason: on {@code HEAD} and {@code 304} the JDK never reaches the
+   * line that writes its declared length, so a handler-set field was the only one sent — and on {@code 204} a
+   * handler-set {@code Content-Length} made {@code java.net.http.HttpClient} fail the response outright.
+   *
    * @param exchange the exchange to answer
-   * @param writeBody whether the body goes on the wire — {@code false} for a {@code HEAD} request, which the caller
+   * @param writesBody whether the body goes on the wire — {@code false} for a {@code HEAD} request, which the caller
    *     decides because {@code Response} documents that the adapter owns that rule (ADR-0018 §3)
    * @param response what the handler returned, never null
    * @throws IOException if bytes did not reach the client. A failure after the status line was written leaves the
    *     response committed, and the caller must not attempt a second status (ADR-0023 §6)
    */
-  static void send(HttpExchange exchange, boolean writeBody, Response response) throws IOException {
+  static void send(HttpExchange exchange, boolean writesBody, Response response) throws IOException {
     Objects.requireNonNull(exchange, "the exchange to answer");
     Objects.requireNonNull(response, "the response to write; with none there is no status to send");
     byte[] body = response.body();
-    int declared = (writeBody && body.length > 0) ? body.length : -1;
+    boolean statusCarriesABody = mayCarryABody(response.status());
+    int declared = (writesBody && statusCarriesABody && body.length > 0) ? body.length : -1;
     com.sun.net.httpserver.Headers outgoing = exchange.getResponseHeaders();
     for (String name : response.headers().names()) {
       for (String value : response.headers().values(name)) {
         outgoing.add(name, value);
       }
     }
+    if (!writesBody && statusCarriesABody) {
+      // The representation's length, stated without its bytes: HEAD's definition. Written after the handler's fields
+      // because a handler cannot supply this name at all — Response refuses it — so set() has nothing to replace.
+      outgoing.set("Content-Length", Integer.toString(body.length));
+    }
     exchange.sendResponseHeaders(response.status(), declared);
-    if (!writeBody || body.length == 0) {
+    if (!writesBody || body.length == 0) {
       // Nothing to commit beyond the header block. Closing is left to the caller's finally so that both this path and
       // the throwing one release the exchange exactly once (ADR-0022 §6).
       return;
@@ -164,6 +180,20 @@ final class JdkExchangeBridge {
     try (OutputStream out = exchange.getResponseBody()) {
       out.write(body);
     }
+  }
+
+  /**
+   * Whether HTTP allows a body on this status, which is the same set of codes {@link Response} enforces.
+   *
+   * <p>Duplicated rather than exposed, deliberately: {@code Response} owns "you may not hand me bytes for a 204" and this
+   * module owns "nothing gets written for a 204", and making the second rule read the first would put a wire decision in
+   * the contract or a contract rule in the adapter. The two lists are pinned to each other by tests on both sides —
+   * {@code refusesEveryStatusThatCarriesNoBodyWhenBytesWereGiven} in the contract, and
+   * {@code aTwoOhFourIsWrittenWithNoBodyAndNoLength} beside {@code aHeadOfATwoOhFourStatesNoLength} here
+   * (ADR-0027 §4, §9).
+   */
+  private static boolean mayCarryABody(int status) {
+    return !(status >= 100 && status < 200) && status != 204 && status != 304;
   }
 
   /**
