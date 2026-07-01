@@ -365,11 +365,14 @@ executor it created and leave a borrowed provider running (ADR-0021 §5, ADR-002
 port; `stop()` is idempotent, never throws and waits the JDK's own 3 seconds for in-flight exchanges rather than sleeping
 (ADR-0024 §5, §6). The exchange bridge hands the contract what the wire actually said — `getRawPath()` never
 `getPath()`, `getRawQuery()` with absent kept distinct from empty, the body read fully into a `byte[]` and closed — so
-`/users/a%2Fb` stays one segment and `/users/%2e%2e/admin` is never normalized (ADR-0022 §2–§4). Two honest limitations
-are asserted as tests rather than glossed: `com.sun.net.httpserver.Headers` canonicalizes field names
+`/users/a%2Fb` stays one segment and `/users/%2e%2e/admin` is never normalized (ADR-0022 §2–§4). Two measured JDK
+facts shape what the adapter promises: `com.sun.net.httpserver.Headers` canonicalizes field names
 (`X-MixedCase` arrives as `X-mixedcase`) and is hash-backed, so arrival order is gone before the bridge reads it
-(ADR-0022 §5); and a method token that is not the exact uppercase `HEAD` is not a HEAD request to the JDK, so it gets a
-`Content-length: 0` where `HEAD` gets the representation's length (ADR-0027 §9). Errors are responses: 404 names no path,
+(ADR-0022 §5); and the JDK reads a request method case-sensitively while the contract folds the nine standard names,
+so HEAD suppression keys on the exact raw token the server itself compares — `HEAD` gets HEAD's response (fields, the
+representation's length, no bytes) and a spelling like `head` gets the ordinary response its representation has, which
+is the intentional boundary ADR-0028 records in place of the false `Content-length: 0` ADR-0027 §9 had measured.
+Errors are responses: 404 names no path,
 405 carries a stable adapter-local `Allow`, a handler's `RuntimeException` is logged with its throwable and answered with
 `Internal Server Error` alone, a target the contract refuses or a body that stops arriving is a 400 before anything is
 committed, and a write that fails after the status line is logged once at DEBUG and never answered with a second status
