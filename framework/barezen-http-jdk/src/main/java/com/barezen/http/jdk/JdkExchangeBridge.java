@@ -135,7 +135,10 @@ final class JdkExchangeBridge {
    *       the response fields directly here, and {@code -1} is declared. Measured: the field reaches the client and the
    *       body does not, which is exactly what HTTP asks of HEAD, and no server-side warning is logged. This is what
    *       closes the limitation ADR-0022 §7 recorded; "no body" and "no length" are different statements, and a HEAD
-   *       needs the second one to be the length a GET would have sent;
+   *       needs the second one to be the length a GET would have sent. The branch is entered by the raw token only
+   *       ({@code ExchangeImpl.isHeadRequest()} is {@code "HEAD".equals(method)}), which is why the caller compares the
+   *       same token the same way rather than the case-folded {@code HttpMethod} — see
+   *       {@link JdkRequestDispatcher} and ADR-0028;
    *   <li>field lines are added one per value, so two {@code Set-Cookie} values leave as two lines. The JDK canonicalizes
    *       and re-orders names on the way out, which is recorded with the same honesty as the request side
    *       (ADR-0022 §5, §6).

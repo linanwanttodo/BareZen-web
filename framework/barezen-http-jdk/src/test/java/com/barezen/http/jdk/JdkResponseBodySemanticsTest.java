@@ -438,13 +438,16 @@ class JdkResponseBodySemanticsTest {
     }
 
     @Test
-    void aMethodTokenThatIsNotTheUpperCaseHeadIsNotAHeadRequestToTheJdk() throws IOException {
-      // Measured asymmetry, recorded rather than papered over. HttpMethod.of() folds the case of the nine known methods,
-      // so a client sending "head" reaches this dispatcher as HEAD and the contract-side decision (no bytes, derived
-      // length) applies. The JDK's own isHeadRequest() compares "HEAD".equals(method) exactly, so it takes neither
-      // branch and the length the adapter wrote gets replaced by the one the server computes for itself. The observable
-      // result: same status, same handler, and a different framing field. ADR-0027 §9 records this as a limit of the JDK
-      // server rather than a behaviour an application should build on.
+    void aMethodTokenThatIsNotTheUpperCaseHeadIsAnOrdinaryRequestOnTheWire() throws IOException {
+      // The commitment ADR-0028 §Decision records, measured rather than assumed. HttpMethod.of() folds the case of the
+      // nine known methods, so a client sending "head" reaches this dispatcher as HttpMethod.HEAD and its HEAD handler
+      // runs — routing does not depend on case. The framing does: the JDK's isHeadRequest() compares "HEAD".equals(method)
+      // exactly, so it treats a lowercase token as an ordinary request and computes its own length for a body it will
+      // send. Judging suppression from the folded value while the server judges it from the token lets the two disagree,
+      // and the server wins — which is the false "Content-length: 0" ADR-0027 §9 recorded as a limitation. This adapter
+      // now compares the same raw token the server compares, so suppression and framing cannot diverge: a token that is
+      // not exactly HEAD gets the body its representation has, with a true length. The three non-exact spellings below are
+      // identical to a GET; only the exact "HEAD" suppresses bytes.
       AtomicInteger calls = new AtomicInteger();
       Router router = Router.builder()
           .route(HttpMethod.HEAD, "/doc", (request, parameters) -> {
@@ -457,16 +460,24 @@ class JdkResponseBodySemanticsTest {
 
         RawHttp.Response uppercase = RawHttp.request(port, "HEAD", "/doc", List.of(), null);
         RawHttp.Response lowercase = RawHttp.request(port, "head", "/doc", List.of(), null);
+        RawHttp.Response mixed = RawHttp.request(port, "Head", "/doc", List.of(), null);
 
-        assertThat(calls.get()).isEqualTo(2);
+        // All three run the HEAD handler once each: the route table sees HttpMethod.HEAD regardless of case.
+        assertThat(calls.get()).isEqualTo(3);
+        // The exact token is the only HEAD response: fields plus the representation's length, and no bytes.
         assertThat(uppercase.status()).isEqualTo(200);
-        assertThat(uppercase.body()).isEmpty();
+        assertThat(uppercase.firstOf("Content-Type")).isEqualTo("text/plain");
         assertThat(uppercase.valuesOf("Content-Length")).containsExactly("5");
-        // The exact comparison, from ExchangeImpl.isHeadRequest(), quoted here as the cause of the difference.
-        assertThat(lowercase.status()).isEqualTo(200);
-        assertThat(lowercase.countOf("Content-Length")).isEqualTo(1);
-        assertThat(lowercase.valuesOf("Content-Length")).isNotEqualTo(uppercase.valuesOf("Content-Length"));
-        assertThat(lowercase.body()).isEmpty();
+        assertThat(uppercase.body()).isEmpty();
+        // A non-exact token is the ordinary request the server already treats it as: same status, same fields, the true
+        // length, and the bytes a GET would have gotten. The length stays truthful rather than collapsing to a false zero.
+        for (RawHttp.Response answer : List.of(lowercase, mixed)) {
+          assertThat(answer.status()).isEqualTo(200);
+          assertThat(answer.firstOf("Content-Type")).isEqualTo("text/plain");
+          assertThat(answer.countOf("Content-Length")).isEqualTo(1);
+          assertThat(answer.valuesOf("Content-Length")).containsExactly("5");
+          assertThat(answer.body()).isEqualTo("hello");
+        }
       }
     }
   }

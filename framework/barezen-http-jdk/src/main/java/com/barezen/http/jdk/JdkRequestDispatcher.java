@@ -126,11 +126,11 @@ final class JdkRequestDispatcher implements HttpHandler {
       return JdkExchangeBridge.toRequest(exchange);
     } catch (IllegalArgumentException unusableTarget) {
       log.debug("refusing a request target the contract cannot name: {}", unusableTarget.getMessage());
-      respond(exchange, true, JdkExchangeBridge.badRequest());
+      respond(exchange, writesBody(exchange), JdkExchangeBridge.badRequest());
       return null;
     } catch (IOException bodyNeverArrived) {
       log.debug("the request body did not arrive: {}", bodyNeverArrived.getMessage());
-      respond(exchange, true, JdkExchangeBridge.badRequest());
+      respond(exchange, writesBody(exchange), JdkExchangeBridge.badRequest());
       return null;
     }
   }
@@ -156,7 +156,7 @@ final class JdkRequestDispatcher implements HttpHandler {
       // The second question is what separates "nothing here" from "not this way", and the route table already answers
       // both — which is why the adapter asks it twice rather than carrying a richer match type (ADR-0019 §10).
       Set<HttpMethod> allowed = router.methodsFor(request.path());
-      respond(exchange, writesBody(request), allowed.isEmpty()
+      respond(exchange, writesBody(exchange), allowed.isEmpty()
           ? JdkExchangeBridge.notFound()
           : JdkExchangeBridge.methodNotAllowed(allowValue(allowed)));
       return;
@@ -171,7 +171,7 @@ final class JdkRequestDispatcher implements HttpHandler {
       log.error("handler failed for {} {}", request.method().text(), request.path(), handlerFailure);
       response = JdkExchangeBridge.internalServerError();
     }
-    respond(exchange, writesBody(request), response);
+    respond(exchange, writesBody(exchange), response);
   }
 
   /**
@@ -208,9 +208,24 @@ final class JdkRequestDispatcher implements HttpHandler {
    * <p>{@code HEAD} is the only method with an answer here: HTTP says the response carries the fields a GET would have
    * produced and no body, and {@link Response} deliberately has no {@code noBody()} to say so — the decision belongs to
    * the adapter, which is the component that holds the method (ADR-0018 §3, ADR-0022 §7).
+   *
+   * <p><b>The test is the raw token, exactly upper-cased, and not {@code request.method()}.</b> The contract folds case
+   * for the nine standard names, so {@code head} arrives here as {@code HttpMethod.HEAD} and routes to the HEAD handler.
+   * The JDK does not fold: {@code ExchangeImpl.isHeadRequest()} is {@code "HEAD".equals(method)}, and that is the
+   * comparison that decides whether the server suppresses the body and whether it writes a length of its own. Judging
+   * the suppression from the contract value while the server judges it from the token leaves two components disagreeing
+   * about one response, and the server wins: measured on JDK 17 and JDK 21, {@code head /doc} kept the handler's fields
+   * and got {@code Content-length: 0} — the number the server computed for a body it had decided to send — written over
+   * the {@code 5} this adapter had derived. A client and any cache in front of it then believe the representation is
+   * empty, which is a worse answer than the one the previous paragraph's rule produces.
+   *
+   * <p>Using the same comparison the server uses removes the disagreement, and what it commits to is stated plainly: a
+   * token that is not exactly {@code HEAD} is treated on the wire as the ordinary request it is, so it gets the body a
+   * GET would have gotten, and the representation's length stays true (ADR-0028 §Decision). The route table still sees
+   * {@code HttpMethod.HEAD}, so which handler runs is unaffected by case; only the bytes follow the token.
    */
-  private static boolean writesBody(Request request) {
-    return !request.method().equals(HttpMethod.HEAD);
+  private static boolean writesBody(HttpExchange exchange) {
+    return !"HEAD".equals(exchange.getRequestMethod());
   }
 
   /**
