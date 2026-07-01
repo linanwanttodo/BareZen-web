@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
  * application that wants to change what a {@code 404} looks like wraps a {@link Handler}, not this class, and an
  * application that wants a different error policy is the reason a second adapter can exist (ADR-0023 §8).
  *
- * <p><b>The five answers, and who decides each:</b>
+ * <p><b>The six answers, and who decides each:</b>
  *
  * <ul>
  *   <li><b>200..599 from a handler</b> — written as returned;
@@ -40,7 +40,12 @@ import org.slf4j.LoggerFactory;
  *       developer reads it, and not to the socket, where a client would (ADR-0023 §4);
  *   <li><b>400</b> — the exchange reached this handler but no {@link Request} could be built from it: the target is one
  *       the contract refuses, or the body never arrived. Both are the client's failure, and answering either with
- *       {@code 500} would blame the server for a request it never parsed (ADR-0023 §5, §6).
+ *       {@code 500} would blame the server for a request it never parsed (ADR-0023 §5, §6);
+ *   <li><b>413</b> — the exchange reached this handler but its content is more than the configured limit allows,
+ *       claimed by a {@code Content-Length} or counted past the bound. The answer names the limit rather than the
+ *       path, and nothing closes before it is written: the surplus is left unread and this method's {@code finally}
+ *       releases the exchange afterwards, which is where the JDK's own leftover-recovery rule runs — so the surplus
+ *       is never parsed as the next request (ADR-0031 §Decision).
  * </ul>
  *
  * <p><b>Commitment, which is why the catch blocks below are asymmetric.</b> Once a status line has been written the
@@ -85,10 +90,13 @@ final class JdkRequestDispatcher implements HttpHandler {
       HttpMethod.PUT, HttpMethod.DELETE, HttpMethod.CONNECT, HttpMethod.OPTIONS, HttpMethod.TRACE, HttpMethod.PATCH);
 
   private final Router router;
+  private final BodyLimit bodyLimit;
 
-  JdkRequestDispatcher(Router router) {
+  JdkRequestDispatcher(Router router, BodyLimit bodyLimit) {
     this.router = Objects.requireNonNull(router, "the route table to dispatch from; a dispatcher with no routes has"
         + " nothing to report but a 404");
+    this.bodyLimit = Objects.requireNonNull(bodyLimit, "the request-body limit; a dispatcher that reads a body"
+        + " without a bound is the shape ADR-0031 exists to remove");
   }
 
   /**
@@ -115,15 +123,23 @@ final class JdkRequestDispatcher implements HttpHandler {
   /**
    * The request, or {@code null} after its failure has been answered.
    *
-   * <p>Two failures are possible and both are the client's, which is why neither becomes a 500. {@link Request}'s own
-   * validation refuses a target that is not a path — reachable on a real socket as a bare {@code %2F}, which the JDK
-   * hands over as a raw path with no leading slash, probed and recorded in ADR-0022 §2 — and a body that stops arriving
-   * throws {@code IOException} out of the read. Both happen before anything was written, so a status is still available
+   * <p>Three failures are possible and all three are the client's, which is why none becomes a 500. {@link Request}'s
+   * own validation refuses a target that is not a path — reachable on a real socket as a bare {@code %2F}, which the
+   * JDK hands over as a raw path with no leading slash, probed and recorded in ADR-0022 §2 — a body that stops
+   * arriving throws {@code IOException} out of the read, and content past the limit throws
+   * {@link BodyLimit.Exceeded} — unchecked, so the {@code IOException} catch cannot fold it into a 400 — out of the
+   * bounded read (ADR-0031 §Decision 3). All three happen before anything was written, so a status is still available
    * to send.
    */
   private Request read(HttpExchange exchange) {
     try {
-      return JdkExchangeBridge.toRequest(exchange);
+      return JdkExchangeBridge.toRequest(exchange, bodyLimit);
+    } catch (BodyLimit.Exceeded contentTooLarge) {
+      // Logged at debug rather than error: a limit is a policy, and meeting it is the client's doing. The message
+      // carries the limit and the framing — a declared length or a counted overflow — and names no path.
+      log.debug("refusing a request body over the limit: {}", contentTooLarge.getMessage());
+      respond(exchange, writesBody(exchange), JdkExchangeBridge.contentTooLarge());
+      return null;
     } catch (IllegalArgumentException unusableTarget) {
       log.debug("refusing a request target the contract cannot name: {}", unusableTarget.getMessage());
       respond(exchange, writesBody(exchange), JdkExchangeBridge.badRequest());
@@ -138,7 +154,7 @@ final class JdkRequestDispatcher implements HttpHandler {
   /**
    * Route, dispatch, write.
    *
-   * <p>Every status this method can produce is one of the five in the class documentation, and each is written exactly
+   * <p>Every status this method can produce is one of the six in the class documentation, and each is written exactly
    * once: {@link JdkExchangeBridge#send} is the commitment point, so a failure at or after it is logged rather than
    * answered.
    *

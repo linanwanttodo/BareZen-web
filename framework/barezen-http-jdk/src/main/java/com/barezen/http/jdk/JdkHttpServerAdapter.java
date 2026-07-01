@@ -3,6 +3,7 @@ package com.barezen.http.jdk;
 import com.barezen.core.concurrent.ThreadPolicy;
 import com.barezen.core.concurrent.ThreadProvider;
 import com.barezen.core.concurrent.ThreadProviders;
+import com.barezen.core.config.Configuration;
 import com.barezen.core.runtime.RuntimeCapabilities;
 import com.barezen.web.HttpServerAdapter;
 import com.barezen.web.Router;
@@ -19,7 +20,7 @@ import org.slf4j.LoggerFactory;
  * An {@link HttpServerAdapter} on {@code com.sun.net.httpserver} — the JDK's own HTTP server, which is why this module
  * exists and why nothing else in the framework is allowed to name that package (ADR-0021).
  *
- * <p>The adapter owns exactly four things and disowns everything else:
+ * <p>The adapter owns exactly five things and disowns everything else:
  *
  * <ul>
  *   <li><b>the {@code HttpServer}.</b> Created here, stopped here, never handed out. There is no {@code server()}
@@ -33,8 +34,11 @@ import org.slf4j.LoggerFactory;
  *       it created and never closes one it was handed: <em>whoever created it, owns it</em>, and a borrowed provider
  *       has other work running on it (ADR-0011, ADR-0024 §4);
  *   <li><b>the routing decision's HTTP consequences.</b> {@link Router} answers which handler and with what
- *       parameters; {@code 404}, {@code 405}, {@code 400} and {@code 500} are written here, because the component that
- *       writes bytes is the component that has to choose a status (ADR-0019 §10, ADR-0023 §1).
+ *       parameters; {@code 404}, {@code 405}, {@code 400}, {@code 413} and {@code 500} are written here, because the
+ *       component that writes bytes is the component that has to choose a status (ADR-0019 §10, ADR-0023 §1);
+ *   <li><b>the request-body limit.</b> Resolved once, at construction, from the configuration snapshot an application
+ *       hands this adapter — or from the key's own default when none is handed — and enforced by the bounded read on
+ *       the request path (ADR-0031 §Decision).
  * </ul>
  *
  * <p><b>One instance, one lifecycle.</b> {@code NEW → RUNNING → STOPPED}, with no path back: a second {@link #start()}
@@ -77,6 +81,7 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
   private final InetSocketAddress address;
   private final Router router;
   private final ThreadProvider threads;
+  private final BodyLimit bodyLimit;
 
   /** {@code true} when this adapter built {@link #threads} and therefore owns the executors created from it. */
   private final boolean ownsThreadProvider;
@@ -87,11 +92,14 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
   private HttpServer server;
 
   /**
-   * A server with its own threads.
+   * A server with its own threads, unconfigured.
    *
    * <p>The thread provider is created here with {@link ThreadPolicy#AUTO} and closed by {@link #stop()}, so an
    * application that never starts an adapter holds nothing back: creating the provider starts no threads, and
-   * {@code ThreadProviders} only resolves a capability it has already detected (ADR-0002).
+   * {@code ThreadProviders} only resolves a capability it has already detected (ADR-0002). The request-body limit
+   * resolves through the existing configuration layer to the key's declared default, which is the secure value —
+   * an adapter built without a snapshot is an <em>unconfigured</em> one, never an <em>unbounded</em> one (ADR-0031
+   * §Decision).
    *
    * @param address the host and port to bind; port {@code 0} asks the operating system for an ephemeral port, which
    *     {@link #port()} then reports
@@ -100,11 +108,11 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
    */
   public JdkHttpServerAdapter(InetSocketAddress address, Router router) {
     this(address, router, ThreadProviders.create(ThreadPolicy.AUTO, RuntimeCapabilities.detect(),
-        ThreadProviders.DEFAULT_CLOSE_TIMEOUT), true);
+        ThreadProviders.DEFAULT_CLOSE_TIMEOUT), true, BodyLimit.unconfigured());
   }
 
   /**
-   * A server that runs its requests on somebody else's threads.
+   * A server that runs its requests on somebody else's threads, unconfigured.
    *
    * <p>The provider is <em>borrowed</em>: this adapter creates one executor from it and never closes either, because
    * the executors a provider hands out belong to it (ADR-0011) and the provider itself belongs to whoever built it. A
@@ -116,11 +124,33 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
    * @throws NullPointerException if any argument is null
    */
   public JdkHttpServerAdapter(InetSocketAddress address, Router router, ThreadProvider threads) {
-    this(address, router, threads, false);
+    this(address, router, threads, false, BodyLimit.unconfigured());
+  }
+
+  /**
+   * A server with its own threads, configured from a resolved snapshot — the one constructor that reads
+   * {@code barezen.http.jdk.maxRequestBodyBytes}.
+   *
+   * <p>Configuration arrives resolved rather than read here, which is ADR-0013's rule (configuration is resolved at
+   * assembly time) applied to an adapter, and the reason this module passes ArchUnit's ban on reading
+   * {@code java.lang.System}: an adapter is configured by the arguments it is constructed with (ADR-0021 §23). The
+   * bad-value failure lands at construction, naming the key, the value and the source — before a port is bound, so a
+   * misconfigured limit is a startup error rather than a runtime surprise.
+   *
+   * @param address the host and port to bind, port {@code 0} for an ephemeral one
+   * @param router the route table to dispatch with, never null, never mutated
+   * @param configuration the resolved snapshot this adapter reads its HTTP options from, never null; a snapshot
+   *     without the body-limit key is legal and takes the key's default (ADR-0031 §Decision)
+   * @throws NullPointerException if any argument is null
+   * @throws com.barezen.core.error.ConfigurationException if the key is present but not a valid number
+   */
+  public JdkHttpServerAdapter(InetSocketAddress address, Router router, Configuration configuration) {
+    this(address, router, ThreadProviders.create(ThreadPolicy.AUTO, RuntimeCapabilities.detect(),
+        ThreadProviders.DEFAULT_CLOSE_TIMEOUT), true, BodyLimit.from(configuration));
   }
 
   private JdkHttpServerAdapter(InetSocketAddress address, Router router, ThreadProvider threads,
-                               boolean ownsThreadProvider) {
+                               boolean ownsThreadProvider, BodyLimit bodyLimit) {
     this.address = Objects.requireNonNull(address,
         "the address to bind; a server with nowhere to listen cannot be started");
     this.router = Objects.requireNonNull(router,
@@ -129,6 +159,8 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
     this.threads = Objects.requireNonNull(threads,
         "the thread provider; requests have to run on somebody's threads, and the somebody has to be named");
     this.ownsThreadProvider = ownsThreadProvider;
+    this.bodyLimit = Objects.requireNonNull(bodyLimit,
+        "the request-body limit; an adapter that reads a body without a bound is the shape ADR-0031 removes");
   }
 
   /**
@@ -158,7 +190,7 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
         // wherever ADR-0024 §4 puts it: with this adapter when it built the provider, with the provider's owner when
         // it did not.
         created.setExecutor(threads.newUnboundedExecutor("barezen-http-jdk"));
-        created.createContext("/", new JdkRequestDispatcher(router));
+        created.createContext("/", new JdkRequestDispatcher(router, bodyLimit));
         created.start();
       } catch (IOException | RuntimeException startupFailure) {
         if (created != null) {

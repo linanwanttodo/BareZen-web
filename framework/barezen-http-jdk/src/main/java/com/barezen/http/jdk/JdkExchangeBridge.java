@@ -6,10 +6,10 @@ import com.barezen.web.Request;
 import com.barezen.web.Response;
 import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -35,41 +35,50 @@ import java.util.Objects;
  *       {@code /x?} and {@code null} for {@code /x}, which is the same absent-versus-empty distinction
  *       {@link Request#query()} keeps as an {@code Optional}; parsing it into a map would be a Query API nobody has
  *       asked for (ADR-0018 §2, ADR-0022 §4);
- *   <li><b>the body is read fully and the stream is closed.</b> {@link Request} holds a {@code byte[]}, so the whole
- *       body is in memory — the cost ADR-0018 §7 accepted deliberately. Closing is not optional: an exchange whose
- *       request body was not drained is a connection the JDK has to recover from;
+ *   <li><b>the body is read fully, bounded by the request-body limit.</b> {@link Request}
+ *       holds a {@code byte[]}, so the whole body is in memory — the cost ADR-0018 §7 accepted, with the bound
+ *       ADR-0031 §Decision added: a declared {@code Content-Length} above the limit is refused on the claim, before
+ *       the counting read, and a body of unknown length is refused at the first byte past it. Neither refusal closes
+ *       anything here: the answer goes to the client first and the exchange is released by the dispatcher's
+ *       {@code finally}, which is what lets the JDK's own drain-or-close recovery run <em>after</em> the 413 rather
+ *       than before it ({@link #readBody});
  *   <li><b>a target the contract refuses becomes {@code IllegalArgumentException}, not {@code 500}.</b> The client sent
  *       something unparseable; answering that with a server-failure status would blame the wrong party
  *       (ADR-0023 §5, §6).
  * </ul>
  *
  * <p>What this bridge does <em>not</em> do: decode, normalize, resolve a dot-segment, lowercase, redirect a trailing
- * slash, split a cookie, read {@code Forwarded}, or reject a body size. The first five would change what the client
- * asked for; the last two are policies with no consumer in this phase, and a body-size limit is recorded as the phase's
- * design debt rather than invented here (ADR-0022 §8, ADR-0023 §7).
+ * slash, split a cookie, or read {@code Forwarded}. The first five would change what the client asked for, and the last
+ * two are policies with no consumer in this phase. The body-size limit it does enforce is not an invented policy: it is
+ * the phase's formal decision, with the configuration key, the default, and the refusal status in ADR-0031.
  */
 final class JdkExchangeBridge {
 
-  /** The status-line text of the four answers this adapter can produce without an application. */
+  /** The status-line text of the five answers this adapter can produce without an application. */
   private static final String BAD_REQUEST = "Bad Request";
   private static final String NOT_FOUND = "Not Found";
   private static final String METHOD_NOT_ALLOWED = "Method Not Allowed";
+  private static final String CONTENT_TOO_LARGE = "Content Too Large";
   private static final String INTERNAL_SERVER_ERROR = "Internal Server Error";
 
   private JdkExchangeBridge() {}
 
   /**
-   * The request an exchange carries, in the form {@link Request} documents.
+   * The request an exchange carries, in the form {@link Request} documents, read under {@code limit}.
    *
    * @param exchange the JDK exchange, already parsed by the JDK's own HTTP parser
+   * @param limit the request-body ceiling enforced on the way in (ADR-0031 §Decision)
    * @return the contract's request, never null
+   * @throws BodyLimit.Exceeded if the content is over the limit — refused on a declared {@code Content-Length} before
+   *     the counting read, or at the first byte past the bound when the length was never declared; unchecked on purpose
+   *     so that the {@code IOException} catch below cannot fold it into a 400
    * @throws IOException if the client's body did not arrive — a truncated or aborted request, which is the client's
    *     failure and must be answered as one (ADR-0023 §6)
    * @throws IllegalArgumentException if the target is not a path this contract can name, thrown by {@link Request}
    *     itself rather than re-implemented here
    * @throws NullPointerException if {@code exchange} is null
    */
-  static Request toRequest(HttpExchange exchange) throws IOException {
+  static Request toRequest(HttpExchange exchange, BodyLimit limit) throws IOException {
     Objects.requireNonNull(exchange, "the exchange to read; with none there is no request to build");
     HttpMethod method = HttpMethod.of(exchange.getRequestMethod());
     URI target = exchange.getRequestURI();
@@ -82,8 +91,42 @@ final class JdkExchangeBridge {
           + " name either a path beginning with \"/\" or an absolute-form URI");
     }
     Headers headers = toHeaders(exchange.getRequestHeaders());
-    byte[] body = readBody(exchange);
+    long declared = declaredLength(headers);
+    if (declared > limit.bytes()) {
+      // Refused on the claim, before the counting read and before this module touches the stream at all. That
+      // ordering is the response's, not just the bytes': the server materializes the request stream before a handler
+      // exists ({@code ServerImpl.java:899} on JDK 17, {@code :903} on JDK 21), so nothing is saved by opening it
+      // here — and closing a stream whose surplus has not arrived makes the JDK's leftover drain block BEFORE the
+      // answer is written, measured: a huge claim plus five stalled bytes answered nothing for nine seconds, while
+      // the same claim refused from outside the stream answered 413 in four milliseconds (ADR-0031 §Decision 4).
+      throw new BodyLimit.Exceeded(limit.bytes(), "declared Content-Length of " + declared);
+    }
+    byte[] body = readBody(exchange, limit);
     return new Request(method, rawPath, target.getRawQuery(), headers, body);
+  }
+
+  /**
+   * The {@code Content-Length} the client declared, or {@code -1} when the length is not a usable declared number.
+   *
+   * <p>{@code -1} is the conservative answer, chosen to match what the JDK does with the same value rather than to
+   * invent a fourth state: a declared length that this module cannot parse ({@code abc}, {@code +5}, a value past
+   * {@code Long}) never reaches an exchange at all — the JDK's parser answers it with a 400 of its own before a
+   * handler exists, measured on both JDKs ({@code ServerImpl.java:824-833}, ADR-0023 §7) — and an absent field is the
+   * chunked case, where the bounded counting read below is the enforcement. So of the values this line can return,
+   * the ones that can be refused early are refused early and the ones that can't are counted. A
+   * {@code Content-Length}/{@code Transfer-Encoding} pair — the one shape where the declared number would be a lie —
+   * is likewise refused by the parser before this method runs ({@code ServerImpl.java:797-801}).
+   */
+  private static long declaredLength(Headers headers) {
+    List<String> values = headers.values("Content-Length");
+    if (values.size() != 1) {
+      return -1;
+    }
+    try {
+      return Long.parseLong(values.get(0).trim());
+    } catch (NumberFormatException unreadable) {
+      return -1;
+    }
   }
 
   /**
@@ -247,15 +290,34 @@ final class JdkExchangeBridge {
   }
 
   /**
-   * The whole body, then close.
-   *
-   * <p>Tries-with-resources rather than {@code readAllBytes()} on the raw stream: the contract says a request is a
-   * complete value, and the JDK says an exchange whose body was not drained is finished by closing it — doing both
-   * leaves nothing for the JDK's recovery path to handle.
+   * @return the answer to content over the limit — the status text and nothing else. RFC 9110 §15.5.14 names the
+   *     status Content Too Large, which is what this body says; the status line carries the JDK's own reason phrase,
+   *     {@code Request Entity Too Large}, for the same reason 404/405/500 carry theirs — the status line is the
+   *     server's, and a framework that rewrote it would be editing an answer it does not own (ADR-0023 §2, §4;
+   *     ADR-0031 §Decision 3).
    */
-  private static byte[] readBody(HttpExchange exchange) throws IOException {
-    try (InputStream body = exchange.getRequestBody()) {
-      return body.readAllBytes();
-    }
+  static Response contentTooLarge() {
+    return statusOnly(413, CONTENT_TOO_LARGE);
+  }
+
+  /**
+   * The whole body within the limit, or the counting refusal — and no {@code close()} here, deliberately.
+   *
+   * <p>No {@code readAllBytes()}: the contract says a request is a complete value, and the limit says a complete value
+   * has a size (ADR-0031 §Decision). No try-with-resources either, which is a timing fact rather than a style choice:
+   * closing a body stream whose surplus has not arrived runs the JDK's leftover drain
+   * ({@code LeftOverInputStream.close()} → {@code drain(drainAmount)}), and a drain on a stalled client blocks — so a
+   * refusal closed here would stall <em>before its own 413 was written</em>, measured as nine silent seconds against
+   * four milliseconds when the answer goes first. The release point is the dispatcher's {@code finally} on
+   * {@code exchange.close()}, which every path reaches after the answer has been written; the drain's rules then work
+   * on the JDK's terms — at most {@code drainAmount} (64 KiB) absorbed, connection kept if the body ends inside that,
+   * closed otherwise ({@code ServerImpl.java:456-462}) — and the surplus is never parsed as the next request, which
+   * is the only desynchronization this path could have caused.
+   *
+   * <p>The declared-length refusal is not here either: {@link #toRequest} judges the claim before this method is
+   * reached, so a client that announces 64 MiB is refused without this module reading or allocating a byte of it.
+   */
+  private static byte[] readBody(HttpExchange exchange, BodyLimit limit) throws IOException {
+    return BodyLimit.readBounded(exchange.getRequestBody(), limit.bytes());
   }
 }
