@@ -603,6 +603,70 @@ class JdkResponseBodySemanticsTest {
   }
 
   /**
+   * The directive §E.1 table asserted as one table, from the shipped adapter's socket, both JDKs.
+   *
+   * <p>Every row elsewhere in this file is one shape; a reader checking "does the implementation match the matrix" should
+   * not have to assemble the answer from seven nested classes. The columns are exactly §E.1's: the status, what the body
+   * was, the {@code Content-Length} the wire carries, and {@code Transfer-Encoding}, which is absent in every row because
+   * this adapter never chunks a response it can count (§E.4).
+   */
+  @Nested
+  @DisplayName("§E.1: the final framing matrix in one socket run")
+  class FramingMatrix {
+
+    /** One row: what was answered, what the wire says about it. */
+    private record Row(String label, int status, String lengthField, String body) {}
+
+    @Test
+    void everyMatrixRowArrivesAsItsRowDefines() throws IOException {
+      Router router = Router.builder()
+          .route(HttpMethod.GET, "/empty", (request, parameters) -> new Response(200, Headers.empty(), new byte[0]))
+          .route(HttpMethod.GET, "/full", (request, parameters) -> new Response(200, Headers.empty(), HELLO))
+          .route(HttpMethod.GET, "/n204", (request, parameters) -> new Response(204, Headers.empty(), null))
+          .route(HttpMethod.GET, "/n304", (request, parameters) -> new Response(304, Headers.of("ETag", "\"7\""), null))
+          .route(HttpMethod.GET, "/boom", (request, parameters) -> {
+            throw new IllegalStateException("the handler failed");
+          })
+          .route(HttpMethod.HEAD, "/full", (request, parameters) -> new Response(200, Headers.empty(), HELLO))
+          .build();
+      try (JdkHttpServerAdapter adapter = on(router)) {
+        int port = start(adapter);
+
+        List<Row> expected = List.of(
+            new Row("200 empty", 200, "0", ""),
+            new Row("200 non-empty", 200, "5", "hello"),
+            new Row("204", 204, null, ""),
+            // §E.1 leaves this cell to the final Stage-D decision, and the decision is D1 (ADR-0029): a 304 through this
+            // framework carries no Content-Length, because the only value the adapter could write is one a handler
+            // asserted without any bytes to verify.
+            new Row("304", 304, null, ""),
+            new Row("HEAD 200 suppressed", 200, "5", ""),
+            new Row("404", 404, "9", "Not Found"),
+            new Row("405", 405, "18", "Method Not Allowed"),
+            new Row("500", 500, "21", "Internal Server Error"));
+
+        List<Row> actual = List.of(
+            row(port, "GET", "/empty", "200 empty"),
+            row(port, "GET", "/full", "200 non-empty"),
+            row(port, "GET", "/n204", "204"),
+            row(port, "GET", "/n304", "304"),
+            row(port, "HEAD", "/full", "HEAD 200 suppressed"),
+            row(port, "GET", "/nowhere", "404"),
+            row(port, "DELETE", "/full", "405"),
+            row(port, "GET", "/boom", "500"));
+
+        assertThat(actual).isEqualTo(expected);
+      }
+    }
+
+    private static Row row(int port, String method, String path, String label) throws IOException {
+      RawHttp.Response answer = RawHttp.request(port, method, path, List.of(), null);
+      assertThat(answer.valuesOf("Transfer-Encoding")).as("no Transfer-Encoding in row %s", label).isEmpty();
+      return new Row(label, answer.status(), answer.firstOf("Content-Length"), answer.body());
+    }
+  }
+
+  /**
    * What the server's own log says about a response this adapter writes: nothing, on every shape above.
    *
    * <p>The JDK logs {@code sendResponseHeaders: rCode = 204: forcing contentLen = -1} when handed a positive length for a

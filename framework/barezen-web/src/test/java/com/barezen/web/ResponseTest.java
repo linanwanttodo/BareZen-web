@@ -304,6 +304,29 @@ class ResponseTest {
     }
 
     @Test
+    void refusesADuplicatedLengthWhetherTheTwoValuesAgreeOrNot() {
+      // Phase 2.10 §E.3 asks what happens to "Content-Length: 5" beside "content-length: 5", and to 5 beside 6. The
+      // answer is one answer for both pairs: refused, because the shape is refused rather than a value checked. An
+      // agreement-insists-on-the-lie reading (accept when both say 5) would need the contract to parse framing values
+      // it has decided it does not own, and would still leave the disagreeing pair to be handled somewhere else.
+      assertThatThrownBy(() -> new Response(200, Headers.of("Content-Length", "5").with("content-length", "5"),
+          "hello".getBytes(StandardCharsets.UTF_8)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not carry Content-Length");
+      assertThatThrownBy(() -> new Response(200, Headers.of("Content-Length", "5").with("content-length", "6"),
+          "hello".getBytes(StandardCharsets.UTF_8)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not carry Content-Length");
+      // The same for the other name, and mixed-case spellings of it — Headers keeps one entry per distinct spelling,
+      // so both lines below are two field lines on their way to the wire (ADR-0027 §5's duplicate row measured there).
+      assertThatThrownBy(() -> new Response(200,
+          Headers.of("Transfer-Encoding", "chunked").with("TRANSFER-ENCODING", "chunked"),
+          "hello".getBytes(StandardCharsets.UTF_8)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not carry Transfer-Encoding");
+    }
+
+    @Test
     void letsEveryOtherFieldThroughIncludingItsOwnLengthsAndTypes() {
       // The refusal is about two names, not about sizing information in general: Content-Range, Content-Type and
       // X-Total-Count all describe an answer, while the refused pair describes the connection.
