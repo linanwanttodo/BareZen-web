@@ -6,15 +6,20 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.9 (HTTP Runtime — JDK adapter), including the 2.9.5–2.9.6 contract audit, is implemented. Everything else
-is design only.
+Phase 2.9 (HTTP Runtime — JDK adapter) and its 2.9.5–2.9.6 contract audit are implemented. Phase 2.10 (HTTP
+semantics stabilization & contract hardening) is **partially implemented**: its semantic decisions, its one behavior
+change and its bytecode automation are shipped — the HEAD framing boundary (ADR-0028), the asserted framing matrix and
+the 304 decision (ADR-0029), the request-body limit with its 413 answer (ADR-0031), the response-body decision that
+kept `byte[]` (ADR-0030), and the class-major build contract (ADR-0032) — while its mutation regression and closing
+audit remain: the cross-JDK mutation work (Stage I) and the final audit (Stage J, §101–123). Everything else is
+design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
-| `framework/barezen-web` | 2.7–2.9.6 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context |
-| `framework/barezen-http-jdk` | 2.9–2.9.6 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider |
+| `framework/barezen-web` | 2.7–2.9.6, 2.10 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix |
+| `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
 | Discovery, Extension Points | later | not created |
 | Security, Data, OpenAPI, Frontend | 4+ | not created |
 
@@ -34,6 +39,7 @@ selected at startup, never a build variant, and there are no `barezen-jdk17`/`ba
 ```bash
 mvn verify
 ./scripts/check-jdk-baseline.sh
+./scripts/check-class-major.sh
 ```
 
 `mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core`, on
@@ -41,6 +47,11 @@ mvn verify
 unreachable by construction, so that half of the bundle is not coverable there without asserting dead code is dead
 (ADR-0002, ADR-0010). JDK 17 in
 CI proves compatibility, JDK 21 proves compatibility and quality.
+`mvn verify` also asserts what it emitted, not only what it declared: `ClassMajorContractTest` (in every emitting
+module) and `scripts/check-class-major.sh` (a CI step after `verify`, on both JDKs) fail if any class file under
+`target/classes` or `target/test-classes` has a class-file major other than 61 — the version JDK 17 reads. That is
+the half `scripts/check-jdk-baseline.sh` cannot see, because `-Dmaven.compiler.release=21` satisfies the
+declared-release script and emits major 65 anyway (ADR-0032).
 `.github/workflows/backend-ci.yml` runs the same build on both; green on both is the definition of compatible.
 
 ## Layout
@@ -54,7 +65,7 @@ framework/barezen-web/      HTTP contract and route table: handler, request, res
                             route match, server adapter contract — no shipped dependency, no server
 framework/barezen-http-jdk/ the JDK adapter: the only module that may name com.sun.net.httpserver, and the only
                             one that registers a ServiceLoader provider
-docs/adr/                   architecture decision records, 0001-0027
+docs/adr/                   architecture decision records, 0001-0032
 scripts/                    build guards
 ```
 
@@ -438,3 +449,81 @@ int port = server.port().getAsInt();
 // ... serve ...
 server.close();                                                  // close() == stop(): idempotent, never throws
 ```
+
+## Phase 2.10 in one paragraph
+
+A stabilization phase, so its product is boundaries rather than features, and each one was measured before it was
+decided. **Method case is two facts, not one** (ADR-0028): which handler runs follows the folded `HttpMethod`, while
+which bytes reach the wire follows the raw token the JDK compares exactly — so `HEAD` gets HEAD's response (fields,
+the representation's length, no bytes) and a spelling like `head` gets the ordinary response its representation has,
+which replaced ADR-0027 §9's false `Content-length: 0` claim with a named boundary. **The framing matrix is now one
+asserted table** (ADR-0029): 200/204/304/HEAD/404/405/500 × length × chunked, `Transfer-Encoding` never written, a
+duplicated framing header refused whether its values agree or not. The same record decides the `304` question Phase
+2.9.5 left open: a `304` carries no body, and therefore no `Content-Length` either — not because HTTP forbids the
+header on that status (RFC 9110 §8.6 explicitly allows a `304` to state one), but because the only in-process source
+for the length it would state is an unverifiable handler assertion. What that costs is named as design debt with a
+reopening trigger (a real conditional-GET consumer that needs to state the stored representation's size), not as a bug
+and not as a limitation without an owner. **The request body has a limit** (ADR-0031):
+`barezen.http.jdk.maxRequestBodyBytes`, a `Long` key declared in the module that enforces it, resolved through the
+existing `Configuration` at construction, **default 1 MiB** — and the boundary is a boundary: `0` is a legal value that
+accepts no body at all, a negative one is rejected at construction, and an adapter with no configuration runs the same
+safe default, so the effective ceiling a server enforces is never a value nobody chose.
+A declared `Content-Length` above it is refused on the
+claim — before the counting read and before the stream is touched, so a 64 MiB claim costs no read, no allocation and
+no wait (4 ms measured); an undeclared chunked body is counted and stopped at the first byte past the bound, the
+buffer growing to what actually arrived. The answer is `413`, framed like every other adapter answer: the JDK's own
+phrase on the status line (`Request Entity Too Large`), the RFC §15.5.14 words `Content Too Large` as a
+`text/plain; charset=utf-8` body of 17 bytes, no `Transfer-Encoding`, no `Retry-After` — a configured limit is not a
+temporary condition — and nothing path-shaped or limit-numbered, which goes to DEBUG. Because the refusal passes the
+same `writesBody` predicate as every other answer, HEAD over the limit states those 17 bytes and sends none, so the
+matrix holds for a sixth status for free. Connection recovery stays the JDK's and both outcomes are measured: a
+surplus the 64 KiB drain can finish leaves the keep-alive connection alive for the next request, a surplus past it
+closes the socket after the answer — and no `Connection: close` is written, because that would punish the first case.
+Two limits are stated rather than smoothed over. An adapter built through the `ServiceLoader` provider takes no
+configuration — `create(host, port, router)` is frozen by ADR-0025 §7 — so the provider path deliberately runs the safe
+default, and **unconfigured is never unbounded**. And a client that declares a large body, sends nothing, and never
+half-closes stalls the JDK's request parse before this module exists for that request; that stall, and the carrier
+thread it occupies, belong to the server's own `sun.net.httpserver.maxReqTime`, which this framework does not name
+because the adapter reads no environment and no properties (ArchUnit, ADR-0013) — a deployment that needs it sets it
+where the JVM starts. **The response-body question got an answer instead of a sketch** (ADR-0030): `byte[]` continues,
+because there is no consumer, no owner for a writer that runs after `handle` returns, and no live-writer design can
+state HEAD's length without re-breaking ADR-0029's matrix; streaming therefore has three named reopening triggers (a
+real consumer with a use site, an ownership answer that does not move `ThreadProvider` or `LifecycleParticipant`
+semantics, a framing design that keeps every matrix row true) and a named phase — 3.x, when the consumer arrives, with
+the forbidden-motivation list inherited as a scope rule rather than a technical verdict.
+
+The one new public API is a constructor — `JdkHttpServerAdapter(InetSocketAddress, Router, Configuration)` — proven
+under the phase's nine-question gate (ADR-0031 §Compatibility Impact): an additive overload, the two existing
+constructors unchanged, the same nine contract types plus this module's two, and its consumer is the assembly code
+ADR-0013/0015 already made responsible for a resolved snapshot. A key that is present but malformed throws
+`ConfigurationException` from that constructor — before a port is bound — naming the key, the value and the source.
+The behavior change is the point of it: requests over 1 MiB that previously succeeded now receive 413, which is the
+vulnerability ADR-0022 §8 recorded as unbounded `readAllBytes()` closing. The build contract around it is now machine-
+checked rather than inspected: in addition to `scripts/check-jdk-baseline.sh`, which has always guarded the *declared*
+compiler release, every emitted class file in the reactor must carry major version **61**, on a JDK 17 build and on a
+JDK 21 build alike — a foreign major fails `mvn clean verify` from inside the build, and
+`scripts/check-class-major.sh` sweeps the whole tree afterwards as a CI step (ADR-0032). 232 web tests, 199 adapter
+tests and 249 core tests, green on both JDKs with `mvn -o -B -ntp clean verify` (the core count skips ten
+virtual-thread capability cases on JDK 17, where the capability cannot be exercised, and one on JDK 21); 21, 23 and 24
+ArchUnit rules, unchanged and unweakened; line coverage measured on the JDK 21 run at 94.38% core, 98.88% web and
+98.17% adapter — the adapter figure sits below its 99.4% pre-phase baseline because the limit's growth and refusal
+paths added lines the earlier suite never reached; the limit itself pinned by 27 raw-socket tests, because a rule
+about framing cannot be tested through a client that rewrites framing.
+
+```java
+// Configuration reaches the adapter the way ADR-0013 says it must: as an argument, resolved by the application.
+Configuration configuration = Configuration.standard(Path.of("config/application.properties"));
+
+JdkHttpServerAdapter server = new JdkHttpServerAdapter(
+    new InetSocketAddress("127.0.0.1", 8080), routes, configuration);   // barezen.http.jdk.maxRequestBodyBytes,
+                                                                        // 1 MiB if the key is absent
+server.start();
+// A key that is present but not a number throws ConfigurationException from the constructor above — before a port is
+// bound — naming the key, the value and the source, so a misconfigured limit is a startup error and not a surprise.
+```
+
+What the phase has left is verification, not design: its nine HTTP-semantics mutation probes have to be re-run and
+mapped to the named test each one must break (Stage I), and the closing audit — ADRs against code against this README,
+the debt list with its reopening triggers, the dependency, configuration and public-API boundaries, the acceptance
+matrix — has to be written against those results (Stage J, §101–123). The tenth probe, an altered class-major
+expectation, was run while writing ADR-0032 and killed four tests on the module where it was mutated.
