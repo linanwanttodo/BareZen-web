@@ -6,13 +6,12 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.9 (HTTP Runtime — JDK adapter) and its 2.9.5–2.9.6 contract audit are implemented. Phase 2.10 (HTTP
-semantics stabilization & contract hardening) is **partially implemented**: its semantic decisions, its one behavior
-change and its bytecode automation are shipped — the HEAD framing boundary (ADR-0028), the asserted framing matrix and
-the 304 decision (ADR-0029), the request-body limit with its 413 answer (ADR-0031), the response-body decision that
-kept `byte[]` (ADR-0030), and the class-major build contract (ADR-0032) — while its mutation regression and closing
-audit remain: the cross-JDK mutation work (Stage I) and the final audit (Stage J, §101–123). Everything else is
-design only.
+Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit and Phase 2.10 (HTTP semantics stabilization &
+contract hardening) are implemented. 2.10 decided boundaries rather than adding features: the HEAD framing boundary
+(ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body decision that kept `byte[]`
+(ADR-0030), the request-body limit with its 413 answer (ADR-0031) and the class-major build contract (ADR-0032). What
+it left open it left open by name: every deferred item carries a reopening trigger and a named phase in the ADR that
+defers it. Everything beyond these phases is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
@@ -522,8 +521,12 @@ server.start();
 // bound — naming the key, the value and the source, so a misconfigured limit is a startup error and not a surprise.
 ```
 
-What the phase has left is verification, not design: its nine HTTP-semantics mutation probes have to be re-run and
-mapped to the named test each one must break (Stage I), and the closing audit — ADRs against code against this README,
-the debt list with its reopening triggers, the dependency, configuration and public-API boundaries, the acceptance
-matrix — has to be written against those results (Stage J, §101–123). The tenth probe, an altered class-major
-expectation, was run while writing ADR-0032 and killed four tests on the module where it was mutated.
+What the phase leaves is a list of named boundaries rather than a list of tasks: a `304` that cannot state a stored
+representation's length (ADR-0029, reopens with a real conditional-GET consumer), the lowercase-`head` asymmetry
+(ADR-0028, reopens when a client is measured to need it, which no mainstream client does), a stalled `Content-Length`
+claim the limit cannot reach because the JDK's parser owns the wait (ADR-0031, whose knob is
+`sun.net.httpserver.maxReqTime`, set where the JVM starts), the fixed three-second stop grace and the bind-never-started
+window (ADR-0024), the JDK's header canonicalization and lost arrival order (ADR-0022 §5), `byte[]` as the response body
+with streaming deferred to 3.x (ADR-0030), and `OPTIONS *`, which this adapter never sees because the server's context
+lookup refuses it (ADR-0026; ordinary `OPTIONS /` is routed and answered normally). Each carries its trigger in the
+record that defers it.
