@@ -502,12 +502,12 @@ vulnerability ADR-0022 §8 recorded as unbounded `readAllBytes()` closing. The b
 checked rather than inspected: in addition to `scripts/check-jdk-baseline.sh`, which has always guarded the *declared*
 compiler release, every emitted class file in the reactor must carry major version **61**, on a JDK 17 build and on a
 JDK 21 build alike — a foreign major fails `mvn clean verify` from inside the build, and
-`scripts/check-class-major.sh` sweeps the whole tree afterwards as a CI step (ADR-0032). 232 web tests, 199 adapter
+`scripts/check-class-major.sh` sweeps the whole tree afterwards as a CI step (ADR-0032). 232 web tests, 200 adapter
 tests and 249 core tests, green on both JDKs with `mvn -o -B -ntp clean verify` (the core count skips ten
 virtual-thread capability cases on JDK 17, where the capability cannot be exercised, and one on JDK 21); 21, 23 and 24
 ArchUnit rules, unchanged and unweakened; line coverage measured on the JDK 21 run at 94.38% core, 98.88% web and
 98.17% adapter — the adapter figure sits below its 99.4% pre-phase baseline because the limit's growth and refusal
-paths added lines the earlier suite never reached; the limit itself pinned by 27 raw-socket tests, because a rule
+paths added lines the earlier suite never reached; the limit itself pinned by 28 raw-socket tests, because a rule
 about framing cannot be tested through a client that rewrites framing.
 
 ```java

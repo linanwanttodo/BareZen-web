@@ -205,11 +205,11 @@ produce. The ArchUnit rules all still hold unmodified: the adapter reads no envi
    previously succeeded on the older constructors now receive 413 — that is the vulnerability closing. Callers who
    want a different number use the new constructor; the provider path runs the safe default by design (ADR-0025's
    frozen list predates this feature and this record does not reopen it).
-7. **Tests:** 27 socket tests in `JdkRequestBodyLimitTest` — the boundary under/exactly/over in both framings, the
+7. **Tests:** 28 socket tests in `JdkRequestBodyLimitTest` — the boundary under/exactly/over in both framings, the
    claim refusal, truncated under (400) and over (413), the parser-owned shapes pinned as the JDK's own answers, the
    keep-alive-after-drain and close-after-overflow pair, bodies larger than the counting read's first buffer on both
-   framing surfaces (§Investigation 7), resolution (configured, absent-key, default value,
-   unconstructed adapter enforcing 1 MiB, bad value, negative, zero, null).
+   framing surfaces (§Investigation 7), the HEAD-over-limit framing row (§Tests), resolution (configured, absent-key,
+   default value, unconstructed adapter enforcing 1 MiB, bad value, negative, zero, null).
 8. **Documentation:** this record; the constructor's own javadoc (why-argument, why-not-System, fails-before-bind);
    the adapter class doc's five-owned-things list; the README's phase text; the index row below.
 9. **ADR:** this one.
@@ -219,12 +219,17 @@ produce. The ArchUnit rules all still hold unmodified: the adapter reads no envi
 All on raw sockets (a limit about framing cannot be tested through a client that rewrites framing — `RawHttp`),
 green on both JDKs via the full reactor:
 
-- `JdkRequestBodyLimitTest` — the whole decision, 27 tests in five nested groups, per §Compatibility Impact item 7.
+- `JdkRequestBodyLimitTest` — the whole decision, 28 tests in five nested groups, per §Compatibility Impact item 7.
   The two buffer-crossing tests (§Investigation 7) were run against the unfixed reader and both failed with
   `SocketException: Connection reset` — the mutation is recorded rather than asserted away, and the fix is the one
   `room` expression in `readBounded`.
 - `JdkResponseBodySemanticsTest.FramingMatrix` keeps every pre-existing row green against the rebuilt dispatcher
-  signature; HEAD-over-limit joins them as the sixth-status check (§Decision 3's claim, probe-measured).
+  signature. The sixth-status claim (§Decision 3) was probe-measured when this record was accepted and had **no test
+  behind it**: Stage I's audit found the gap, and
+  `JdkRequestBodyLimitTest.KnownLength.aHeadOverTheLimitStatesTheRefusalLengthAndSendsNoneOfIt` is the pin that closes
+  it — the 64 MiB claim over a HEAD answers 413 with `Content-Length: 17`, no `Transfer-Encoding`, and no body bytes.
+  It is written on the half-close instrument because a HEAD answer has no body to terminate a read, which is the
+  client's shape rather than the server's.
 - `BarezenHttpJdkArchitectureTest` (24 rules) passes unmodified, including the no-environment rule the new read
   path had to satisfy — its one `System.arraycopy` draft was the rule's own counterexample, and the shipped
   `Arrays.copyOf` is that rule's evidence.

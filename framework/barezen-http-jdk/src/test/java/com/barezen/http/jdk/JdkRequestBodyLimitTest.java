@@ -198,6 +198,25 @@ class JdkRequestBodyLimitTest {
     }
 
     @Test
+    @DisplayName("a HEAD over the limit states the refusal's 17 bytes and sends none of them")
+    void aHeadOverTheLimitStatesTheRefusalLengthAndSendsNoneOfIt() throws IOException {
+      // The refusal passes the same `writesBody` predicate as every other answer, so the framing matrix holds for a
+      // sixth status without a new rule (ADR-0031 §Decision 3): Content-Length says 17, the wire carries no body, and
+      // no Transfer-Encoding joins them. The claim alone is what is refused, so this is the known-length framing, and
+      // the answer is read on the same instrument the other big-claim refusals use: a HEAD has no body to end a read,
+      // so only the half-close releases the server's drain and lets the socket reach EOF (ADR-0031 §Decision 5).
+      startWithLimit(16);
+      RawHttp.Response response = requestWithFin(
+          "HEAD " + PATH + " HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 67108864\r\n\r\n");
+      assertThat(response.status()).isEqualTo(413);
+      assertThat(response.statusLine()).isEqualTo("HTTP/1.1 413 Request Entity Too Large");
+      assertThat(response.firstOf("Content-Length")).isEqualTo("17");
+      assertThat(response.firstOf("Content-Type")).isEqualTo("text/plain; charset=utf-8");
+      assertThat(response.valuesOf("Transfer-Encoding")).isEmpty();
+      assertThat(response.body()).isEmpty();
+    }
+
+    @Test
     @DisplayName("a truncated body under the limit stays the read failure it was — 400")
     void aTruncatedBodyUnderTheLimitStaysABadRequest() throws IOException {
       startWithLimit(64);
