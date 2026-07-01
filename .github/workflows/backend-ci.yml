@@ -45,6 +45,13 @@ jobs:
         # command means "compatibility + quality" on 21 and "compatibility" on 17 (ADR-0002).
         run: mvn -B -ntp clean verify
 
+      - name: Assert every emitted class file is major 61
+        # The step above proves the build was configured for JDK 17; this one proves what it produced is JDK 17
+        # bytecode. Both run on both JDKs, because the compiler that emitted 65 is the one whose output is checked.
+        # Runs against the target/ the build just filled, so a wrong major fails the job rather than being reviewed
+        # (ADR-0032).
+        run: ./scripts/check-class-major.sh
+
       - name: Upload coverage report
         if: matrix.java == 21
         uses: actions/upload-artifact@v4
