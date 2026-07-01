@@ -17,6 +17,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -131,6 +132,19 @@ class JdkRequestBodyLimitTest {
       RawHttp.Response response = upload(15);
       assertThat(response.status()).isEqualTo(200);
       assertThat(response.bodyUtf8()).isEqualTo("len=15");
+    }
+
+    @Test
+    @DisplayName("a declared body larger than the read buffer arrives whole")
+    void aDeclaredBodyPastTheFirstBufferArrivesWhole() throws IOException {
+      // The same shape the chunked test below makes, on the other framing surface: 20 000 bytes is under the limit and
+      // over the counting read's first buffer, so it is the case where the read must ask for room that is still in the
+      // array. A read that asked for buf.length at an offset instead of buf.length - size reached the JDK's
+      // BufferedInputStream out of bounds, and the handler never ran (ADR-0031 §Tests).
+      startWithLimit(100_000);
+      RawHttp.Response response = upload(20_000);
+      assertThat(response.status()).isEqualTo(200);
+      assertThat(response.bodyUtf8()).isEqualTo("len=20000");
     }
 
     @Test
@@ -257,6 +271,38 @@ class JdkRequestBodyLimitTest {
         }
         RawHttp.Response response = readOneResponse(socket);
         assertThat(response.status()).isEqualTo(413);
+      }
+    }
+
+    @Test
+    @DisplayName("a chunked body larger than the read buffer arrives whole, because the buffer grows into it")
+    void aChunkedBodyPastTheFirstBufferArrivesWhole() throws IOException {
+      // The bound is a read bound, not a pre-committed allocation (ADR-0031 §Decision 5), and the growth step is only
+      // exercised by a body bigger than the buffer's first size. 20 000 bytes against a 100 000 bound: the reader
+      // starts at 8 KiB, doubles, and lands on a buffer larger than what arrived — so the copy returned is the body's
+      // length, not the bound's. A reader that allocated the limit up front would pass this test too, which is why it
+      // asserts the length the handler saw rather than a memory claim.
+      startWithLimit(100_000);
+      String[] chunks = new String[20];
+      Arrays.fill(chunks, "x".repeat(1_000));
+      // A keep-alive message read as one response, the same instrument the big-body refusals use: requestRaw reads
+      // to EOF, and a body this size is served while the client is still writing, so the close can arrive as a reset
+      // before the reader has its answer. That is the client's shape, not the server's behavior, and ADR-0031 §5
+      // already measures which side owns it.
+      try (Socket socket = new Socket()) {
+        socket.connect(new InetSocketAddress("127.0.0.1", port()), 5_000);
+        socket.setSoTimeout(5_000);
+        StringBuilder message = new StringBuilder(postHeader("Transfer-Encoding: chunked\r\n\r\n"));
+        for (String payload : chunks) {
+          message.append(Integer.toHexString(payload.length())).append("\r\n").append(payload).append("\r\n");
+        }
+        message.append("0\r\n\r\n");
+        OutputStream out = socket.getOutputStream();
+        out.write(message.toString().getBytes(StandardCharsets.US_ASCII));
+        out.flush();
+        RawHttp.Response response = readOneResponse(socket);
+        assertThat(response.status()).isEqualTo(200);
+        assertThat(response.bodyUtf8()).isEqualTo("len=20000");
       }
     }
 

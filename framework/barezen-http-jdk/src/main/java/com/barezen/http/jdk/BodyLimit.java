@@ -118,17 +118,23 @@ record BodyLimit(long bytes) {
    *     already is (ADR-0023 §6)
    */
   static byte[] readBounded(InputStream body, long limit) throws IOException {
-    if (limit < 0) {
-      throw new IllegalArgumentException("a negative limit would refuse a bodiless request: " + limit);
-    }
+    // `limit` is always a validated BodyLimit's own value, and the record's constructor already refused a negative
+    // one, so capacity is never below 1, buf is never zero-length, and read() always asks the stream for something
+    // (a limit of 0 reads exactly one byte to decide).
     // Read one past the limit: a read that lands exactly on `limit` cannot tell "body == limit" from "body == limit+1"
-    // until it asks for more, and asking for more is what this capacity is for. capacity is never below 1, so buf is
-    // never zero-length and read() always asks the stream (limit 0 reads exactly one byte to decide).
+    // until it asks for more, and asking for more is what this capacity is for.
     final long capacity = limit + 1;
     byte[] buf = new byte[(int) Math.min(capacity, 8192)];
     int size = 0;
     while (size < capacity) {
-      int room = (int) Math.min(capacity - size, buf.length);
+      // Room in the buffer, not room to the bound: the JDK's own chunk and fixed-length streams clamp a read to the
+      // current chunk or the declared remainder, but they hand the offset and length straight to a
+      // BufferedInputStream, which bounds-checks them — asking for `buf.length` bytes at offset `size` writes past the
+      // array and reaches the caller as an IndexOutOfBoundsException instead of as bytes (measured: a 20 000-byte
+      // chunked body under the 1 MiB default closed the connection with no answer, 8 000 bytes answered normally, and
+      // the boundary was exactly the first buffer's 8 192). `capacity - size` is still the outer bound; the
+      // grow step below keeps `buf.length - size` at least 1, so this never asks for zero bytes.
+      int room = (int) Math.min(capacity - size, buf.length - size);
       int read = body.read(buf, size, room);
       if (read < 0) {
         break;

@@ -78,6 +78,22 @@ The RFC renames the status Content Too Large; the JDK's own status table still s
 `Request Entity Too Large` (`Code.java:97-99`). A `Retry-After` is prescribed only «if the condition is temporary» —
 a configured limit is not, so none is written.
 
+**7. The growth path was unreachable until a later phase's automation provoked it.** This record shipped with every
+one of its tests passing on both JDKs, and no test sent a body larger than the counting read's first buffer (8 KiB).
+Worse, the loop only grew when a read landed *exactly* on the buffer's end, and the JDK's streams clamp a read to the
+current chunk or the declared remainder — so a body between 8 KiB and the limit reached neither the grow step nor a
+legal read: it asked for `buf.length` bytes at offset `size` instead of `buf.length - size`, which runs past the
+array. Measured on JDK 21 with the 1 MiB default, before and after the one-line fix: an 8 000-byte chunked body
+answered `200 len=8000`; a 9 000-byte chunked body (eight whole chunks plus one) closed the connection with **no HTTP
+answer at all**, the server logging `IndexOutOfBoundsException` from `java.io.BufferedInputStream.implRead` through
+`ChunkedInputStream.readImpl:130` into `BodyLimit.readBounded`; the same shape with a declared `Content-Length`
+failed the same way, because the clamping differs only in which stream does it. A suite that only ever uploads small
+bodies cannot see this, which is why the class-major automation added in Stage H (ADR-0032) and the coverage report's
+list of never-executed lines — not a failing request test — are where it surfaced. §Decision 5's «grown to what
+actually arrived» is now true for every body up to the limit, and
+`aDeclaredBodyPastTheFirstBufferArrivesWhole` / `aChunkedBodyPastTheFirstBufferArrivesWhole` hold it, both measured
+red before the fix and green after.
+
 ## Options Considered
 
 **G2 — defer with written risk.** Rejected: the directive rules «unknown» out, and §1 priced the risk on the shipped
@@ -189,9 +205,10 @@ produce. The ArchUnit rules all still hold unmodified: the adapter reads no envi
    previously succeeded on the older constructors now receive 413 — that is the vulnerability closing. Callers who
    want a different number use the new constructor; the provider path runs the safe default by design (ADR-0025's
    frozen list predates this feature and this record does not reopen it).
-7. **Tests:** 25 socket tests in `JdkRequestBodyLimitTest` — the boundary under/exactly/over in both framings, the
+7. **Tests:** 27 socket tests in `JdkRequestBodyLimitTest` — the boundary under/exactly/over in both framings, the
    claim refusal, truncated under (400) and over (413), the parser-owned shapes pinned as the JDK's own answers, the
-   keep-alive-after-drain and close-after-overflow pair, resolution (configured, absent-key, default value,
+   keep-alive-after-drain and close-after-overflow pair, bodies larger than the counting read's first buffer on both
+   framing surfaces (§Investigation 7), resolution (configured, absent-key, default value,
    unconstructed adapter enforcing 1 MiB, bad value, negative, zero, null).
 8. **Documentation:** this record; the constructor's own javadoc (why-argument, why-not-System, fails-before-bind);
    the adapter class doc's five-owned-things list; the README's phase text; the index row below.
@@ -202,7 +219,10 @@ produce. The ArchUnit rules all still hold unmodified: the adapter reads no envi
 All on raw sockets (a limit about framing cannot be tested through a client that rewrites framing — `RawHttp`),
 green on both JDKs via the full reactor:
 
-- `JdkRequestBodyLimitTest` — the whole decision, 25 tests in five nested groups, per §Compatibility Impact item 7.
+- `JdkRequestBodyLimitTest` — the whole decision, 27 tests in five nested groups, per §Compatibility Impact item 7.
+  The two buffer-crossing tests (§Investigation 7) were run against the unfixed reader and both failed with
+  `SocketException: Connection reset` — the mutation is recorded rather than asserted away, and the fix is the one
+  `room` expression in `readBounded`.
 - `JdkResponseBodySemanticsTest.FramingMatrix` keeps every pre-existing row green against the rebuilt dispatcher
   signature; HEAD-over-limit joins them as the sixth-status check (§Decision 3's claim, probe-measured).
 - `BarezenHttpJdkArchitectureTest` (24 rules) passes unmodified, including the no-environment rule the new read
