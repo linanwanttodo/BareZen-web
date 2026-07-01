@@ -93,12 +93,14 @@ final class JdkExchangeBridge {
     Headers headers = toHeaders(exchange.getRequestHeaders());
     long declared = declaredLength(headers);
     if (declared > limit.bytes()) {
-      // Refused on the claim, before the counting read and before this module touches the stream at all. That
-      // ordering is the response's, not just the bytes': the server materializes the request stream before a handler
-      // exists ({@code ServerImpl.java:899} on JDK 17, {@code :903} on JDK 21), so nothing is saved by opening it
-      // here — and closing a stream whose surplus has not arrived makes the JDK's leftover drain block BEFORE the
-      // answer is written, measured: a huge claim plus five stalled bytes answered nothing for nine seconds, while
-      // the same claim refused from outside the stream answered 413 in four milliseconds (ADR-0031 §Decision 4).
+      // Refused on the claim, before the counting read and before this method touches the stream. Two measured
+      // reasons for that placement. It saves the bytes: a 64 MiB claim is refused without a byte of it being read
+      // or allocated (ADR-0031 §Decision 4). And it cannot be improved on by refusing from inside the body read:
+      // the server already materializes the request stream before the handler runs ({@code ServerImpl.java:899} on
+      // JDK 17, {@code :903} on JDK 21), so opening it here changes nothing — while closing it on the refusal
+      // would run the JDK's leftover drain BEFORE the 413 is written ({@code LeftOverInputStream.java:65-69}),
+      // which is a wait on the client's remaining bytes that sits between the client and its answer
+      // (ADR-0031 §Decision 5; the drain belongs after the answer, in {@code JdkRequestDispatcher}'s finally).
       throw new BodyLimit.Exceeded(limit.bytes(), "declared Content-Length of " + declared);
     }
     byte[] body = readBody(exchange, limit);
