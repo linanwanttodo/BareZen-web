@@ -415,7 +415,9 @@ limitation without a server-side warning: the twelve-shape wire table is byte-id
 `Date`, and a JUL handler on the server logger captures none. `byte[]` stayed, and no `BodyMode`, `NoBody`,
 `Representation`, `StreamingBody` or `Optional<byte[]>` was added, so the directive's four-part proof for a new public type
 was never triggered (ADR-0027). What the uniform rule costs is recorded rather than hidden: **a `304` through this
-framework cannot state the stored representation's length**, and that is design debt with a named reason.
+framework cannot state the stored representation's length**. Phase 2.10 decided that as the answer rather than deferring
+it — the value RFC 9110 §8.6 binds such a header to is a 200 this framework never computes, so the forbid stays and the
+question has a named reopening trigger (ADR-0029, D1).
 
 227 web tests and 152 adapter tests, both green on JDK 17 and JDK 21 with `mvn -o -B -ntp clean verify`; 23 and 24 ArchUnit
 rules, unchanged and unweakened; line coverage 98.9% and 99.4%; ten mutation probes (A–I plus a stronger F) and every one
