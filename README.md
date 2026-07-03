@@ -7,13 +7,18 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 ## Current state
 
 Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit, Phase 2.10 (HTTP semantics stabilization &
-contract hardening) and Phase 2.11 (Security) are implemented. 2.10 decided boundaries rather than adding features:
+contract hardening), Phase 2.11 (Security) and Phase 2.12 (Data) are implemented. 2.10 decided boundaries rather than
+adding features:
 the HEAD framing boundary (ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body
 decision that kept `byte[]` (ADR-0030), the request-body limit with its 413 answer (ADR-0031) and the class-major
 build contract (ADR-0032). 2.11 added the first capability module since the contract: `framework/barezen-security`, a
 `Handler` decorator that authenticates, then authorizes, then answers — with three authentication states (ADR-0034),
 PBKDF2 password hashing (ADR-0035), opaque revocable sessions rather than JWTs (ADR-0036) and the 401/403 boundary
-(ADR-0037), all attached to the contract without widening it (ADR-0033). What is left open is left open by name:
+(ADR-0037), all attached to the contract without widening it (ADR-0033). 2.12 added persistence as a second capability
+module on a boundary that names no driver: `framework/barezen-data`, where `Database(DataSource)` reaches the database
+only through a `DataSource` the application supplies (ADR-0038), a `Transaction` the callback receives but can never
+decide (ADR-0039), and a migration history table whose one honest promise — recorded if and only if applied — was
+rewritten after this build measured that H2 commits DDL implicitly (ADR-0040). What is left open is left open by name:
 every deferred item carries a reopening trigger and a named phase in the ADR that defers it. Everything beyond these
 phases is design only.
 
@@ -24,8 +29,9 @@ phases is design only.
 | `framework/barezen-web` | 2.7–2.9.6, 2.10 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix |
 | `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
+| `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
 | Discovery, Extension Points | later | not created |
-| Data, OpenAPI, TestKit, Examples | 2.12–2.16 | planned, not created |
+| Data, OpenAPI, TestKit, Examples | 2.12–2.16 | Data created in 2.12; OpenAPI, TestKit, Examples planned, not created |
 | Frontend | later | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -48,7 +54,8 @@ mvn verify
 ```
 
 `mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core`, on
-`barezen-web`, on `barezen-http-jdk` and on `barezen-security`. The gate runs on JDK 21 only: on JDK 17 the virtual
+`barezen-web`, on `barezen-http-jdk`, on `barezen-security` and on `barezen-data`. The gate runs on JDK 21 only:
+on JDK 17 the virtual
 thread provider is unreachable by construction, so that half of the bundle is not coverable there without asserting
 dead code is dead (ADR-0002, ADR-0010). JDK 17 in
 CI proves compatibility, JDK 21 proves compatibility and quality.
@@ -73,7 +80,10 @@ framework/barezen-http-jdk/ the JDK adapter: the only module that may name com.s
 framework/barezen-security/ security on the contract: the Handler decorator, the three-state authentication result,
                             PBKDF2 hashing and the opaque session store — one compile dependency (barezen-web),
                             no server, no JDBC, no logging facade, no thread-local
-docs/adr/                   architecture decision records, 0001-0037
+framework/barezen-data/     persistence behind one javax.sql boundary: Database(DataSource) with zero compile
+                            dependencies, the package-private-decider Transaction, DataAccessException as the one
+                            translation point, and the history-table Migrator — no driver named, H2 test-scope only
+docs/adr/                   architecture decision records, 0001-0040
 scripts/                    build guards
 ```
 
@@ -591,4 +601,68 @@ Router routes = Router.builder()
 
 // A handler that needs to know who is asking implements SecuredHandler beside Handler;
 // readUser above may be either — the middleware delivers the context when the handler asks for it.
+```
+
+## Phase 2.12 in one paragraph
+
+`framework/barezen-data` is persistence designed against measurements rather than against the JDBC specification's
+promises, and both of this phase's measurements changed the design before it shipped. **The boundary is
+`Database(DataSource)`** (ADR-0038): the module's compile dependencies are none — it speaks `javax.sql` from the JDK
+and receives a finished `DataSource` the application's assembly code built from its own configuration (ADR-0013's
+hand-over, never a framework-side read), so an application swaps databases by swapping an object and the test database
+is structurally unreachable from production because nothing in `src/main` may name `org.h2..`, a `DriverManager`
+overload or a `Class.forName`. Every `SQLException` leaves the module as one unchecked `DataAccessException` naming the
+operation and the SQL with the driver cause preserved — while a runtime exception thrown by the application's own
+transaction callback stays itself, because wrapping a business failure in a persistence exception would report a
+database failure that never happened. **A transaction is an object the callback receives and never decides**
+(ADR-0039): `commit`/`rollback` are package-private, which turns «不要让每个 repository 自己 commit» from a review rule
+into a compile error — guarded further by a reflection probe that fails if the visibility itself is ever widened —
+and the decision table is total and recorder-sequenced: returns → commit, throws → rollback (and the JDBC call
+sequence `[setAutoCommit:false, commit, rollback, setAutoCommit:true]` is asserted when a commit fails), the
+connection closes on every path, a `Transaction` is dead outside the callback that received it. Nesting gets the
+explicit answer rather than a discovered one: a second `transaction(...)` call opens an independent transaction on a
+second connection — pinned, not documented-and-hoped. **The migration history table is the framework's authority**
+(ADR-0040), and that sentence is the product of a falsified draft: the first contract said a failed migration leaves
+no trace, and standalone probes on this build measured the opposite — a `CREATE TABLE` inside a rolled-back
+transaction survives on the same connection and in a new one, because H2 commits DDL implicitly — while the DML
+control rolled back honestly (`control DML rows after rollback: 0`). The rewritten promise is exactly one sentence
+about the table the framework owns — *a version is recorded if and only if its `apply` completed* (the history row
+shares the change's transaction) — with schema integrity after a failure stated as the product's answer, recovery
+defined as re-run-and-repair, and `IF NOT EXISTS`-style idempotent DDL written into `Migration`'s contract because the
+retry re-runs the version that never got recorded. Six run states are tested each (fresh, existing, already applied,
+duplicate refused before database contact, failed, and the out-of-order refusal — where a first-draft bug that would
+have refused every normal up-to-date startup was caught by `anUpToDateListIsNotAnInversionJustBecauseItsFirstVersionIsLow`);
+no-ambient and no-driver rules are seven ArchUnit rules in this module, each proven to bite by a deliberately
+violating class (`EvilDataProbe`, deleted after its `Tests run: 7, Failures: 7`). The module ships eight public
+top-level types (`Database`, `Transaction`, `TransactionCallback`, `RowMapper`, `DataAccessException`, `Migrator`,
+`Migration`, `AppliedMigration`), one package, zero compile dependencies, and one test-scope driver fetched from
+Central (`com.h2database:h2:2.2.224`) — the only dependency addition in the whole 2.x line, justified here by ADR-0038.
+64 tests (8 boundary, 11 lifecycle, 13 transaction, 21 migrator, 7 ArchUnit, 4 class-major), 92.21% line coverage on
+JDK 21 above the 85% gate, and sixteen mutation probes (M1–M16) covering every mutation the directive named — delete
+rollback, delete commit, skip a migration, reversed version order, leak the connection, leak the statement, commit
+after an exception, repository bypass re-opened by making commit public — plus eight more boundary and negative probes:
+every one killed by a named test and the source restored byte-identical (SHA-256 verified). What 2.12 leaves named
+rather than built: streaming `RowMapper` reads (ADR-0038, reopens with a consumer), ambient/propagated transactions
+(ADR-0039, refused and re-openable by a real join-the-outer-unit pattern), down-migrations, checksums and concurrent
+runs (ADR-0040, non-goals with triggers), and pooling — the application's decision, made at the `DataSource` seam the
+pooled world already agrees on.
+
+```java
+// The application owns the DataSource; the framework never builds one and never names a driver.
+Database database = new Database(pool);                  // any javax.sql.DataSource
+
+// One statement, one borrowed connection:
+long orders = database.query("SELECT COUNT(*) FROM orders", rs -> rs.getLong(1)).get(0);
+
+// A unit of work: the service opens it, the repositories receive it, and only the boundary can decide it.
+OrderReceipt receipt = database.transaction(tx -> {
+  tx.executeUpdate("INSERT INTO orders (id, total) VALUES (?, ?)", order.id(), order.total());
+  tx.executeUpdate("INSERT INTO audit (ref) VALUES (?)", order.id());
+  return new OrderReceipt(order.id(), orders + 1);   // commit is package-private: a repository cannot decide this
+});
+
+// At startup, whenever the application assembles: safe to run every time.
+Migrator.of(database).migrate(List.of(                   // validate → sort → apply ascending → record
+    migration(1, "creates orders", "CREATE TABLE IF NOT EXISTS orders (...)"),
+    migration(2, "creates audit",  "CREATE TABLE IF NOT EXISTS audit (...)")));
 ```
