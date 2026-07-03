@@ -6,12 +6,16 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 ## Current state
 
-Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit and Phase 2.10 (HTTP semantics stabilization &
-contract hardening) are implemented. 2.10 decided boundaries rather than adding features: the HEAD framing boundary
-(ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body decision that kept `byte[]`
-(ADR-0030), the request-body limit with its 413 answer (ADR-0031) and the class-major build contract (ADR-0032). What
-it left open it left open by name: every deferred item carries a reopening trigger and a named phase in the ADR that
-defers it. Everything beyond these phases is design only.
+Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit, Phase 2.10 (HTTP semantics stabilization &
+contract hardening) and Phase 2.11 (Security) are implemented. 2.10 decided boundaries rather than adding features:
+the HEAD framing boundary (ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body
+decision that kept `byte[]` (ADR-0030), the request-body limit with its 413 answer (ADR-0031) and the class-major
+build contract (ADR-0032). 2.11 added the first capability module since the contract: `framework/barezen-security`, a
+`Handler` decorator that authenticates, then authorizes, then answers — with three authentication states (ADR-0034),
+PBKDF2 password hashing (ADR-0035), opaque revocable sessions rather than JWTs (ADR-0036) and the 401/403 boundary
+(ADR-0037), all attached to the contract without widening it (ADR-0033). What is left open is left open by name:
+every deferred item carries a reopening trigger and a named phase in the ADR that defers it. Everything beyond these
+phases is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
@@ -19,8 +23,10 @@ defers it. Everything beyond these phases is design only.
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
 | `framework/barezen-web` | 2.7–2.9.6, 2.10 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix |
 | `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
+| `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | Discovery, Extension Points | later | not created |
-| Security, Data, OpenAPI, Frontend | 4+ | not created |
+| Data, OpenAPI, TestKit, Examples | 2.12–2.16 | planned, not created |
+| Frontend | later | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
 
@@ -42,9 +48,9 @@ mvn verify
 ```
 
 `mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core`, on
-`barezen-web` and on `barezen-http-jdk`. The gate runs on JDK 21 only: on JDK 17 the virtual thread provider is
-unreachable by construction, so that half of the bundle is not coverable there without asserting dead code is dead
-(ADR-0002, ADR-0010). JDK 17 in
+`barezen-web`, on `barezen-http-jdk` and on `barezen-security`. The gate runs on JDK 21 only: on JDK 17 the virtual
+thread provider is unreachable by construction, so that half of the bundle is not coverable there without asserting
+dead code is dead (ADR-0002, ADR-0010). JDK 17 in
 CI proves compatibility, JDK 21 proves compatibility and quality.
 `mvn verify` also asserts what it emitted, not only what it declared: `ClassMajorContractTest` (in every emitting
 module) and `scripts/check-class-major.sh` (a CI step after `verify`, on both JDKs) fail if any class file under
@@ -64,7 +70,10 @@ framework/barezen-web/      HTTP contract and route table: handler, request, res
                             route match, server adapter contract — no shipped dependency, no server
 framework/barezen-http-jdk/ the JDK adapter: the only module that may name com.sun.net.httpserver, and the only
                             one that registers a ServiceLoader provider
-docs/adr/                   architecture decision records, 0001-0032
+framework/barezen-security/ security on the contract: the Handler decorator, the three-state authentication result,
+                            PBKDF2 hashing and the opaque session store — one compile dependency (barezen-web),
+                            no server, no JDBC, no logging facade, no thread-local
+docs/adr/                   architecture decision records, 0001-0037
 scripts/                    build guards
 ```
 
@@ -530,3 +539,56 @@ window (ADR-0024), the JDK's header canonicalization and lost arrival order (ADR
 with streaming deferred to 3.x (ADR-0030), and `OPTIONS *`, which this adapter never sees because the server's context
 lookup refuses it (ADR-0026; ordinary `OPTIONS /` is routed and answered normally). Each carries its trigger in the
 record that defers it.
+
+## Phase 2.11 in one paragraph
+
+`framework/barezen-security` is the first module built *on* the contract rather than *as* part of it, and the whole
+phase turns on not widening the contract to fit security. **Security is a decorator** (ADR-0033):
+`SecurityMiddleware.wrap(authentication, authorization, delegate)` takes a `Handler` and returns a `Handler`, so an
+application composes it exactly where it composes a route, and the adapter holds no security policy. **The context is
+an argument, never ambient state** (ADR-0033): a handler that must know who is asking implements `SecuredHandler`
+beside `Handler` and the middleware delivers the request-scoped `SecurityContext` to that half; `handle`'s signature
+gains nothing, `Request` gains nothing, and the two designs the contract forbids — a context parameter and a
+`ThreadLocal` — are refused with an ArchUnit rule each, every rule fired by a deliberately violating class before it
+was deleted. **Authentication has three states** (ADR-0034): authenticated, failure-with-a-server-side-reason and
+anonymous, sealed, because "offered nothing" and "offered something wrong" are the difference between a login prompt
+and a refusal and a boolean collapses them into one wrong answer. **The status boundary is fixed and the handler is
+never reached by a refusal** (ADR-0037): 401 for no valid identity, 403 for a denied one, 500 for a security
+collaborator that throws, and every refusal test counts the delegate's invocations at zero; default-deny is mechanical
+because both `wrap` overloads refuse a null collaborator, and the middleware asks exactly one permission per request —
+`Permission.ANY` by default, the route's named permission through the four-argument overload. **Passwords hash with
+PBKDF2-HMAC-SHA256 at 600,000 iterations**, 16-byte salt, 32-byte key, encoded self-describing so the count lives
+inside the hash and can rise without invalidating anything (ADR-0035); bcrypt was refused as a dependency the enforcer
+posture would not take quietly and Argon2 as a JDK-absent library, both named as the reopening conditions; a malformed
+hash verifies `false` rather than throwing, comparison is `MessageDigest.isEqual`, and the module cannot name a logger
+at all, so a password has no path to a log line. **Sessions are opaque and revocable, not JWTs** (ADR-0036): a 256-bit
+random token keys a server-side record, revocation is one removal, rotation kills the old token, expiry is an injected
+`Clock` checked on lookup with the dead record retired, and JWT was refused on four concrete grounds — starting with
+the one a self-contained token cannot answer: revoke this user right now. Neither a credential, a token value nor a
+hash appears in any `toString`. The module ships twelve top-level public types on one compile dependency
+(`barezen-web`); `barezen-core` is not on its classpath, the JDK adapter is test-scope only and used by the one test
+that proves the decorator survives a real keep-alive connection where three identities arrive back to back and none
+bleeds into the next. 99 tests (7 ArchUnit rules, 4 class-major contract tests, 6 socket-level integration tests),
+98.96% line coverage on JDK 21 — the two uncovered lines are the `catch` that a JDK without PBKDF2 would take, which
+is no JDK — fourteen mutation probes (SM1–SM14) covering the authenticated gate, the 401/403/500 mapping, the context
+delivery, the permission question, the bearer comparison, the expiry boundary, session retirement and rotation, the
+iteration guard, salt randomness and credential disclosure: every one killed by a named test and the source restored
+byte-identical. What 2.11 leaves named rather than built: a shared/distributed session store (ADR-0036, reopens with
+a multi-instance deployment), an Argon2 path (ADR-0035, reopens with a GPU/ASIC offline threat model), per-state
+challenge responses like `WWW-Authenticate` (ADR-0037, non-goal with a trigger), and a route→permission table the
+framework owns (ADR-0033, refused: the policy is the application's).
+
+```java
+Authentication tokens = Authentication.bearer("Bearer", sessionToken, new Principal("ada"));   // any Authentication
+Authorization canRead = Authorization.of(Map.of(new Principal("ada"), Set.of(Permission.of("user:read"))));
+
+// The decorator returns a Handler, so it is registered where a handler is registered.
+Router routes = Router.builder()
+    .route(HttpMethod.GET, "/users/{id}",
+        SecurityMiddleware.wrap(tokens, canRead, Permission.of("user:read"), readUser))
+    .route(HttpMethod.GET, "/health", health)          // unwrapped: public, and visible as such in the table
+    .build();
+
+// A handler that needs to know who is asking implements SecuredHandler beside Handler;
+// readUser above may be either — the middleware delivers the context when the handler asks for it.
+```
