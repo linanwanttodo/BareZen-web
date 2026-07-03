@@ -104,9 +104,10 @@ class BarezenHttpJdkArchitectureTest {
   /**
    * Rules 5 and 6: the reserved packages never point at an adapter.
    *
-   * <p>{@code com.barezen.security..} and {@code com.barezen.data..} do not exist yet, and both halves of this rule are
-   * written anyway — a rule over classes that exist cannot see the one that was just added, and the failure this guards
-   * against arrives months later as a "temporary" import inside a persistence module.
+   * <p>{@code com.barezen.security..} and {@code com.barezen.data..} did not exist when this rule was written, and
+   * both halves were written anyway — a rule over classes that exist cannot see the one that was just added, and the
+   * failure it guards against arrives months later as a "temporary" import inside a persistence module. Both now
+   * exist, and the rule reads them.
    */
   @ArchTest
   static final ArchRule no_other_barezen_module_may_depend_on_an_http_adapter = noClasses()
