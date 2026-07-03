@@ -55,9 +55,18 @@
       </dependency>
 
       <!--
-        Future modules are listed here as they are created (data,
-        testkit, app, plugins). They are intentionally absent for now so that the bom never
-        advertises an artifact that does not exist.
+        The data layer (Phase 2.12). It has no framework dependency at all: it speaks javax.sql and receives an
+        application-supplied DataSource, so importing it pulls in no driver and no database product (ADR-0038).
+      -->
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-data</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
+        Future modules are listed here as they are created (testkit, app, plugins). They are intentionally absent
+        for now so that the bom never advertises an artifact that does not exist.
       -->
     </dependencies>
   </dependencyManagement>
