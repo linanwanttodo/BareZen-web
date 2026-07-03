@@ -663,6 +663,13 @@ OrderReceipt receipt = database.transaction(tx -> {
 
 // At startup, whenever the application assembles: safe to run every time.
 Migrator.of(database).migrate(List.of(                   // validate → sort → apply ascending → record
-    migration(1, "creates orders", "CREATE TABLE IF NOT EXISTS orders (...)"),
-    migration(2, "creates audit",  "CREATE TABLE IF NOT EXISTS audit (...)")));
+    new CreateTable(1, "creates orders", "CREATE TABLE IF NOT EXISTS orders (...)"),
+    new CreateTable(2, "creates audit",  "CREATE TABLE IF NOT EXISTS audit (...)")));
+
+// A Migration is the application's own three-method implementation — no framework helper exists, on purpose:
+record CreateTable(long version, String description, String sql) implements Migration {
+  @Override public void apply(Connection c) throws SQLException {
+    try (Statement s = c.createStatement()) { s.execute(sql); }   // defensive DDL: retries must complete
+  }
+}
 ```
