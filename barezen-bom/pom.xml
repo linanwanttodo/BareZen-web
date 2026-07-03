@@ -45,7 +45,17 @@
       </dependency>
 
       <!--
-        Future modules are listed here as they are created (api, security, data,
+        Security middleware on the web contract (Phase 2.11). It depends on barezen-web, never on an adapter,
+        so an application wires it around a Router without taking a server dependency.
+      -->
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-security</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
+        Future modules are listed here as they are created (data,
         testkit, app, plugins). They are intentionally absent for now so that the bom never
         advertises an artifact that does not exist.
       -->
