@@ -23,6 +23,7 @@
     <module>framework/barezen-security</module>
     <module>framework/barezen-data</module>
     <module>framework/barezen-plugins</module>
+    <module>framework/barezen-testkit</module>
   </modules>
 
   <properties>

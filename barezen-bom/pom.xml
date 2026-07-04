@@ -76,6 +76,17 @@
       </dependency>
 
       <!--
+        The test kit (Phase 2.15): a test server on the JDK adapter, the seven-verb client, fixtures and assertions.
+        Applications add it in test scope; nothing in the reactor depends on it, which is the isolation ADR-0044
+        states and an ArchUnit rule enforces.
+      -->
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-testkit</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
         Future modules are listed here as they are created (testkit, app). They are intentionally absent
         for now so that the bom never advertises an artifact that does not exist.
       -->
