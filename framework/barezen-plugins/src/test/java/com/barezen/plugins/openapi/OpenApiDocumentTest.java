@@ -48,7 +48,7 @@ class OpenApiDocumentTest {
     return ApiDocument.builder().info("Demo", "1.0").schema("User", userSchema());
   }
 
-  @Nested
+    @Nested
   @DisplayName("a valid document builds")
   class Valid {
 
@@ -90,17 +90,36 @@ class OpenApiDocumentTest {
           .build();
 
       String json = document.toJson();
-      assertThat(json)
-          .contains("\"openapi\":\"3.0.3\"")
-          .contains("\"servers\":[{\"url\":\"https://api.example.com\"}]")
-          .contains("\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"required\":true,"
-              + "\"schema\":{\"type\":\"integer\",\"format\":\"int64\"}}]")
-          .contains("\"post\":{\"operationId\":\"postUsers\"")
-          .contains("\"404\":{\"description\":\"no such user\"}")
-          .contains("\"$ref\":\"#/components/schemas/User\"")
-          .contains("\"securitySchemes\":{\"sessionToken\":{\"type\":\"http\",\"scheme\":\"bearer\"}}")
-          .contains("\"security\":[{\"sessionToken\":[\"write\"]}]")
-          .contains("\"tags\":[{\"name\":\"users\"}]");
+      // golden bytes for the whole full-document surface: securitySchemes, both path items, every operation's
+      // method key, parameters, requestBody content, security, the $ref *inside a response body*, tags, and the
+      // component — the Stage 2.14-G drop-/scramble-mutations each remove one visible fragment of this string
+      assertThat(json).isEqualTo(
+          "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Demo\",\"version\":\"1.0\"},"
+              + "\"servers\":[{\"url\":\"https://api.example.com\"}],"
+              + "\"paths\":{"
+              + "\"/users\":{"
+              + "\"get\":{\"operationId\":\"getUsers\",\"summary\":\"List users\",\"tags\":[\"users\"],"
+              + "\"responses\":{\"200\":{\"description\":\"the users\",\"content\":{\"application/json\":"
+              + "{\"schema\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/User\"}}}}}}},"
+              + "\"post\":{\"operationId\":\"postUsers\",\"summary\":\"Create a user\",\"tags\":[\"users\"],"
+              + "\"requestBody\":{\"required\":true,\"content\":{\"application/json\":"
+              + "{\"schema\":{\"$ref\":\"#/components/schemas/User\"}}}},"
+              + "\"security\":[{\"sessionToken\":[\"write\"]}],"
+              + "\"responses\":{\"201\":{\"description\":\"created\",\"content\":{\"application/json\":"
+              + "{\"schema\":{\"$ref\":\"#/components/schemas/User\"}}}}}}},"
+              + "\"/users/{id}\":{\"get\":{\"operationId\":\"getUsersId\",\"summary\":\"Fetch one user\","
+              + "\"tags\":[\"users\"],"
+              + "\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"required\":true,"
+              + "\"schema\":{\"type\":\"integer\",\"format\":\"int64\"}}],"
+              + "\"responses\":{\"200\":{\"description\":\"the user\",\"content\":{\"application/json\":"
+              + "{\"schema\":{\"$ref\":\"#/components/schemas/User\"}}}},"
+              + "\"404\":{\"description\":\"no such user\"}}}}},"
+              + "\"components\":{\"schemas\":{\"User\":{\"type\":\"object\",\"properties\":{"
+              + "\"id\":{\"type\":\"integer\",\"format\":\"int64\"},\"name\":{\"type\":\"string\"},"
+              + "\"friends\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/User\"}}},"
+              + "\"required\":[\"id\",\"name\"]}},"
+              + "\"securitySchemes\":{\"sessionToken\":{\"type\":\"http\",\"scheme\":\"bearer\"}}},"
+              + "\"tags\":[{\"name\":\"users\"}]}");
     }
   }
 
@@ -241,6 +260,20 @@ class OpenApiDocumentTest {
       int getAt = json.indexOf("\"get\"");
       assertThat(alpha).isLessThan(mike);
       assertThat(delete).isLessThan(getAt); // DELETE before GET within /alpha, by method text
+    }
+
+    @Test
+    @DisplayName("responses keep declared order in the output: 404 before 200 stays 404 before 200")
+    void responseOrderIsDeclaredOrderInOutput() {
+      ApiDocument document = ApiDocument.builder().info("T", "1.0")
+          .operation(Operation.builder(new OperationMetadata(HttpMethod.GET, "/x", "X", List.of()))
+              .response(ApiResponse.empty("404", "missing"))
+              .response(ApiResponse.empty("200", "ok"))
+              .build())
+          .build();
+
+      assertThat(document.toJson()).contains(
+          "\"responses\":{\"404\":{\"description\":\"missing\"},\"200\":{\"description\":\"ok\"}}");
     }
   }
 
