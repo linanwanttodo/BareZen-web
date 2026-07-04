@@ -7,8 +7,8 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 ## Current state
 
 Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit, Phase 2.10 (HTTP semantics stabilization &
-contract hardening), Phase 2.11 (Security), Phase 2.12 (Data), Phase 2.13 (Plugin Ecosystem) and Phase 2.14 (OpenAPI)
-are implemented.
+contract hardening), Phase 2.11 (Security), Phase 2.12 (Data), Phase 2.13 (Plugin Ecosystem), Phase 2.14 (OpenAPI) and
+Phase 2.15 (TestKit) are implemented.
 2.10 decided boundaries rather than
 adding features:
 the HEAD framing boundary (ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body
@@ -20,9 +20,15 @@ PBKDF2 password hashing (ADR-0035), opaque revocable sessions rather than JWTs (
 module on a boundary that names no driver: `framework/barezen-data`, where `Database(DataSource)` reaches the database
 only through a `DataSource` the application supplies (ADR-0038), a `Transaction` the callback receives but can never
 decide (ADR-0039), and a migration history table whose one honest promise — recorded if and only if applied — was
-rewritten after this build measured that H2 commits DDL implicitly (ADR-0040). What is left open is left open by name:
-every deferred item carries a reopening trigger and a named phase in the ADR that defers it. Everything beyond these
-phases is design only.
+rewritten after this build measured that H2 commits DDL implicitly (ADR-0040). 2.13 opened the plugin layer on the SPI
+already in core — three plugins sit on the framework and never inside it (ADR-0042) — and 2.14 projects the OpenAPI
+plugin's collected metadata into a deterministic JSON document, staying inside the plugins fence because a framework
+module naming plugin types is the exact edge ADR-0042 rule 1 refuses (ADR-0043). 2.15 added TestKit as the reactor's
+second top module: `framework/barezen-testkit`, a consumer-facing test tool that binds the real JDK adapter to
+`127.0.0.1:0`, ships the seven-verb client, the fixtures and the assertions an integration test needs, and depends
+downward and never sideways — the isolation ADR-0044 turns into a build fact by rule. What is left open is left open
+by name: every deferred item carries a reopening trigger and a named phase in the ADR that defers it. Everything beyond
+2.15 — examples and release metadata — is design only.
 
 | Module | Phase | State |
 | --- | --- | --- |
@@ -33,8 +39,9 @@ phases is design only.
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
 | `framework/barezen-plugins` | 2.13–2.14 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
+| `framework/barezen-testkit` | 2.15 | a consumer-facing test tool, not a framework service: `TestServer` binds the real JDK adapter to `127.0.0.1:0`, `TestHttpClient` speaks the seven verbs over `java.net.http` with `followRedirects(NEVER)`, `TestFixtures` provides the counting and principal-capturing handlers, `TestDatabase` wraps an application-supplied `DataSource` and owns only the reset, `Assertions` gives the response/count/identity checks (ADR-0044). Five downward compile dependencies (core, web, http-jdk, security, data), no sideways edge to `com.barezen.plugins`, H2 test-scope only, and no class in the shipped reactor may name it — the isolation rule |
 | Discovery, Extension Points | later | not created |
-| TestKit, Examples | 2.15–2.16 | planned, not created; the OpenAPI generator shipped in 2.14 *inside* `barezen-plugins`, because a framework module naming plugin types breaks the fence (ADR-0043) |
+| Examples | 2.16 | planned, not created; the OpenAPI generator shipped in 2.14 *inside* `barezen-plugins` because a framework module naming plugin types breaks the fence (ADR-0043), and TestKit shipped in 2.15 as its own top module because its dependencies all point downward (ADR-0044) |
 | Frontend | later | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -57,7 +64,8 @@ mvn verify
 ```
 
 `mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core`, on
-`barezen-web`, on `barezen-http-jdk`, on `barezen-security`, on `barezen-data` and on `barezen-plugins`. The gate runs
+`barezen-web`, on `barezen-http-jdk`, on `barezen-security`, on `barezen-data`, on `barezen-plugins` and on
+`barezen-testkit`. The gate runs
 on JDK 21 only:
 on JDK 17 the virtual
 thread provider is unreachable by construction, so that half of the bundle is not coverable there without asserting
@@ -92,7 +100,15 @@ framework/barezen-plugins/  the first plugins on the SPI: AuthPlugin, UserPlugin
                             2.14 OpenAPI generator projects the collected metadata into a deterministic JSON
                             document inside this same fence (ADR-0043); the framework names no plugin back
                             (ADR-0042), H2 test-scope only
-docs/adr/                   architecture decision records, 0001-0043
+framework/barezen-testkit/  a consumer-facing test tool (Phase 2.15): TestServer binds the real JDK adapter to
+                            127.0.0.1:0, TestHttpClient speaks the seven verbs over java.net.http, TestFixtures
+                            hands out the counting and principal-capturing handlers, TestDatabase wraps an
+                            application-supplied DataSource and owns only the reset, Assertions gives the
+                            response/count/identity checks; five downward compile dependencies, no sideways edge
+                            to com.barezen.plugins, H2 test-scope only, and the reactor names nothing here
+                            (ADR-0044)
+docs/adr/                   architecture decision records, 0001-0044
+docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 scripts/                    build guards
 ```
 
@@ -824,4 +840,52 @@ Request request = new Request(HttpMethod.GET, "/openapi.json", null, Headers.emp
 RouteMatch match = router.match(request).orElseThrow();           // the adapter's own call shape
 Response response = match.handler().handle(request, match.parameters());
 // response.body() is exactly document.toJson()'s bytes
+```
+
+## Phase 2.15 in one paragraph
+
+`framework/barezen-testkit` is the reactor's second top module, and the phase's first decision had already been tested
+by 2.14's opposite answer: 2.14 could *not* leave the plugins fence because a framework module naming plugin types is
+the edge ADR-0042 rule 1 refuses, but TestKit's dependencies all point *downward* — core, web, http-jdk, security, data —
+so a new module is legal, and ADR-0044 records exactly that asymmetry (the one thing the phase adds to the directive's
+plan). The isolation claim "a test tool nothing in the shipped framework depends on" is made a build fact by the ArchUnit
+rule `nothing_in_the_framework_depends_on_testkit`, spike-proven with a class mis-declared into `com.barezen.core` that
+reached for a testkit type and was refused. `TestServer` **wraps** `JdkHttpServerAdapter` on `127.0.0.1:0` rather than
+faking it — a fake server proves only the fake works, so every framing decision of 2.9–2.10 is exercised for real — reads
+its OS-assigned port back through `port()` (empty is a broken adapter, stated as an `IllegalStateException`), and its
+`close()` is idempotent and is the only path that releases the port and the adapter's owned `ThreadProvider`. The client
+is `java.net.http.HttpClient` — zero new runtime dependencies — with `followRedirects(NEVER)` so a `3xx` arrives as the
+status the handler actually returned. `TestFixtures.PrincipalCapturingHandler` implements both `Handler` and
+`SecuredHandler` (its plain half is a tripwire, matching `SecurityHttpEndToEndTest`), and every fixture holds its state
+*per instance* — two tests prove a second counting or principal handler opens at zero, which is the phase's "fixture
+state shared" and "security context leaked" mutations run as ordinary assertions. `TestDatabase` wraps an
+application-supplied `DataSource` and owns only the reset; it names no driver, and the ArchUnit driver-ban is written
+against `org.h2..` and friends while leaving the `javax.sql` port legal on purpose. `Assertions` is deliberately thin —
+status/header/body/JSON-path, a count, an identity — because a JSON reader big enough to *navigate* a body is the only
+library cost worth paying, and it is package-private and order-preserving. Two bugs were caught before shipping rather
+than discovered by a green build: `PrincipalCapturingHandler`'s first draft implemented only `Handler`, so its `record`
+method could never be reached by the middleware, and `TestResponse` built its case-insensitive header map with
+`Map.copyOf`, which silently drops the comparator the javadoc promised — both fixed from the contract, not from a
+relaxed assertion. 77 tests green on JDK 17 in the module (13 assertions, 14 fixtures, 17 reader, 7 database, 15
+end-to-end over a real socket, 4 class-major, 6 architecture, 1 README example executed verbatim), seven mutations — the directive's six (stop omitted, port
+not released, fixture state shared, assertion ignored, security context leaked, database not reset) plus a wrong-echo
+handler — all killed with a real build failure and every source restored byte-identical, and four worked guides shipped
+under `docs/testkit/` (quick start, first integration test, security, database, OpenAPI).
+
+```java
+// A TestKit integration test end to end — public API only. Executed as-is by ReadmeTestKitExampleTest.
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", TestFixtures.textHandler("ok"))                 // a plain framework Handler
+    .route(HttpMethod.GET, "/who",
+        SecurityMiddleware.wrap(TestFixtures.authenticationFor("t0ken", new Principal("ada")),
+            Authorization.allowAll(), TestFixtures.principalCapturingHandler()))
+    .build();
+
+try (TestServer server = TestServer.start(router)) {                                   // the real JDK adapter, :0 port
+  TestHttpClient client = server.client();                                             // java.net.http, NEVER-redirect
+  Assertions.assertThat(client.get("/health")).statusIs(200).bodyIs("ok");
+  Assertions.assertThat(client.request(HttpMethod.GET, "/who")
+      .header("Authorization", "Bearer t0ken").send()).statusIs(200).bodyIs("hello, ada");
+  Assertions.assertThat(client.get("/who")).statusIs(401);                             // anonymous never reached the delegate
+}                                                                                       // close() released the port here
 ```

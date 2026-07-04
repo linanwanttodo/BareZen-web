@@ -94,6 +94,20 @@ class FixturesTest {
       handler.reset();
       assertThat(handler.count()).isEqualTo(0);
     }
+
+    @Test
+    @DisplayName("two counting handlers do not share a counter — per-instance state, not a class-level one")
+    void independentInstances() {
+      TestFixtures.CountingHandler a = TestFixtures.countingHandler("x");
+      a.handle(get("/x"), Map.of());
+      a.handle(get("/x"), Map.of());
+      TestFixtures.CountingHandler b = TestFixtures.countingHandler("y");
+      // If the counter were static, b would open at a's two and this isolation test would be lying.
+      assertThat(b.count()).isEqualTo(0);
+      b.handle(get("/x"), Map.of());
+      assertThat(b.count()).isEqualTo(1);
+      assertThat(a.count()).isEqualTo(2);
+    }
   }
 
   @Nested
@@ -142,6 +156,18 @@ class FixturesTest {
       assertThatThrownBy(() -> handler.handle(get("/who"), Map.of()))
           .isInstanceOf(AssertionError.class)
           .hasMessageContaining("SecurityContext");
+    }
+
+    @Test
+    @DisplayName("two principal handlers do not share captured identity — per-instance, not class-level")
+    void independentInstances() {
+      TestFixtures.PrincipalCapturingHandler a = TestFixtures.principalCapturingHandler();
+      a.handle(get("/who"), Map.of(),
+          new SecurityContext(AuthenticationResult.authenticated(new Principal("ada"))));
+      TestFixtures.PrincipalCapturingHandler b = TestFixtures.principalCapturingHandler();
+      // A static lastSeen would make b report ada; per-instance state is what makes the isolation claim real.
+      assertThat(b.seen()).isEmpty();
+      assertThat(b.count()).isEqualTo(0);
     }
   }
 
