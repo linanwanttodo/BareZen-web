@@ -278,6 +278,37 @@ class OpenApiDocumentTest {
   }
 
   @Nested
+  @DisplayName("declared details reach the output")
+  class DeclaredDetails {
+
+    @Test
+    @DisplayName("a parameter description, a body description, a nullable property and a boolean schema render as declared")
+    void detailsAreEmitted() {
+      ApiDocument document = ApiDocument.builder().info("D", "1.0")
+          .schema("Flags", Schema.object(List.of(
+              new Schema.Property("active", Schema.booleanSchema().asNullable(), false))))
+          .operation(Operation.builder(new OperationMetadata(HttpMethod.POST, "/users", "Create", List.of()))
+              .parameter(new Parameter("id", Parameter.Location.QUERY, Schema.string(), false, "the user id"))
+              .requestBody(new RequestBody("the new user", Schema.ref("Flags"), true))
+              .response(ApiResponse.json("200", "flags", Schema.ref("Flags")))
+              .build())
+          .build();
+
+      assertThat(document.toJson()).isEqualTo(
+          "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"D\",\"version\":\"1.0\"},"
+              + "\"paths\":{\"/users\":{\"post\":{\"operationId\":\"postUsers\",\"summary\":\"Create\","
+              + "\"parameters\":[{\"name\":\"id\",\"in\":\"query\",\"required\":false,"
+              + "\"description\":\"the user id\",\"schema\":{\"type\":\"string\"}}],"
+              + "\"requestBody\":{\"description\":\"the new user\",\"required\":true,"
+              + "\"content\":{\"application/json\":{\"schema\":{\"$ref\":\"#/components/schemas/Flags\"}}}},"
+              + "\"responses\":{\"200\":{\"description\":\"flags\",\"content\":{\"application/json\":"
+              + "{\"schema\":{\"$ref\":\"#/components/schemas/Flags\"}}}}}}}},"
+              + "\"components\":{\"schemas\":{\"Flags\":{\"type\":\"object\",\"properties\":{\"active\":"
+              + "{\"type\":\"boolean\",\"nullable\":true}}}}}}");
+    }
+  }
+
+  @Nested
   @DisplayName("cycle safety: $ref is a name, not a walk")
   class CycleSafety {
 

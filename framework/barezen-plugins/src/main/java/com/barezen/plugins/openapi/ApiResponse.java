@@ -25,6 +25,10 @@ public record ApiResponse(String statusCode, String description, Schema bodySche
     // model that can hold null would force the emitter to invent the one string this record exists to carry.
     Objects.requireNonNull(description, "description; a documented response that says what it means is the"
         + " difference between a status code and documentation");
+    if (description.isBlank()) {
+      throw new IllegalArgumentException("a response description must not be blank; the same rule OperationMetadata"
+          + " sets for a summary — a placeholder someone forgot to fill renders as an empty field a client reads");
+    }
     if (!statusCode.matches("([1-5]\\d{2}|[1-5]XX|default)")) {
       throw new IllegalArgumentException("status code \"" + statusCode
           + "\" is outside the subset: a three-digit code, an NXX range, or \"default\"");
@@ -35,9 +39,6 @@ public record ApiResponse(String statusCode, String description, Schema bodySche
             + " declares a body schema; the framing contract (ADR-0029) forbids a body there, and a document"
             + " describing one teaches clients to parse bytes that never arrive");
       }
-    }
-    if (description != null && description.isBlank()) {
-      throw new IllegalArgumentException("a response description, if declared, must not be blank");
     }
   }
 

@@ -14,8 +14,8 @@ import java.util.Objects;
  * The OpenAPI plugin: it *collects* operation metadata and answers "what does this application expose". It is a
  * {@link Plugin} (ADR-0016) with one phase — it registers into nothing, it is registered — and it deliberately
  * generates no document (Stage 2.13-E). The projection from these records to a specification is 2.14's decision,
- * made in 2.14's module, against a spec the framework does not yet name; what lives here is the input that
- * projection consumes, and nothing more.
+ * made inside this same package's fence (ADR-0043 chose placement over a new module, because the framework may
+ * not name these types); what lives here is the input that projection consumes, and nothing more.
  *
  * <p>How operations get in: an application calls {@link #add} while it assembles, passing the same
  * {@code HttpMethod} and pattern it passed to {@code Router.builder()}. The plugin does not read the router — the

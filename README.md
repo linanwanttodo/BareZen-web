@@ -7,7 +7,8 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 ## Current state
 
 Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit, Phase 2.10 (HTTP semantics stabilization &
-contract hardening), Phase 2.11 (Security), Phase 2.12 (Data) and Phase 2.13 (Plugin Ecosystem) are implemented.
+contract hardening), Phase 2.11 (Security), Phase 2.12 (Data), Phase 2.13 (Plugin Ecosystem) and Phase 2.14 (OpenAPI)
+are implemented.
 2.10 decided boundaries rather than
 adding features:
 the HEAD framing boundary (ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body
@@ -31,9 +32,9 @@ phases is design only.
 | `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
-| `framework/barezen-plugins` | 2.13 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only, no document); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
+| `framework/barezen-plugins` | 2.13–2.14 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
 | Discovery, Extension Points | later | not created |
-| OpenAPI, TestKit, Examples | 2.14–2.16 | planned, not created; the plugin *collector* shipped in 2.13 is 2.14's input, not its generator |
+| TestKit, Examples | 2.15–2.16 | planned, not created; the OpenAPI generator shipped in 2.14 *inside* `barezen-plugins`, because a framework module naming plugin types breaks the fence (ADR-0043) |
 | Frontend | later | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -88,8 +89,10 @@ framework/barezen-data/     persistence behind one javax.sql boundary: Database(
                             translation point, and the history-table Migrator — no driver named, H2 test-scope only
 framework/barezen-plugins/  the first plugins on the SPI: AuthPlugin, UserPlugin, OpenApiPlugin — each driven by the
                             one existing lifecycle engine, each filling a port the framework already owned; the
-                            framework names no plugin back (ADR-0042), H2 test-scope only
-docs/adr/                   architecture decision records, 0001-0042
+                            2.14 OpenAPI generator projects the collected metadata into a deterministic JSON
+                            document inside this same fence (ADR-0043); the framework names no plugin back
+                            (ADR-0042), H2 test-scope only
+docs/adr/                   architecture decision records, 0001-0043
 scripts/                    build guards
 ```
 
@@ -750,4 +753,75 @@ String token = auth.issueSession("ada", "hunter2")            // verifies via Pa
 AuthenticationResult result = auth.authenticate(new Credential("Bearer", presentedToken));
                                                               // lookup only — a returning request never re-checks a password
 app.stop();
+```
+
+## Phase 2.14 in one paragraph
+
+`com.barezen.plugins.openapi` gained the document the 2.13 collector was left waiting for, and the phase's first
+decision was forced by measurement rather than taste: the directive's "2.14's module" would be a `barezen-openapi`
+module of framework code naming `OperationMetadata` and `OpenApiPlugin` — the exact edge ADR-0042's first ArchUnit
+rule (`the_framework_does_not_know_plugins_exist`) exists to refuse — so the generator ships **inside the plugins
+package**, and the deviation is recorded in ADR-0043 as the phase's only departure from the directive's wording. The
+second decision is the one the maxim is about: schemas are **declared data, never reflected classes**, and the
+directive's four conditions for reflection ("deterministic, cycle-safe, no arbitrary classpath scanning, stable
+property ordering") are satisfied *structurally* instead of engineered — a `Schema.REFERENCE` node carries a name and
+nothing else, the emitter prints the name without recursing, so `User.friends = array($ref User)` is one string deep
+and no walk of the document can loop, while property order is literally the order the application wrote. The model is
+six types (`Schema`, `Parameter`, `ApiResponse`, `RequestBody`, `Security`, and `Operation` built *from* an
+`OperationMetadata` — the one-way projection, because a generator that could write back to the collector lets docs
+redefine the API), and `ApiDocument` owns every ordering decision once — paths by template, operations by method
+text, components and schemes by name, tags distinct-sorted, servers in declaration order — so `JsonWriter`, the
+framework's only JSON emitter and package-private by choice, can be dumb: it writes members in exactly the order
+added, which is what makes byte-determinism a property of the code rather than a hope about a library's map policy.
+Validation is build-time and total: the six Stage 2.14-F refusal categories each fire at a named site (blank required
+field, duplicate `(method, path)`, colliding derived `operationId`, no-response operations and 204/304-with-body per
+ADR-0029, every `$ref` resolved recursively against declared components, security requirements naming undeclared
+schemes), and `Operation.build` cross-checks path parameters against the route pattern in both directions. Serving is
+the framework's own request path: `document.handler()` is a `com.barezen.web.Handler` that answers the bytes rendered
+once at assembly — the application mounts it on its router, and no second serving mechanism exists (ADR-0016). The
+subset is exactly the named concepts — 3.0.3, path/query/header parameters, one media type, one bearer scheme
+(ADR-0036's session as it is actually implemented); cookie, oauth2, YAML, `oneOf` and every other grammar the spec
+allows stay non-goals with a named reopening trigger. Two generator bugs fell out of testing rather than review: the
+duplicate-path guard called `List.add` — which always returns `true`, so the check could never fire — and reference
+resolution stopped at the top node, letting `array($ref Missing)` through; both were fixed from the failing
+assertions, not loosened. 49 new tests (19 document, 22 model, 7 writer, 1 README example executed verbatim) on
+top of 2.13's 53 — 102 in the module, all
+green — every rendering assertion pinned to **golden bytes** (the full document asserted as one exact string, from
+`openapi` to `tags`), eight mutations (M1 drop endpoint, M2 drop response, M3 drop parameter, M4 change HTTP method,
+M5 wrong path parameter, M6 wrong schema type, M7 non-deterministic ordering, M8 invalid security requirement) all
+killed by a named test with the sources restored byte-identical, and the seven architecture rules unchanged and
+still green, because the fence already covered the whole `com.barezen` namespace.
+
+```java
+// The 2.13 example, continued: the same collector, projected into a served document — public API only.
+// This snippet is executed as-is by ReadmeDocumentExampleTest.
+OpenApiPlugin openapi = new OpenApiPlugin();
+openapi.add(HttpMethod.GET, "/users/{id}", "Fetch one user", List.of("users"));
+
+// The application declares the shapes the collector cannot know (ADR-0043's declared data).
+Schema user = Schema.object(List.of(
+    new Schema.Property("id", Schema.integer(), true),
+    new Schema.Property("name", Schema.string(), true)));
+
+ApiDocument document = ApiDocument.builder()
+    .info("Demo", "1.0")
+    .schema("User", user)
+    .securityScheme(Security.Scheme.bearer("sessionToken"))
+    .operations(openapi.operations().stream()                      // the frozen snapshot; one-way projection
+        .map(metadata -> Operation.builder(metadata)
+            .parameter(Parameter.path("id", Schema.integer()))
+            .security(Security.Requirement.of("sessionToken", List.of()))
+            .response(ApiResponse.json("200", "the user", Schema.ref("User")))
+            .build())
+        .toList())
+    .build();                                                     // the six refusals run here, or nothing ships
+
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/openapi.json", document.handler())   // the rendered bytes, on the app's own router
+    .build();
+
+Request request = new Request(HttpMethod.GET, "/openapi.json", null, Headers.empty(), null);
+RouteMatch match = router.match(request).orElseThrow();           // the adapter's own call shape
+Response response = match.handler().handle(request, match.parameters());
+// response.body() is exactly document.toJson()'s bytes
 ```

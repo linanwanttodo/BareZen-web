@@ -104,6 +104,15 @@ class OpenApiModelTest {
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("blank");
     }
+
+    @Test
+    @DisplayName("the public constructor treats null properties as none — the copy is the caller's safety")
+    void nullPropertiesBecomeEmpty() {
+      Schema schema = new Schema(Schema.SchemaType.OBJECT, null, null, null, null, false);
+      assertThat(schema.properties()).isEmpty();
+      assertThat(schema.requiredNames()).isEmpty();
+      assertThat(Schema.booleanSchema().toString()).isEqualTo("boolean");
+    }
   }
 
   @Nested
@@ -164,6 +173,10 @@ class OpenApiModelTest {
           .isInstanceOf(NullPointerException.class);
       assertThatThrownBy(() -> new ApiResponse(null, "d", null))
           .isInstanceOf(NullPointerException.class);
+      assertThatThrownBy(() -> new ApiResponse("200", " ", null))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("blank");
+      assertThat(ApiResponse.empty("204", "deleted").toString()).isEqualTo("204");
     }
   }
 
