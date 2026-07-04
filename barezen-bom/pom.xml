@@ -65,7 +65,18 @@
       </dependency>
 
       <!--
-        Future modules are listed here as they are created (testkit, app, plugins). They are intentionally absent
+        The plugin ecosystem (Phase 2.13): the auth, user and OpenAPI plugins. It depends downward on core, web,
+        security and data (ADR-0042's one-way direction), so importing it pulls in those capabilities and no driver
+        or server beyond them.
+      -->
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-plugins</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
+        Future modules are listed here as they are created (testkit, app). They are intentionally absent
         for now so that the bom never advertises an artifact that does not exist.
       -->
     </dependencies>

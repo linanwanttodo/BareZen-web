@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.barezen</groupId>
+    <artifactId>barezen-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>barezen-plugins</artifactId>
+  <name>BareZen Plugins</name>
+  <description>
+    The plugin ecosystem: a persistence-backed user identity plugin implementing the security ports, a session auth
+    plugin composing them, and an OpenAPI metadata plugin. Each is a LifecycleParticipant plugin (ADR-0016), never a
+    container, and each depends downward on the capabilities it uses — the framework never reaches up into a plugin.
+  </description>
+
+  <dependencies>
+    <!--
+      The plugin contract itself: Plugin, PluginDescriptor, PluginRegistration. Compile scope, because a plugin is a
+      participant and needs the SPI to be one (ADR-0016).
+    -->
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-core</artifactId>
+    </dependency>
+
+    <!--
+      The web contract, so a plugin can offer a Handler and read request/response types. barezen-security already
+      depends on it; a plugin composes both, and the SPI direction (ADR-0042) keeps that composition pointing one way.
+    -->
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-web</artifactId>
+    </dependency>
+
+    <!--
+      The security ports a plugin implements. The load-bearing fact of Stage 2.13-D is the arrow: plugins depend on
+      com.barezen.security, and com.barezen.security depends on nothing here (its no-JDBC and no-plugins rules are
+      proven to bite in its own module). Direction "Security ← SPI ← Plugin" is the same shape as ADR-0038's
+      DataSource seam, one layer up (ADR-0041, ADR-0042).
+    -->
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-security</artifactId>
+    </dependency>
+
+    <!--
+      Persistence behind the driver-free boundary (ADR-0038). The user plugin speaks Database/Transaction; it never
+      names a driver either, so the test database reaches it only through an application-supplied DataSource.
+    -->
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-data</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- Test database, same ADR-0038 justification the data module carries; production code never names it. -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <!-- Same gate and JDK 21 binding as the other capability modules (ADR-0002). -->
+      <id>coverage-gate</id>
+      <activation>
+        <jdk>[21,)</jdk>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>check-coverage</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+                <configuration>
+                  <rules>
+                    <rule>
+                      <element>BUNDLE</element>
+                      <limits>
+                        <limit>
+                          <counter>LINE</counter>
+                          <value>COVEREDRATIO</value>
+                          <minimum>0.85</minimum>
+                        </limit>
+                      </limits>
+                    </rule>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

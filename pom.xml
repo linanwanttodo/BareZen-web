@@ -22,6 +22,7 @@
     <module>framework/barezen-http-jdk</module>
     <module>framework/barezen-security</module>
     <module>framework/barezen-data</module>
+    <module>framework/barezen-plugins</module>
   </modules>
 
   <properties>
