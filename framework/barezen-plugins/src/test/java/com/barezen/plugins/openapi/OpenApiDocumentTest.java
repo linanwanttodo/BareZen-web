@@ -65,7 +65,12 @@ class OpenApiDocumentTest {
       assertThat(document.title()).isEqualTo("Library");
       assertThat(document.version()).isEqualTo("2.0");
       assertThat(document.paths()).containsOnlyKeys("/health");
-      assertThat(document.toJson()).startsWith("{\"openapi\":\"3.0.3\"");
+      // golden bytes, not a prefix: the emitter's exact output is the contract the Stage 2.14-G mutations are
+      // checked against, and a generator change that moves one key or one field fails this line first
+      assertThat(document.toJson()).isEqualTo(
+          "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Library\",\"version\":\"2.0\"},"
+              + "\"paths\":{\"/health\":{\"get\":{\"operationId\":\"getHealth\",\"summary\":\"Liveness\","
+              + "\"responses\":{\"200\":{\"description\":\"alive\"}}}}}}");
     }
 
     @Test
