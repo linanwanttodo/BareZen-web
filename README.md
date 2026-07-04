@@ -7,8 +7,8 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 ## Current state
 
 Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit, Phase 2.10 (HTTP semantics stabilization &
-contract hardening), Phase 2.11 (Security), Phase 2.12 (Data), Phase 2.13 (Plugin Ecosystem), Phase 2.14 (OpenAPI) and
-Phase 2.15 (TestKit) are implemented.
+contract hardening), Phase 2.11 (Security), Phase 2.12 (Data), Phase 2.13 (Plugin Ecosystem), Phase 2.14 (OpenAPI),
+Phase 2.15 (TestKit) and Phase 2.16 (Examples / Release Hardening) are implemented.
 2.10 decided boundaries rather than
 adding features:
 the HEAD framing boundary (ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body
@@ -26,9 +26,11 @@ plugin's collected metadata into a deterministic JSON document, staying inside t
 module naming plugin types is the exact edge ADR-0042 rule 1 refuses (ADR-0043). 2.15 added TestKit as the reactor's
 second top module: `framework/barezen-testkit`, a consumer-facing test tool that binds the real JDK adapter to
 `127.0.0.1:0`, ships the seven-verb client, the fixtures and the assertions an integration test needs, and depends
-downward and never sideways — the isolation ADR-0044 turns into a build fact by rule. What is left open is left open
-by name: every deferred item carries a reopening trigger and a named phase in the ADR that defers it. Everything beyond
-2.15 — examples and release metadata — is design only.
+downward and never sideways — the isolation ADR-0044 turns into a build fact by rule. 2.16 closed the 2.x line with a
+leaf `examples` module: seven runnable programs that use only the public developer API, each proving itself twice —
+once by a `main()` that binds a real socket and once by a TestKit-driven test the reactor runs (ADR-0045). What is left
+open is left open by name: every deferred item carries a reopening trigger and a named phase in the ADR that defers it,
+and nothing beyond the 2.x line is claimed as built.
 
 | Module | Phase | State |
 | --- | --- | --- |
@@ -40,9 +42,9 @@ by name: every deferred item carries a reopening trigger and a named phase in th
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
 | `framework/barezen-plugins` | 2.13–2.14 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
 | `framework/barezen-testkit` | 2.15 | a consumer-facing test tool, not a framework service: `TestServer` binds the real JDK adapter to `127.0.0.1:0`, `TestHttpClient` speaks the seven verbs over `java.net.http` with `followRedirects(NEVER)`, `TestFixtures` provides the counting and principal-capturing handlers, `TestDatabase` wraps an application-supplied `DataSource` and owns only the reset, `Assertions` gives the response/count/identity checks (ADR-0044). Five downward compile dependencies (core, web, http-jdk, security, data), no sideways edge to `com.barezen.plugins`, H2 test-scope only, and no class in the shipped reactor may name it — the isolation rule |
-| Discovery, Extension Points | later | not created |
-| Examples | 2.16 | planned, not created; the OpenAPI generator shipped in 2.14 *inside* `barezen-plugins` because a framework module naming plugin types breaks the fence (ADR-0043), and TestKit shipped in 2.15 as its own top module because its dependencies all point downward (ADR-0044) |
-| Frontend | later | not created |
+| `examples` | 2.16 | seven runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`. Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
+| Discovery, Extension Points | 3.x | DEFERRED — reopen trigger: a first real component that owns an extension point (ADR-0016) |
+| Frontend | non-goal | NON-GOAL — BareZen is a server-side framework; a frontend binding needs a real consumer with named rules (ADR-0016) |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
 
@@ -107,8 +109,13 @@ framework/barezen-testkit/  a consumer-facing test tool (Phase 2.15): TestServer
                             response/count/identity checks; five downward compile dependencies, no sideways edge
                             to com.barezen.plugins, H2 test-scope only, and the reactor names nothing here
                             (ADR-0044)
-docs/adr/                   architecture decision records, 0001-0044
+examples/                   seven runnable programs (Phase 2.16) on the public API only, one leaf module wired last:
+                            hello-world, routing, request/response, security, database, plugin, openapi — each a
+                            router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
+                            reactor runs; nothing in the framework depends on this leaf (ADR-0045)
+docs/adr/                   architecture decision records, 0001-0045
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
+docs/examples/             the run-a-main() classpath and what each example demonstrates
 scripts/                    build guards
 ```
 
