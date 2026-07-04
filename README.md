@@ -7,7 +7,8 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 ## Current state
 
 Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit, Phase 2.10 (HTTP semantics stabilization &
-contract hardening), Phase 2.11 (Security) and Phase 2.12 (Data) are implemented. 2.10 decided boundaries rather than
+contract hardening), Phase 2.11 (Security), Phase 2.12 (Data) and Phase 2.13 (Plugin Ecosystem) are implemented.
+2.10 decided boundaries rather than
 adding features:
 the HEAD framing boundary (ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body
 decision that kept `byte[]` (ADR-0030), the request-body limit with its 413 answer (ADR-0031) and the class-major
@@ -30,8 +31,9 @@ phases is design only.
 | `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
+| `framework/barezen-plugins` | 2.13 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only, no document); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
 | Discovery, Extension Points | later | not created |
-| Data, OpenAPI, TestKit, Examples | 2.12–2.16 | Data created in 2.12; OpenAPI, TestKit, Examples planned, not created |
+| OpenAPI, TestKit, Examples | 2.14–2.16 | planned, not created; the plugin *collector* shipped in 2.13 is 2.14's input, not its generator |
 | Frontend | later | not created |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -54,7 +56,8 @@ mvn verify
 ```
 
 `mvn verify` runs unit tests, ArchUnit architecture rules and an 85% line-coverage gate on `barezen-core`, on
-`barezen-web`, on `barezen-http-jdk`, on `barezen-security` and on `barezen-data`. The gate runs on JDK 21 only:
+`barezen-web`, on `barezen-http-jdk`, on `barezen-security`, on `barezen-data` and on `barezen-plugins`. The gate runs
+on JDK 21 only:
 on JDK 17 the virtual
 thread provider is unreachable by construction, so that half of the bundle is not coverable there without asserting
 dead code is dead (ADR-0002, ADR-0010). JDK 17 in
@@ -83,7 +86,10 @@ framework/barezen-security/ security on the contract: the Handler decorator, the
 framework/barezen-data/     persistence behind one javax.sql boundary: Database(DataSource) with zero compile
                             dependencies, the package-private-decider Transaction, DataAccessException as the one
                             translation point, and the history-table Migrator — no driver named, H2 test-scope only
-docs/adr/                   architecture decision records, 0001-0040
+framework/barezen-plugins/  the first plugins on the SPI: AuthPlugin, UserPlugin, OpenApiPlugin — each driven by the
+                            one existing lifecycle engine, each filling a port the framework already owned; the
+                            framework names no plugin back (ADR-0042), H2 test-scope only
+docs/adr/                   architecture decision records, 0001-0042
 scripts/                    build guards
 ```
 
@@ -672,4 +678,76 @@ record CreateTable(long version, String description, String sql) implements Migr
     try (Statement s = c.createStatement()) { s.execute(sql); }   // defensive DDL: retries must complete
   }
 }
+```
+
+## Phase 2.13 in one paragraph
+
+`framework/barezen-plugins` is the plugin concept used for real for the first time, and its design constraint was the
+maxim read directly: *the moment a plugin system needs its own lifecycle, registry, or context, it has become the
+container ADR-0016 refuses* — so this phase adds a participant, not an engine. The three plugins are ordinary
+`LifecycleParticipant`s driven by the existing `LifecycleOrchestrator` (no `install`, no `PluginContext`, and
+`PluginCompositionTest` asserts the exact `initialize → start → stop` sequence, because "stop skipped" is a named
+mutation and a registry whose cleanup can be skipped is a leak, not a lifecycle). **The direction rule is the phase's
+actual content** (ADR-0042): `AuthPlugin` implements security's *existing* `Authentication` port and `UserPlugin`
+implements `Authorization`, so the arrow is `Security ← SPI ← User Plugin` — and it is not merely unbroken but
+demonstrably *unwidened*, because `com.barezen.security`'s public surface gained nothing in this phase and the first
+ArchUnit rule (`the_framework_does_not_know_plugins_exist`) fails the build if a framework type ever names a plugin
+back. Two design facts fall out of measurements rather than taste. `Credential(scheme, value)` holds a single value
+(ADR-0034), which makes a `username:password` login credential a delimiter bug waiting for a username containing `:`
+— so auth is *split in two*: `issueSession(username, password)` verifies and returns the token-bearing `Session`,
+while `authenticate(Credential)` answers a returning request by store lookup and never consults a password
+(`tokenAuthenticates` proves it with a second plugin sharing the store whose verifier rejects everything). And the
+user plugin reaches auth's collaborator only through a plugin-local `PasswordVerifier` port handed over at assembly —
+auth's four declared fields are asserted to be exactly `SessionStore`/`PasswordVerifier`/`String`/`Duration`, which is
+what makes "plugin A mutates plugin B's state" unbuildable rather than discouraged. `OpenApiPlugin` stops at metadata
+(Stage 2.13-E): the application *declares* operations beside the routes it registers, and the plugin stores, refuses a
+duplicate `(method, path)`, and hands out a **frozen, path-then-method-sorted** snapshot — no scanner and no
+generator, because enumerating routes means widening the web contract for a doc tool (ADR-0019's one-question rule)
+and generating a document is 2.14's module's decision. On the core side, `PluginRegistration.validate` is the pure
+static verifier ADR-0016 §4 predicted but did not write (ADR-0041): duplicate id, missing dependency and cycle are
+refused all-or-nothing *before* assembly, unrelated plugins keep the caller's relative order, and the type holds
+nothing, looks nothing up and runs no phase — a first draft that refused "ambiguous" order and sorted ties
+alphabetically was measured against ADR-0016's "ordering belongs to the assembler" and reversed before it shipped.
+The fence was again tested rather than trusted: the JDBC rule was written with `java.sql..` forbidden wholesale, which
+**fired on honest code** — `UserRepository`'s `RowMapper` reads a `ResultSet` because `Database.query`'s own public
+seam hands one out (ADR-0038's signature) — and the corrected rule names that exception instead of loosening the
+fence. Seven architecture rules were each proven to bite by two temporarily-added violating classes (violation counts
+2/2/1/2/1/1/1, both spikes deleted, suite re-run green), and the spike itself corrected rule 2's shape: a custom
+condition that reports its own violations must sit under `classes().should(...)`, because `noClasses()` inverted its
+events and the rule passed silently. 53 tests (8 auth, 13 user, 11 openapi, 10 composition, 7 ArchUnit, 4
+class-major), 96.40% line coverage on JDK 21 above the 85% gate, plus core's 15 `PluginRegistrationTest` cases, and
+six mutation probes (M1 duplicate-ID accepted, M2 dependency check bypassed, M3 skip registration, M4 stop skipped,
+M5 plugin exception swallowed, M6 plugin state leaked) — every one killed by a named test and the source restored
+byte-identical (SHA-256 verified). What 2.13 leaves named rather than built: the OpenAPI *document* (2.14, consuming
+`OperationMetadata`), `PasswordVerifier`'s promotion into security (this ADR's trigger: a consumer outside the plugin
+namespace), plugin discovery (ADR-0016 §7, unchanged), versioned and optional dependencies (ADR-0041 non-goals), and a
+`Migrator`-based plugin schema (the path exists; this plugin's schema is one restart-idempotent decision).
+
+```java
+// Assembly, in the application's own code: build, validate the declared graph, register under descriptor ids.
+Database database = new Database(pool);                       // the app's DataSource, as in 2.12
+UserRepository users = new UserRepository(database, PasswordHasher.standard());
+UserPlugin user = new UserPlugin(users);                      // fills Authorization (ADR-0042's direction)
+SessionStore sessions = SessionStore.of(Clock.systemUTC(), new SecureRandom());
+AuthPlugin auth = new AuthPlugin(sessions, user, "Bearer", Duration.ofMinutes(30));
+                                                              // ^ auth holds the user plugin as a PasswordVerifier,
+                                                              //   never as a type it can mutate
+OpenApiPlugin openapi = new OpenApiPlugin();                  // declared metadata only; 2.14 renders it
+openapi.add(HttpMethod.POST, "/sessions", "Log in", List.of("auth"));
+
+LifecycleOrchestrator.Builder builder = LifecycleOrchestrator.builder();
+for (Plugin plugin : PluginRegistration.validate(List.of(auth, user, openapi))) {
+  builder.register(plugin.descriptor().id(), plugin);         // refuses a duplicate id; validate() refused
+}                                                             // the missing edge, the cycle, and the collision first
+
+LifecycleOrchestrator app = builder.build();
+app.start();                                                  // one engine: initialize all, then start all
+
+// The login route's two halves, kept two methods on purpose (Credential holds ONE value):
+String token = auth.issueSession("ada", "hunter2")            // verifies via PasswordVerifier, returns Optional<Session>
+    .map(session -> session.token().value())                  //   both halves the caller needs: token AND principal
+    .orElse(null);                                            //   null here is a wrong password or unknown user, indistinct
+AuthenticationResult result = auth.authenticate(new Credential("Bearer", presentedToken));
+                                                              // lookup only — a returning request never re-checks a password
+app.stop();
 ```
