@@ -96,6 +96,7 @@ class OpenApiDocumentTest {
           .contains("\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"required\":true,"
               + "\"schema\":{\"type\":\"integer\",\"format\":\"int64\"}}]")
           .contains("\"post\":{\"operationId\":\"postUsers\"")
+          .contains("\"404\":{\"description\":\"no such user\"}")
           .contains("\"$ref\":\"#/components/schemas/User\"")
           .contains("\"securitySchemes\":{\"sessionToken\":{\"type\":\"http\",\"scheme\":\"bearer\"}}")
           .contains("\"security\":[{\"sessionToken\":[\"write\"]}]")
