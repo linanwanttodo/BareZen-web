@@ -1,0 +1,112 @@
+# Changelog
+
+All notable changes to BareZen-web. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+headings, and the project tracks the phases it names rather than a semver release history — the current version is
+`0.1.0-SNAPSHOT`, no release artifact has been published, and no release date is claimed here.
+
+Dates are taken from `git log`, not from a plan.
+
+## [Unreleased]
+
+The whole 2.x line lives under `0.1.0-SNAPSHOT` on `main`. Once a release is actually cut, the phases below get
+grouped under its tag with the real release date; until then this section is the honest state.
+
+### Phase 2.16 — Examples / Release Hardening (2026-10-04)
+
+- `examples/` as one leaf Maven module wired last in the reactor, containing seven runnable programs on the public
+  developer API only: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`,
+  `PluginExample`, `OpenApiExample`.
+- Each example splits a package-private `router()` / `wiring()` factory from a `public static main(String[])` that
+  binds a real socket and self-verifies, plus a TestKit-driven test the reactor runs — 25 example tests, all green
+  on JDK 17 and JDK 21.
+- ADR-0045 records the shape of the leaf: "public API only" enforced by the compiler rather than by review; the
+  example's H2 compile dependency (framework rule holds where it was set — ADR-0038 binds framework modules, an
+  application names its own driver); the four-line `UserRepository.PasswordHashing` adapter as the composition seam
+  the framework deliberately keeps in place.
+- `docs/examples/README.md`: build-and-test invocation, the `java -cp` recipe for running each `main()`, the observed
+  output of all seven, and a reading order.
+- README current state and layout updated for the 2.x completion; the module table's two placeholder rows replaced
+  with named debt classifications (DEFERRED with a reopen trigger, NON-GOAL).
+- `examples/contract/ClassMajorContractTest` so the emitted-major contract holds inside `mvn verify` for every
+  emitting module, not only in the after-the-fact shell guard.
+
+### Phase 2.15 — TestKit / Developer Experience (2026-10-04)
+
+- `framework/barezen-testkit` as the reactor's second top module: `TestServer` binds the real JDK adapter to
+  `127.0.0.1:0`; `TestHttpClient` speaks the seven verbs over `java.net.http.HttpClient` with
+  `followRedirects(NEVER)`; `TestFixtures` hands out the counting and principal-capturing handlers; `TestDatabase`
+  wraps an application-supplied `DataSource` and owns only the reset; `Assertions` gives the response / count /
+  identity checks.
+- Six ArchUnit rules enforce the isolation: nothing in the framework depends on testkit (the isolation rule itself),
+  testkit never names plugins, no driver is named in main sources (`javax.sql` allowed on purpose), no thread-local,
+  no system-property or environment reads, no static mutable state.
+- ADR-0044 records why a new module is legal here when 2.14's generator was forced to stay inside `barezen-plugins`
+  — testkit's dependencies all point downward, so no sideways edge is drawn at the reactor top.
+- `docs/testkit/`: quick start, first integration test, testing security, testing database, testing OpenAPI.
+- 77 testkit tests, seven mutations (the directive's six plus a wrong-echo handler) all killed and restored
+  byte-identical.
+
+### Phase 2.14 — OpenAPI (2026-10-04)
+
+- The OpenAPI generator lives *inside* `com.barezen.plugins.openapi`, not as a new module: a framework module naming
+  plugin types is the exact edge ADR-0042 rule ① forbids, so the placement was measured against the fence, not
+  preferred (`ADR-0043`).
+- Schemas are declared data the application writes, not classes the framework reflects — cycle safety, stable
+  property order, and "no scanning" are structural properties. OpenAPI 3.0.3 JSON only, no YAML (two determinism
+  proofs for one model); `operationId` derived rather than declared, so a duplicate fails loudly instead of silently
+  colliding.
+- `ApiDocument.build()` refuses six malformed-document categories up front.
+- Golden-bytes determinism: the same declared document renders the same bytes every time.
+- Two generator bugs caught by the tests first (a `List.add` returning always-true where `Set.add` was meant; a
+  `$ref` walk that stopped at nesting). 102 plugin-module tests, eight mutations M1–M8 killed and byte-restored.
+
+### Phase 2.13 — Plugin Ecosystem (2026-10-04)
+
+- `framework/barezen-plugins` on the SPI already in core: `AuthPlugin` fills security's existing `Authentication`
+  port, `UserPlugin` fills `Authorization`, `OpenApiPlugin` collects declared `OperationMetadata` only, generating no
+  document. The framework never names a plugin back — the direction is one way (`ADR-0042`).
+- `PluginRegistration.validate` is a pure static verifier: refuses duplicate id, missing dependency, and cycle
+  all-or-nothing, and returns the set ordered so every dependency precedes its dependent (`ADR-0041`).
+- Seven ArchUnit rules hold the boundary; every rule spike-proven to bite (violation counts 2/2/1/2/1/1/1) before
+  the spikes were deleted. Six mutations M1–M6 killed.
+
+### Phase 2.12 — Data (2026-10-04)
+
+- `framework/barezen-data`: `Database(DataSource)` with zero compile dependencies, a `Transaction` whose
+  `commit` / `rollback` are package-private so a repository cannot decide, `DataAccessException` as the single
+  translation point, and a `Migrator` with a history table the framework owns (`ADR-0038`).
+- Transaction semantics measured, not asserted: a first-draft promise that a failed migration leaves no trace was
+  falsified by a standalone probe — H2 commits DDL implicitly — and rewritten to one honest sentence about the table
+  the framework owns (`ADR-0040`).
+- Nesting gets an explicit answer: a second `transaction(...)` opens an independent transaction on a second
+  connection, pinned by tests, not documented-and-hoped (`ADR-0039`).
+
+### Phase 2.11 — Security (2026-10-04)
+
+- `framework/barezen-security`: `SecurityMiddleware` is a `Handler` decorator, three authentication states
+  (`Authenticated`, `Failure`, `Anonymous` — `ADR-0034`), opaque revocable sessions rather than JWTs (`ADR-0036`),
+  PBKDF2-HMAC-SHA256 password hashing (`ADR-0035`), and the 401/403 boundary — identity is delivered to a
+  `SecuredHandler` as a parameter, never a thread-local (`ADR-0033`).
+- Attached to the web contract without widening it — `barezen-web`'s shipped jar still declares zero compile
+  dependencies. 99 security tests (7 ArchUnit rules, 4 class-major, 6 socket-level integration), fourteen mutation
+  probes SM1–SM14 covering the authenticated gate, the 401/403/500 mapping, context delivery, permission question,
+  bearer comparison, expiry boundary, session retirement and rotation, iteration guard, salt randomness and
+  credential disclosure.
+
+### Phase 2.10 — HTTP semantics stabilization & contract hardening (2026-10-01)
+
+- The HEAD framing boundary: folded method decides the handler, raw token decides the wire bytes (`ADR-0028`).
+- One asserted framing matrix — 200/204/304/HEAD/404/405/500 × length × chunked, `Transfer-Encoding` never written,
+  a duplicated framing header refused whether its values agree or not (`ADR-0029`).
+- Response body stays `byte[]` — the streaming design was measured against three named reopening triggers rather
+  than skipped (`ADR-0030`).
+- The request-body limit and its 413 answer (`ADR-0031`).
+- The class-major contract: `scripts/check-jdk-baseline.sh` guards the declared release and
+  `scripts/check-class-major.sh` guards the emitted bytes, so `-Dmaven.compiler.release=21` cannot quietly produce
+  major-65 bytecode that a JDK 17 deployment cannot load (`ADR-0032`).
+
+### Phases 2.1 – 2.9.6
+
+Earlier phases are recorded as individual ADRs in `docs/adr/` (0001–0027) and in the per-phase paragraphs of
+`README.md`; a `0.1.0-SNAPSHOT` line has one rolling history, so this file summarises the recent phases by the
+decisions they made rather than by a semver release cadence.

@@ -113,7 +113,7 @@ examples/                   seven runnable programs (Phase 2.16) on the public A
                             hello-world, routing, request/response, security, database, plugin, openapi — each a
                             router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
                             reactor runs; nothing in the framework depends on this leaf (ADR-0045)
-docs/adr/                   architecture decision records, 0001-0045
+docs/adr/                   architecture decision records, 0001-0046
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
 scripts/                    build guards
