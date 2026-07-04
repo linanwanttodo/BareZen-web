@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.barezen</groupId>
+    <artifactId>barezen-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>barezen-examples</artifactId>
+  <packaging>jar</packaging>
+
+  <name>BareZen Examples</name>
+  <description>
+    Runnable, self-testing examples of the public BareZen API (Phase 2.16). Every example builds, runs from its own
+    main method, and is covered by an integration test that uses the TestKit — so the reactor proves the documented
+    surface works, not only that it compiles. These sources are a leaf: nothing in the framework depends on them,
+    and they name only public API.
+  </description>
+
+  <dependencies>
+    <!--
+      Compile scope: an example is a consumer, and a consumer assembles the whole stack. Each dependency is a
+      downward edge onto a shipped framework module; none of them names a driver or a test tool.
+    -->
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-http-jdk</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-data</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-plugins</artifactId>
+    </dependency>
+
+    <!--
+      H2 is a compile dependency HERE and only here. A runnable database example must actually run against a real
+      driver, and the JDK ships no in-memory SQL, so the alternative would be an example whose main() never executes.
+      This does not weaken the framework's rules: every framework module keeps H2 in test scope and its no-driver-in-
+      main ArchUnit rule stays scoped to com.barezen.framework/data/testkit namespaces — this leaf is not one of them,
+      is depended on by nothing, is not in the BOM, and is not a release artifact. Recorded as a bounded Phase 2.16
+      decision, not a loosening (ADR-0038's rule holds for the framework; an example is an application, and an
+      application legitimately names the database it runs on).
+    -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>compile</scope>
+    </dependency>
+
+    <!--
+      Test scope: the examples demonstrate the TestKit exactly as an application's own tests would. No production edge
+      is added; these drive the mains' public entry points through the TestKit integration tests.
+    -->
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

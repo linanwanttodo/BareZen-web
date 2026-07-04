@@ -24,6 +24,12 @@
     <module>framework/barezen-data</module>
     <module>framework/barezen-plugins</module>
     <module>framework/barezen-testkit</module>
+    <!--
+      The examples are a leaf at the very bottom of the reactor (Phase 2.16). They depend only on public API, so
+      they must never be a dependency of a framework module; being last and depended on by nothing is that boundary
+      made structural. Their tests are the build's "the documented examples actually run and pass" signal.
+    -->
+    <module>examples</module>
   </modules>
 
   <properties>
