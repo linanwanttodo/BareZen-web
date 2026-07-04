@@ -93,6 +93,9 @@ class OpenApiDocumentTest {
       assertThat(json)
           .contains("\"openapi\":\"3.0.3\"")
           .contains("\"servers\":[{\"url\":\"https://api.example.com\"}]")
+          .contains("\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"required\":true,"
+              + "\"schema\":{\"type\":\"integer\",\"format\":\"int64\"}}]")
+          .contains("\"post\":{\"operationId\":\"postUsers\"")
           .contains("\"$ref\":\"#/components/schemas/User\"")
           .contains("\"securitySchemes\":{\"sessionToken\":{\"type\":\"http\",\"scheme\":\"bearer\"}}")
           .contains("\"security\":[{\"sessionToken\":[\"write\"]}]")
