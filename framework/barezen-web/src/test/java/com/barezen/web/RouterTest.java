@@ -70,14 +70,15 @@ class RouterTest {
     }
 
     @Test
-    void abuilderHasOneRegistrationMethodAndOneBuildMethod() {
+    void abuilderHasOneRegistrationMethodOneContributionMethodAndOneBuildMethod() {
       // Not get/post/put/delete: the same nine statements in nine spellings, naming the HTTP methods twice
-      // (ADR-0019 §12).
+      // (ADR-0019 §12). `contributing` is that registration run over a list somebody else wrote, not a third way to
+      // register (ADR-0047).
       assertThat(Arrays.stream(Router.Builder.class.getDeclaredMethods())
           .filter(method -> Modifier.isPublic(method.getModifiers()))
           .map(Method::getName)
           .distinct())
-          .containsExactlyInAnyOrder("route", "build");
+          .containsExactlyInAnyOrder("route", "contributing", "build");
     }
 
     @Test

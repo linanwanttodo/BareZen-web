@@ -329,22 +329,31 @@ class BarezenWebArchitectureTest {
    * name its server needs a type to be found by. Still an allow-list, so a tenth type fails the build, and still renamed
    * rather than left saying "five" or "seven" — the reason ADR-0019 §20 gave is that a rule whose name disagrees with its
    * list is a rule nobody trusts when it does fail.
+   *
+   * <p><b>Amended by Phase 3.1.</b> ADR-0047 adds {@code RouteContributor}, the framework's first extension point, so the
+   * list names ten. Its consumer exists before it does: {@code Router.Builder.contributing} takes a list of them, the JDK
+   * adapter routes through the built table, and {@code RouteContributorTest} calls it on a real table. The reason the
+   * tenth type is allowed where ADR-0016 §6 refused a generic {@code ExtensionPoint} is the dependency direction: this jar
+   * names no core type, so an extension point can only be an interface declared by the component that owns the thing being
+   * contributed — and a token, a registry or a {@code contribute(ExtensionPoint<T>, T)} method would all have needed the
+   * core type this module is forbidden to compile against.
    */
   @ArchTest
-  static final ArchRule the_contract_is_exactly_the_nine_contracted_types = classes()
+  static final ArchRule the_contract_is_exactly_the_ten_contracted_types = classes()
       .that(JavaClass.Predicates.resideInAPackage(WEB)
           .and(JavaClass.Predicates.TOP_LEVEL_CLASSES))
-      .should(haveFullyQualifiedNameBeingOneOfTheNine())
+      .should(haveFullyQualifiedNameBeingOneOfTheTen())
       .as("ADR-0018 §16 froze Handler, Request, Response, Headers, HttpMethod; ADR-0019 §20 added Router and RouteMatch;"
-          + " ADR-0021 §3 and ADR-0025 §2 added HttpServerAdapter and HttpServerAdapterProvider — anything else needs a"
-          + " consumer, which is the rule every earlier phase used");
+          + " ADR-0021 §3 and ADR-0025 §2 added HttpServerAdapter and HttpServerAdapterProvider; ADR-0047 added"
+          + " RouteContributor — anything else needs a consumer, which is the rule every earlier phase used");
 
-  private static ArchCondition<JavaClass> haveFullyQualifiedNameBeingOneOfTheNine() {
+  private static ArchCondition<JavaClass> haveFullyQualifiedNameBeingOneOfTheTen() {
     List<String> allowed = java.util.List.of(
         "com.barezen.web.Handler", "com.barezen.web.Request", "com.barezen.web.Response", "com.barezen.web.Headers",
         "com.barezen.web.HttpMethod", "com.barezen.web.Router", "com.barezen.web.RouteMatch",
-        "com.barezen.web.HttpServerAdapter", "com.barezen.web.HttpServerAdapterProvider");
-    return new ArchCondition<JavaClass>("be one of the nine contracted types") {
+        "com.barezen.web.HttpServerAdapter", "com.barezen.web.HttpServerAdapterProvider",
+        "com.barezen.web.RouteContributor");
+    return new ArchCondition<JavaClass>("be one of the ten contracted types") {
       @Override
       public void check(JavaClass type, ConditionEvents events) {
         boolean violates = !allowed.contains(type.getName());
@@ -663,16 +672,25 @@ class BarezenWebArchitectureTest {
    * called {@code replace}, {@code reload} or {@code unregister}, none of which starts with any banned prefix. An
    * allow-list refuses the whole family, and refuses {@code size()} and {@code routes()} with it: methods that would
    * turn a table into something an application inspects, orders, or merges (ADR-0019 §13, §19).
+   *
+   * <p><b>Amended by Phase 3.1.</b> {@code contributing} joins the list as the runner ADR-0047 wrote for {@code
+   * RouteContributor}. It is the authority {@code route} already had — registering a handler for a method and a pattern —
+   * reached over a list the caller supplied, so it adds no way to inspect, order or merge the table, and the family this
+   * rule was written to refuse ({@code size}, {@code routes}, {@code replace}, {@code reload}) is still absent. The
+   * alternative, an application's own loop over its plugins, would have put the same registration outside the allow-list
+   * while teaching every consumer to cast.
    */
   @ArchTest
   static final ArchRule the_route_table_exposes_only_the_questions_it_answers = methods()
       .that(JavaMember.Predicates.declaredIn(routeTableTypes()))
       .should(beAPublicMethodOnTheAllowedList())
-      .as("Router answers match and methodsFor; Router.Builder registers and builds. Anything else — unregister,"
-          + " replace, reload, size, routes — is a route registry with precedence rules, which ADR-0019 §13 defers");
+      .as("Router answers match and methodsFor; Router.Builder registers, contributes what others registered and builds."
+          + " Anything else — unregister, replace, reload, size, routes — is a route registry with precedence rules,"
+          + " which ADR-0019 §13 defers");
 
   private static ArchCondition<JavaMethod> beAPublicMethodOnTheAllowedList() {
-    List<String> allowed = java.util.List.of("builder", "match", "methodsFor", "toString", "route", "build");
+    List<String> allowed = java.util.List.of(
+        "builder", "match", "methodsFor", "toString", "route", "contributing", "build");
     return new ArchCondition<JavaMethod>("be one of the allowed router operations") {
       @Override
       public void check(JavaMethod method, ConditionEvents events) {

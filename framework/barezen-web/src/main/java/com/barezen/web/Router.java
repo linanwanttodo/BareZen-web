@@ -288,7 +288,8 @@ public final class Router {
   /**
    * The route table under construction: explicit registration, then {@link #build()}.
    *
-   * <p>{@code route} is the whole registration surface. {@code get(path, handler)} plus {@code post(...)} plus
+   * <p>{@link #route} is the whole registration surface, and {@link #contributing} is that method run over a list
+   * somebody else supplied — it adds no third way to register. {@code get(path, handler)} plus {@code post(...)} plus
    * {@code put(...)} would be nine ways to say the same thing, each with its own documentation to keep in agreement, and
    * it would name the HTTP methods twice — once as {@link HttpMethod} values and once as method names. Refusing a second
    * equivalent entry point is the same call {@code ServiceAssembly.Builder} made when it kept {@code instance} and
@@ -333,6 +334,40 @@ public final class Router {
       Registration registration = parsed(method, pattern, handler);
       refuseAmbiguous(registration);
       registrations.add(registration);
+      return this;
+    }
+
+    /**
+     * Asks each contributor to register its routes on this builder, in the order they arrive.
+     *
+     * <p>This is the one place the extension point is run, and it is here rather than in an application's assembly loop
+     * so that the composition has no {@code instanceof} to write and no order of its own to get wrong: the table applies
+     * contributors and then the application's own {@link #build()} freezes the result, which is the sequencing ADR-0047
+     * replaces. The element type is already {@link RouteContributor}, so nothing here tests, casts or looks up — the
+     * contributors were chosen by the caller, and {@code com.barezen.plugins.routes} is where a caller holding
+     * {@code Plugin}s narrows them to this type (ADR-0042's direction).
+     *
+     * <p>Contributions are applied as if the application had written each {@link #route} call itself, which is the
+     * whole point: a contributed route is refused by {@link #refuseAmbiguous} exactly like a hand-written one, and there
+     * is no precedence, weight or namespace between the two kinds.
+     *
+     * @param contributors the components whose routes belong in this table, never {@code null} and never containing
+     *     {@code null}; iteration order is the registration order
+     * @return this builder, so an application can contribute and build in one statement
+     * @throws NullPointerException if {@code contributors} or any element of it is null
+     * @throws IllegalArgumentException if a contributed route collides with one already registered, including one
+     *     registered by an earlier contributor (ADR-0019 §9)
+     */
+    public Builder contributing(Iterable<? extends RouteContributor> contributors) {
+      Objects.requireNonNull(contributors,
+          "the route contributors; a null list is indistinguishable from a caller that meant to contribute nothing,"
+              + " and the difference is a route table that quietly lacks a plugin's endpoints");
+      for (RouteContributor contributor : contributors) {
+        Objects.requireNonNull(contributor,
+            "a null route contributor; every contributor is asked in turn, so a null element would fail halfway"
+                + " through a table that already holds the routes registered before it");
+        contributor.contributeRoutes(this);
+      }
       return this;
     }
 
