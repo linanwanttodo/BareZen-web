@@ -2,7 +2,7 @@ package com.barezen.examples.plugins;
 
 import com.barezen.core.kernel.LifecycleOrchestrator;
 import com.barezen.core.plugin.Plugin;
-import com.barezen.core.plugin.PluginDescriptor;
+import com.barezen.core.plugin.PluginDiscovery;
 import com.barezen.core.plugin.PluginRegistration;
 import com.barezen.data.Database;
 import com.barezen.plugins.auth.AuthPlugin;
@@ -19,30 +19,35 @@ import com.barezen.web.Headers;
 import com.barezen.web.HttpMethod;
 import com.barezen.web.Request;
 import com.barezen.web.Response;
-import com.barezen.web.RouteContributor;
 import com.barezen.web.Router;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 import javax.sql.DataSource;
 
 /**
- * Plugins: the auth, user and OpenAPI plugins assembled into one lifecycle, ordered by their declared dependencies, plus
- * one plugin that owns an endpoint and therefore contributes its route.
+ * Plugins assembled three ways at once: the ones this application builds by hand, the one that announced itself on the
+ * classpath, and the routes the contributors among them hand over.
  *
  * <p>A plugin here is a {@link Plugin} — a lifecycle participant that can name itself. The three shipped plugins
  * cooperate through plain constructors, not a plugin context: a {@link UserRepository} sits on the {@link Database},
  * the {@link UserPlugin} wraps it and is both an authorization source and a password verifier, and the
- * {@link AuthPlugin} takes that verifier plus a {@link SessionStore} to issue and check bearer sessions. Each
- * declares its dependencies on its descriptor, and {@link PluginRegistration#validate} refuses cycles and duplicates
- * and returns the list ordered so every dependency is initialized before the plugin that needs it — that order is the
- * {@link LifecycleOrchestrator}'s startup order.
+ * {@link AuthPlugin} takes that verifier plus a {@link SessionStore} to issue and check bearer sessions. None of them can
+ * be discovered: each is constructed with collaborators, and a {@link java.util.ServiceLoader} provider is a no-argument
+ * constructor, which is the limit ADR-0048 states rather than dissolves.
  *
- * <p>{@link ReportsPlugin} shows the other half: a plugin that owns HTTP endpoints does not receive a
- * {@link Router.Builder} in its constructor, it implements {@link RouteContributor} and {@link #router} asks the
- * contributors among the plugin list for their routes (ADR-0047). The table is then built and frozen before anything
- * starts, so the route an application can serve is decided by assembly and not by which plugin happened to run first.
+ * <p>{@link ReportsPlugin} is the one that needs nothing, so it is announced in
+ * {@code META-INF/services/com.barezen.core.plugin.Plugin} and arrives from {@link PluginDiscovery#discover()}. It also
+ * owns an endpoint: it implements {@code RouteContributor} rather than receiving a {@link Router.Builder} in a
+ * constructor (ADR-0047), and {@link #router} asks the contributors among the assembled list for their routes. The table
+ * is built and frozen before anything starts, so the routes an application serves are decided by assembly and not by
+ * which plugin ran first.
+ *
+ * <p>{@link PluginRegistration#validate} is where the two sources meet: it takes the hand-built and the discovered set
+ * as one list, honours declared dependencies across that boundary, and refuses a duplicate id whether the claim arrives
+ * from a jar or from {@code new} (ADR-0041, ADR-0048).
  *
  * <p>{@code UserPlugin.initialize()} creates the user tables, so the login must happen after {@code app.start()}, not
  * before. The OpenAPI plugin only collects operation metadata; it owns no HTTP and attaches no routes, which is why
@@ -56,26 +61,8 @@ public final class PluginExample {
   private PluginExample() {
   }
 
-  /** The four plugins plus the repository behind them, wired to one data source. */
-  record Wiring(UserRepository users, AuthPlugin auth, List<Plugin> plugins) {
-  }
-
-  /**
-   * A plugin that owns one endpoint. It holds no router, no builder and no context: it declares the route its own
-   * contributor method registers (ADR-0047).
-   */
-  static final class ReportsPlugin implements Plugin, RouteContributor {
-
-    @Override
-    public PluginDescriptor descriptor() {
-      return new PluginDescriptor("reports", List.of("user"));
-    }
-
-    @Override
-    public void contributeRoutes(Router.Builder routes) {
-      routes.route(HttpMethod.GET, "/reports/status", (request, ignored) ->
-          new Response(200, Headers.of("Content-Type", "text/plain"), "reports ready".getBytes()));
-    }
+  /** The plugins this application constructs itself, plus the repository and the auth handle the demo needs. */
+  record Wiring(UserRepository users, AuthPlugin auth, List<Plugin> built) {
   }
 
   public static DataSource dataSource() {
@@ -105,7 +92,7 @@ public final class PluginExample {
     };
   }
 
-  /** Build the plugins and their collaborators. The list is intentionally unordered; {@link #start} orders it. */
+  /** Build the plugins that need collaborators. The list is intentionally unordered; {@link #assemble} orders it. */
   static Wiring wiring(DataSource dataSource) {
     Database database = new Database(dataSource);
     UserRepository users = new UserRepository(database, hashing());
@@ -114,7 +101,25 @@ public final class PluginExample {
     AuthPlugin auth = new AuthPlugin(sessions, user, "Bearer", Duration.ofMinutes(30));
     OpenApiPlugin openapi = new OpenApiPlugin();
     openapi.add(HttpMethod.POST, "/sessions", "Log in");
-    return new Wiring(users, auth, List.of(auth, user, openapi, new ReportsPlugin()));
+    return new Wiring(users, auth, List.of(auth, user, openapi));
+  }
+
+  /**
+   * The whole plugin set: what the application built plus what the classpath announced, in dependency order.
+   *
+   * <p>One {@link PluginDiscovery#discover()} call, and its result goes into the same validated list the orchestrator
+   * is later registered from — so the instance whose routes were contributed is the instance that gets lifecycle
+   * phases. Discovery returns fresh instances every call (it stores nothing), and an application that called it twice
+   * would run two plugins under one id and be refused by the validator rather than silently doubled.
+   *
+   * @param wiring the application's own plugins
+   * @param announced the plugins found on the classpath, normally {@code PluginDiscovery.discover()}
+   * @return every plugin, ordered so each one follows the ones it declares
+   */
+  static List<Plugin> assemble(Wiring wiring, List<Plugin> announced) {
+    List<Plugin> merged = new ArrayList<>(wiring.built());
+    merged.addAll(announced);
+    return PluginRegistration.validate(merged);
   }
 
   /**
@@ -124,18 +129,18 @@ public final class PluginExample {
    * plugin layer because that is the only layer allowed to name both {@link Plugin} and a web type (ADR-0047). Building
    * the table here, before {@link #start}, is what makes the routes decided by assembly rather than by a lifecycle.
    */
-  static Router router(Wiring wiring) {
+  static Router router(List<Plugin> plugins) {
     return Router.builder()
         .route(HttpMethod.GET, "/health", (request, ignored) ->
             new Response(200, Headers.of("Content-Type", "text/plain"), "ok".getBytes()))
-        .contributing(RouteContributions.of(PluginRegistration.validate(wiring.plugins())))
+        .contributing(RouteContributions.of(plugins))
         .build();
   }
 
-  /** Order the plugins by declared dependency and start them on a fresh orchestrator. */
-  static LifecycleOrchestrator start(Wiring wiring) {
+  /** Register the assembled plugins under their descriptor ids and start them on a fresh orchestrator. */
+  static LifecycleOrchestrator start(List<Plugin> plugins) {
     LifecycleOrchestrator.Builder builder = LifecycleOrchestrator.builder();
-    for (Plugin plugin : PluginRegistration.validate(wiring.plugins())) {
+    for (Plugin plugin : plugins) {
       builder.register(plugin.descriptor().id(), plugin);
     }
     LifecycleOrchestrator app = builder.build();
@@ -143,18 +148,26 @@ public final class PluginExample {
     return app;
   }
 
+  private static List<String> idsOf(List<Plugin> plugins) {
+    return plugins.stream().map(plugin -> plugin.descriptor().id()).toList();
+  }
+
   public static void main(String[] args) {
     Wiring wiring = wiring(dataSource());
-    Router routes = router(wiring);
-    LifecycleOrchestrator app = start(wiring);
+    List<Plugin> announced = PluginDiscovery.discover();
+    List<Plugin> plugins = assemble(wiring, announced);
+    Router routes = router(plugins);
+    LifecycleOrchestrator app = start(plugins);
     try {
+      System.out.println("announced on the classpath -> " + idsOf(announced));
+      System.out.println("assembled order -> " + idsOf(plugins));
       System.out.println("startup order -> " + app.participantIds());
       System.out.println("route table -> " + routes);
 
       // The contributed route is answerable before anything was started, and it answers with its own handler.
       routes.match(new Request(HttpMethod.GET, "/reports/status", null, Headers.empty(), null))
           .orElseThrow(() -> new IllegalStateException("the reports plugin's route is missing from the table"));
-      System.out.println("GET /reports/status -> answered by the plugin's handler");
+      System.out.println("GET /reports/status -> answered by the discovered plugin's handler");
 
       // The user table exists only after start(), because that is when UserPlugin.initialize() runs.
       wiring.users().create("ada", "hunter2");
