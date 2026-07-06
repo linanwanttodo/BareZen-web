@@ -45,6 +45,17 @@
       </dependency>
 
       <!--
+        The servlet integration (ADR-0049): a Router deployed into an existing container. jakarta.servlet-api is
+        `provided`, so an application that never deploys a war takes nothing from this artifact and no transitive
+        container arrives with it — it is in the BOM because it is shippable, not because a build needs it.
+      -->
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-http-servlet</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
         Security middleware on the web contract (Phase 2.11). It depends on barezen-web, never on an adapter,
         so an application wires it around a Router without taking a server dependency.
       -->

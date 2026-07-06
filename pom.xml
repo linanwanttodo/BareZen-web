@@ -20,6 +20,7 @@
     <module>framework/barezen-core</module>
     <module>framework/barezen-web</module>
     <module>framework/barezen-http-jdk</module>
+    <module>framework/barezen-http-servlet</module>
     <module>framework/barezen-security</module>
     <module>framework/barezen-data</module>
     <module>framework/barezen-plugins</module>
@@ -55,6 +56,16 @@
       rollback and migration behaviour can be tested against a real JDBC driver without shipping one.
     -->
     <h2.version>2.2.224</h2.version>
+
+    <!--
+      The servlet boundary (ADR-0049). jakarta.servlet-api is `provided` in the adapter module: an application
+      deploying into a container is given those classes by the container, and one that embeds a container brings its
+      own. Tomcat appears once, at test scope, so the adapter's request-mapping and framing claims are measured against
+      a real container rather than against a mock of one. Both are outside the framework's dependency rule: ADR-0001
+      binds barezen-core, and the ban list in this pom still refuses Spring, log4j-core and commons-logging.
+    -->
+    <jakarta-servlet.version>6.0.0</jakarta-servlet.version>
+    <tomcat-embed.version>10.1.34</tomcat-embed.version>
 
     <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
     <maven-surefire-plugin.version>3.2.5</maven-surefire-plugin.version>
@@ -112,6 +123,20 @@
         <groupId>ch.qos.logback</groupId>
         <artifactId>logback-classic</artifactId>
         <version>${logback.version}</version>
+        <scope>test</scope>
+      </dependency>
+
+      <dependency>
+        <groupId>jakarta.servlet</groupId>
+        <artifactId>jakarta.servlet-api</artifactId>
+        <version>${jakarta-servlet.version}</version>
+        <scope>provided</scope>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.tomcat.embed</groupId>
+        <artifactId>tomcat-embed-core</artifactId>
+        <version>${tomcat-embed.version}</version>
         <scope>test</scope>
       </dependency>
     </dependencies>

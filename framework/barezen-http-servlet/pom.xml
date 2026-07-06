@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.barezen</groupId>
+    <artifactId>barezen-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>barezen-http-servlet</artifactId>
+  <packaging>jar</packaging>
+
+  <name>BareZen HTTP Integration: Servlet</name>
+  <description>
+    The second implementation of the web contract's request path, built on jakarta.servlet: one servlet that serves a
+    Router, so an existing Tomcat, Jetty or Wildfly deployment can run BareZen routing inside the container it already
+    has instead of replacing its server. Reads an HttpServletRequest into a Request with the contract's raw-path and
+    raw-query rules, dispatches it through the Router, and writes the Response back. Owns no port, no thread pool, no
+    executor and no lifecycle: the container owns all four, which is why this module is an integration and not an
+    HttpServerAdapter (ADR-0024, ADR-0049).
+  </description>
+
+  <!--
+    Three dependencies, and no barezen-core among them — which is the phase's claim rather than an oversight. A servlet
+    deployed from a web.xml is instantiated by the container, so an application that runs inside one cannot hand it a
+    Configuration snapshot at assembly; the container's own init-parameter mechanism is the assembly-time surface
+    available in both deployment shapes, and ADR-0013's rule is about resolving once and travelling as a typed value,
+    which is exactly what init() does here. Dropping core also keeps this artifact droppable into a war without dragging
+    the kernel in, and keeps the dependency direction ADR-0018 §12 drew: web is the contract, this is one of its
+    implementations, and the kernel is nobody's requirement.
+
+    jakarta.servlet-api is `provided`: the container supplies those classes at runtime, and shipping them inside a war
+    is the classic deployment failure this scope exists to prevent. Tomcat appears only at test scope, so the mapping
+    and framing claims are measured against a real container rather than asserted against a mock — the same discipline
+    that made ADR-0022 read the JDK's own bytes on a socket instead of trusting its documentation.
+
+    No logback at compile scope, for ADR-0001's reason: production code depends on the facade. Test scope carries the
+    binding because ADR-0023 §4 splits a handler failure into "recorded in the log" and "absent from the socket", and
+    the log half cannot be observed without an implementation.
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-web</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>jakarta.servlet</groupId>
+      <artifactId>jakarta.servlet-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.tomcat.embed</groupId>
+      <artifactId>tomcat-embed-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <!--
+        Same gate and same JDK 21 binding as every other emitting module (ADR-0002, ADR-0032). Nothing in this module
+        is platform-conditional: no thread provider, no capability probe, no executor — the container owns all three —
+        so there is no unreachable half of the bundle on JDK 17 and no reason for a lower bar there.
+      -->
+      <id>coverage-gate</id>
+      <activation>
+        <jdk>[21,)</jdk>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>check-coverage</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+                <configuration>
+                  <rules>
+                    <rule>
+                      <element>BUNDLE</element>
+                      <limits>
+                        <limit>
+                          <counter>LINE</counter>
+                          <value>COVEREDRATIO</value>
+                          <minimum>0.85</minimum>
+                        </limit>
+                      </limits>
+                    </rule>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>
