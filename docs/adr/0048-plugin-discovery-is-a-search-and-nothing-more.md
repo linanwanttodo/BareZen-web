@@ -110,15 +110,16 @@ Each call re-reads the classpath and instantiates new objects. There is no cache
 | M4 | drop the `requireNonNull(loader)` | `aNullLoaderIsRefusedRatherThanSilentlyReplacedByTheContextLoader` | 1 failure of 11, build failed — `ServiceLoader.load(type, null)` does not refuse it, so the explicit check is load-bearing, not decorative |
 - M1's spread is the finding worth reading: a cache does not merely fail its own test, it leaks across tests in the same JVM (the empty-loader call poisoned the cached list and two later tests then read zero plugins). That is the failure mode the no-state rule exists to prevent.
 - Module totals on this build: `barezen-core` 264 → 275, `examples` 26 → 28, 0 failures, 0 errors.
-- Full reactor on JDK 21: `mvn -o -B -ntp clean verify` → BUILD SUCCESS in 9:26 — core 275 (1 skipped), web 248, http-jdk
+- Full reactor (Maven on JDK 24, `release 17`): `mvn -o -B -ntp clean verify` → BUILD SUCCESS in 9:26 — core 275 (1 skipped), web 248, http-jdk
   200, security 99, data 64, plugins 114, testkit 77, examples 28 = **1105 tests, 0 failures, 0 errors**; every module's
   coverage check met; `check-jdk-baseline.sh` and `check-class-major.sh` both exit 0 at
   `checked=563 unique-majors=[61]`.
 - Observed `PluginExample` output, run outside Maven: `announced on the classpath -> [reports]`,
   `assembled order -> [user, openapi, auth, reports]`, `route table -> Router[GET /health, GET /reports/status]` — the
   plugin arrived from a services file, not from a constructor call in the application.
-- JDK 21 only, as in ADR-0047: no JDK 17 in this environment and no remote, so the CI matrix claim is still not executed
-  here.
+- JDK: this build ran on Maven's JDK 24 with `release 17`, not on JDK 21 as first recorded here — corrected against
+  `mvn -version` in ADR-0049's audit. JDK 17 remains unverified (it is not installed) and the CI matrix has never run
+  (there is no remote), exactly as ADR-0047's correction says.
 
 ## Non-goals
 

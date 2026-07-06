@@ -127,7 +127,7 @@ Discovery (3.2), per-route security policy, route enumeration, a second extensio
 - Module totals on this build: `barezen-web` 232 → 248, `barezen-plugins` 102 → 114, `examples` 25 → 26 (the 26th is
   `aPluginContributesARouteTheServerServes`, which serves the contributed route over a real socket through
   `TestServer`/`JdkHttpServerAdapter` and asserts a `POST` to it is 405), 0 failures, 0 errors.
-- Full reactor on JDK 21: `mvn -o -B -ntp clean verify` → BUILD SUCCESS in 9:43, per module core 264 (1 skipped), web 248,
+- Full reactor (Maven on JDK 24, `release 17`): `mvn -o -B -ntp clean verify` → BUILD SUCCESS in 9:43, per module core 264 (1 skipped), web 248,
   http-jdk 200, security 99, data 64, plugins 114, testkit 77, examples 26 — **1092 tests, 0 failures, 0 errors**.
   `scripts/check-jdk-baseline.sh` and `scripts/check-class-major.sh` both exit 0, the latter reporting
   `checked=556 unique-majors=[61] expected=61`.
@@ -145,7 +145,7 @@ Discovery (3.2), per-route security policy, route enumeration, a second extensio
 | M3 | `of` returns the list reversed | `onlyContributorsComeBackAndTheirOrderIsTheCallers` | 1 failure of 12, build failed |
 | M4 | `of` skips a null element instead of refusing it | `aNullElementIsRefusedRatherThanDropped` | 1 failure of 12, build failed |
 | M5 | `contributing` swallows a duplicate so a later plugin wins | `twoContributorsCannotClaimTheSameRouteEither`, `theContributionOrderDoesNotDecideTheWinnerBecauseBothFail` | 2 failures of 16, build failed |
-- JDK: this phase was built and measured on JDK 21. JDK 17 is not installed in this environment (`/usr/lib/jvm` holds 8, 21, 24 and 25), so the JDK 17 half of the compatibility claim is **not** re-verified here, and `git remote -v` is empty so the CI matrix has never run. The emitted major is asserted inside the build by `ClassMajorContractTest`, which is what makes the 61 claim meaningful without a second JDK.
+- JDK: this phase was built on the JDK this environment actually runs — `mvn -version` reports Maven 3.9.12 on `JAVA_HOME=/usr/lib/jvm/jdk-24.0.2`. The "JDK 21" this record first said was wrong, and ADR-0049 corrected it after checking: JDK 17 is not installed here (`/usr/lib/jvm` holds 8, 21, 24 and 25), so neither the 17 nor the 21 half of the compatibility claim is verified by this build, and `git remote -v` is empty so the CI matrix has never executed. What the claim rests on is `release=17` plus `ClassMajorContractTest` and `scripts/check-class-major.sh`, which assert the emitted major inside the build.
 
 ## Non-goals
 

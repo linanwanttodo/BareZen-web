@@ -6,12 +6,48 @@ headings, and the project tracks the phases it names rather than a semver releas
 
 Dates are taken from `git log`, not from a plan.
 
+Two claims inherited from the 2.x entries are not true of this environment and were corrected in Phase 3.3 (ADR-0049):
+the 2.15/2.16 lines say tests were green "on JDK 17 and JDK 21", and no entry can show a CI run. JDK 17 is not installed
+here, `git remote -v` is empty so `.github/workflows/backend-ci.yml` has never executed, and the builds that produced the
+numbers below ran on Maven's JDK 24 with `maven.compiler.release=17`. The bytecode claim survives because it is asserted
+inside the build (`ClassMajorContractTest`, `scripts/check-class-major.sh`), not by a matrix that never ran.
+
 ## [Unreleased]
 
 The whole 2.x line and the first phase of the 3.x line live under `0.1.0-SNAPSHOT` on `main`. Once a release is actually
 cut, the phases below get grouped under its tag with the real release date; until then this section is the honest state.
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
+
+### Phase 3.3 — A Second Server, as a Servlet (2026-10-06)
+
+- `framework/barezen-http-servlet`: `BarezenServlet` routes the same `Router` inside an existing Tomcat, Jetty or Wildfly
+  deployment — the first integration that makes "adopt BareZen" mean "add a jar" instead of "replace your server"
+  (ADR-0049).
+- It is deliberately **not** an `HttpServerAdapter`: ADR-0024's contract is one instance owning a bound port, and a servlet
+  owns none. One public class, one declared public method (`init`), two constants; `ServletBridge` is package-private for
+  ADR-0022 §9's reason.
+- The route table arrives by constructor or by one `ServletContext` attribute read once in `init()` — the declarative
+  deployment needs a no-arg constructor, and one key of one type read once is ADR-0014's explicit registration, not the
+  lookup ADR-0006 refuses.
+- Measured against a real container before asserted: Tomcat frames an unstated body as `Transfer-Encoding: chunked` where
+  the JDK adapter emits `Content-Length`, so the bridge states the length and ADR-0029's single framing matrix now holds
+  across two servers; 204/304 state nothing; HEAD's suppression and the lowercase-`head` asymmetry reproduce from a
+  different cause; the routed path is raw `getRequestURI()` minus the context path.
+- Same 1 MiB request-body limit as the JDK adapter (claim refused before the read, counted past the bound), resolved once
+  from the container's init-parameter so this module needs no dependency on the kernel. A bad or negative value fails the
+  deployment; `0` is a policy.
+- Recorded rather than smoothed over: three refusals never reach the servlet (encoded slash, a body short of its declared
+  length, `TRACE`) and arrive as Tomcat's own HTML — including an exception report — and `Content-Type` whitespace is
+  re-written by the container. A miswired deployment comes down (its requests get the container's 404), but `start()`
+  does not throw unless the container is configured to fail the context, so no fail-fast is claimed.
+- 58 module tests (18 contract semantics over real sockets, 7 body-limit, 10 assembly with no container, 4 deployment
+  including a `/app` context, 8 ArchUnit rules, 7 surface, 4 class-major). One spike class fired 6 of the 8 rules
+  (violations 1/3/1/1/1/1); the two cross-module rules can only be enforced by javac here and say so. Mutations M1–M5 and
+  M7 killed, M6 shown not to compile, every file md5-restored. Coverage gate met at 85%.
+- Docs corrected against `mvn -version`: this build runs on Maven's JDK 24 with `release 17`, not on JDK 21 as ADR-0047 and
+  ADR-0048 first said; JDK 17 is not installed here and there is no git remote, so the CI matrix has never executed. The
+  bytecode claim rests on `ClassMajorContractTest` and `scripts/check-class-major.sh`, which run inside the build.
 
 ### Phase 3.2 — Plugin Discovery (2026-10-06)
 
