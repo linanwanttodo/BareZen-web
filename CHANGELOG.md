@@ -13,6 +13,26 @@ cut, the phases below get grouped under its tag with the real release date; unti
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
 
+### Phase 3.2 — Plugin Discovery (2026-10-06)
+
+- `com.barezen.core.plugin.PluginDiscovery`: `discover()` and `discover(ClassLoader)` read
+  `META-INF/services/com.barezen.core.plugin.Plugin` and return a fresh immutable list in provider-configuration order.
+  It keeps nothing, runs no lifecycle phase, and answers no lookup — the search is a function from a classpath to a list
+  (ADR-0048).
+- Supersedes ADR-0016 §7's refusal while keeping its concern as a build fact: `the_assembler_and_the_event_bus_do_not_scan_or_reflect`
+  still forbids `ServiceLoader.load` in `core.di` and `core.event`, spike-proven again in this phase (1 violation, build
+  failed). No architecture rule needed amending.
+- A discoverable plugin is one a public no-argument constructor can build, so a plugin needing a `DataSource` stays the
+  application's to construct. None of the three shipped plugins is discoverable; `examples/.../ReportsPlugin.java` is, and
+  it is announced by a real services file so the tests run against a live `ServiceLoader` rather than a mock.
+- Discovered and hand-built plugins meet only at `PluginRegistration.validate`, which honours declared dependencies across
+  the boundary and refuses a duplicate id whichever side claimed it.
+- A provider that cannot be loaded aborts the call with the JDK's `ServiceConfigurationError` naming it — booting without
+  an integration nobody can see missing was refused as the undebuggable failure (ADR-0004's cause-preserving rule).
+- 11 `PluginDiscoveryTest` + 2 new `PluginExampleTest` tests (core 264 → 275, examples 26 → 28); mutations M1–M4 (cache the
+  list, skip a broken provider, ignore the caller's loader, drop the null check) all killed and every source md5-restored. M1
+  leaked across tests, which is the registry failure mode the no-state rule exists to prevent.
+
 ### Phase 3.1 — The First Extension Point (2026-10-06)
 
 - `com.barezen.web.RouteContributor` is the framework's first extension point and the tenth contracted type: one method

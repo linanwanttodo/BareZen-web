@@ -40,21 +40,25 @@ the only place `Plugin` and a web type may meet, since core cannot name web and 
 left to the application (builder → construct plugins → `start()` → `build()` → adapter) collapses to builder → contribute
 → build → start, a contributed route colliding with any other is refused by the existing duplicate rule rather than won
 by whoever ran last, and there is still no `PluginContext`, no registry, no token, no annotation and no route
-enumeration. What is left open is left open by name: every deferred item carries a reopening trigger and a named phase in
-the ADR that defers it, and nothing beyond what a build measured is claimed as working.
+enumeration. Phase 3.2 added the search (`PluginDiscovery`, ADR-0048): a plugin announced in `META-INF/services` now arrives from
+the classpath instead of being named by the application, in the SPI's own package because the container and the bus
+may not scan and an application must not need the shipped plugins to be pluggable. A discoverable plugin is one a
+no-argument constructor can build, so the three shipped plugins stay hand-built and the example shows both halves;
+the discovered and hand-built sets meet only at `PluginRegistration.validate`, which refuses a duplicate id
+whichever side claimed it. What is left open is left open by name: every deferred item carries a reopening trigger
+and a named phase in the ADR that defers it, and nothing beyond what a build measured is claimed as working.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
-| `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
+| `framework/barezen-core` | 2.1–2.6, 3.2 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, event bus, and the plugin SPI — `Plugin`, `PluginDescriptor`, `PluginRegistration` (2.13) and since 3.2 `PluginDiscovery`, the search that finds announced plugins and keeps none of them (ADR-0048); the container and the bus still may not scan or enumerate a service |
 | `framework/barezen-web` | 2.7–2.9.6, 2.10, 3.1 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix; 3.1 added the contract's first extension point, `RouteContributor`, and the `Router.Builder.contributing` runner, so the shipped jar now names ten contracted types and still zero compile dependencies |
 | `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
 | `framework/barezen-plugins` | 2.13–2.14, 3.1 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); 3.1 adds `routes.RouteContributions.of`, the pure narrowing from `Plugin`s to `RouteContributor`s, which is the one `instanceof` in the mechanism and the only namespace where `Plugin` and a web type may meet (ADR-0047); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
 | `framework/barezen-testkit` | 2.15 | a consumer-facing test tool, not a framework service: `TestServer` binds the real JDK adapter to `127.0.0.1:0`, `TestHttpClient` speaks the seven verbs over `java.net.http` with `followRedirects(NEVER)`, `TestFixtures` provides the counting and principal-capturing handlers, `TestDatabase` wraps an application-supplied `DataSource` and owns only the reset, `Assertions` gives the response/count/identity checks (ADR-0044). Five downward compile dependencies (core, web, http-jdk, security, data), no sideways edge to `com.barezen.plugins`, H2 test-scope only, and no class in the shipped reactor may name it — the isolation rule |
-| `examples` | 2.16 | seven runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`. Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
-| Discovery | 3.2 | DEFERRED — reopen trigger: a plugin that must arrive without an application naming its constructor; `ADR-0016 §7` keeps it out until then, and `ADR-0025 §5` is the precedent for a seam that may only discover |
+| `examples` | 2.16 | seven runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`; `PluginExample` also carries the plugin that announces itself in `META-INF/services` (3.2). Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
 | Route enumeration | 3.x | DEFERRED — reopen trigger: the OpenAPI double-write (a route declared once as a route and once as `OperationMetadata`) costing a real project a wrong document; `ADR-0047` records why the merge step stays refused until then |
 | Second extension point | 3.x | DEFERRED — reopen trigger: a component other than the route table with a plugin that needs to contribute to it (the named candidate is the event bus, consumerless since 2.6 per ADR-0017) |
 | Frontend | non-goal | NON-GOAL — BareZen is a server-side framework; a frontend binding needs a real consumer with named rules (ADR-0016) |
@@ -99,7 +103,7 @@ declared-release script and emits major 65 anyway (ADR-0032).
 pom.xml                     barezen-parent: owns maven.compiler.release=17, versions, enforcer
 barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
-                            assembly (di), plugin SPI, events, errors
+                            assembly (di), plugin SPI (descriptor, validator, discovery since 3.2), events, errors
 framework/barezen-web/      HTTP contract and route table: handler, request, response, headers, method, router,
                             route match, server adapter contract, and the contract's first extension point
                             (RouteContributor, ADR-0047) — no shipped dependency, no server
@@ -128,7 +132,7 @@ examples/                   seven runnable programs (Phase 2.16) on the public A
                             hello-world, routing, request/response, security, database, plugin, openapi — each a
                             router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
                             reactor runs; nothing in the framework depends on this leaf (ADR-0045)
-docs/adr/                   architecture decision records, 0001-0047
+docs/adr/                   architecture decision records, 0001-0048
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
 docs/txt/                   the public API reference (`BAREZEN-WEB-PUBLIC-API-REFERENCE.md`) plus the archived
@@ -937,9 +941,11 @@ the OpenAPI double-write is recorded there as the honest unfinished half of this
 route table.
 
 ```java
-// A plugin that owns an endpoint contributes it instead of holding a builder. Verbatim from
-// examples/.../plugins/PluginExample.java, where PluginExampleTest serves the contributed route over a real socket.
-static final class ReportsPlugin implements Plugin, RouteContributor {
+// A plugin that owns an endpoint contributes it instead of holding a builder, and announces itself so an application
+// does not have to name its constructor. Both files are verbatim from examples/: ReportsPlugin.java (public, no-arg
+// constructor, listed in META-INF/services/com.barezen.core.plugin.Plugin) and PluginExample.java.
+public class ReportsPlugin implements Plugin, RouteContributor {
+  public ReportsPlugin() {}                                        // required by ServiceLoader
   @Override public PluginDescriptor descriptor() { return new PluginDescriptor("reports", List.of("user")); }
   @Override public void contributeRoutes(Router.Builder routes) {
     routes.route(HttpMethod.GET, "/reports/status", (request, ignored) ->
@@ -947,17 +953,37 @@ static final class ReportsPlugin implements Plugin, RouteContributor {
   }
 }
 
-static Router router(Wiring wiring) {
-  return Router.builder()
-      .route(HttpMethod.GET, "/health", (request, ignored) ->
-          new Response(200, Headers.of("Content-Type", "text/plain"), "ok".getBytes()))
-      .contributing(RouteContributions.of(PluginRegistration.validate(wiring.plugins())))  // the narrowing, once
-      .build();                                                                            // frozen before anything starts
-}
+// The two sources meet at the validator: hand-built plugins (each needs a DataSource) plus discovered ones.
+List<Plugin> plugins = PluginExample.assemble(wiring, PluginDiscovery.discover());
+Router routes = Router.builder()
+    .route(HttpMethod.GET, "/health", (request, ignored) ->
+        new Response(200, Headers.of("Content-Type", "text/plain"), "ok".getBytes()))
+    .contributing(RouteContributions.of(plugins))                  // the narrowing, once (ADR-0047)
+    .build();                                                      // frozen before anything starts
 
 // PluginExampleTest, the same table on the real JDK adapter:
-try (TestServer server = TestServer.start(PluginExample.router(wiring))) {
+try (TestServer server = TestServer.start(routes)) {
   Assertions.assertThat(server.client().get("/reports/status")).statusIs(200).bodyIs("reports ready");
   Assertions.assertThat(server.client().request(HttpMethod.POST, "/reports/status").send()).statusIs(405);
 }
 ```
+
+## Phase 3.2 in one paragraph
+
+`PluginDiscovery` is the search ADR-0016 §7 refused, and this is the separate record §7 said discovery would need
+(ADR-0048). It supersedes the refusal and keeps the concern: a container that discovers has stopped being told what
+exists, so `core.di` and `core.event` still may not scan, load a class by name or enumerate a service —
+`the_assembler_and_the_event_bus_do_not_scan_or_reflect` was spike-proven against this exact call again in this phase (a
+`ServiceLoader.load` placed in `ServiceAssembly` fired 1 violation and failed the build). Two static methods return the
+plugins announced by `META-INF/services/com.barezen.core.plugin.Plugin`, in provider-configuration order, as a fresh
+immutable list every call: nothing is cached, so there is no registry, no `byId`, no instance held past the call, and no
+lifecycle phase run on what arrived. The limit is stated rather than designed around — a `ServiceLoader` provider is a
+public no-argument constructor, so a plugin that needs a `DataSource` or a `SessionStore` cannot be discovered and stays
+the application's to build; that is ADR-0016 §1, and the way around it is the service locator five records refuse. The
+two sources meet at one place, `PluginRegistration.validate`, which honours declared dependencies across the boundary and
+refuses a duplicate id whether it arrived from a jar or from `new`, and a provider that cannot load aborts the call with
+the JDK's own message naming it rather than being skipped. `examples/` carries both halves: `auth`, `user` and `openapi`
+constructed by hand, `reports` announced in a services file, contributing its route (ADR-0047) and served over a real
+socket by the test. Eleven discovery tests plus two example tests, mutations M1–M4 killed — and M1, the cache, is the one
+worth reading, because turning the result into a registry leaked across tests in the same JVM and that is precisely the
+failure the no-state rule exists to prevent.

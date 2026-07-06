@@ -15,7 +15,7 @@ Both are part of the reactor, so the ordinary build runs them:
 mvn -o -B -ntp -pl examples -am test
 ```
 
-That compiles every framework module the examples depend on and runs the 26 example tests (22 behavioural across the
+That compiles every framework module the examples depend on and runs the 28 example tests (24 behavioural across the
 seven topics plus a per-module `ClassMajorContractTest` of 4). They are also in the
 full-reactor `mvn -o -B -ntp clean verify`, so no separate command is needed once the whole project is green.
 
@@ -47,7 +47,7 @@ endpoint. The recorded output of the seven runs on JDK 17:
 | `requestresponse.RequestResponseExample` | echo round-trips the body, `describe` reports method/header/query, `DELETE /gone -> 204` |
 | `security.SecurityExample` | password verify true/false, `/health` 200, `/report` 401 then 200 with the bearer, `/admin` 403 |
 | `database.DatabaseExample` | one migration applied, two rows after a committed transaction, a rolled-back insert leaves the count at 2 |
-| `plugins.PluginExample` | startup order `[user, openapi, auth, reports]`, the table `Router[GET /health, GET /reports/status]` with the second route contributed by a plugin, a login authenticates as `ada`, a bad password issues no session |
+| `plugins.PluginExample` | announced on the classpath `[reports]`, assembled order `[user, openapi, auth, reports]`, startup order `[user, openapi, auth, reports]`, the table `Router[GET /health, GET /reports/status]` with the second route contributed by the discovered plugin, a login authenticates as `ada`, a bad password issues no session |
 | `openapi.OpenApiExample` | a 1201-byte document, served `200 application/json` at `/openapi.json` |
 
 ## What each example demonstrates
@@ -66,10 +66,14 @@ endpoint. The recorded output of the seven runs on JDK 17:
   application, not the framework (ADR-0038's rule holds where it was set).
 - **`PluginExample`** — `PluginRegistration.validate` orders the plugins by their declared dependencies and the
   `LifecycleOrchestrator` starts them in that order; `UserPlugin.initialize()` creates the tables a login then needs.
-  The `PasswordHashing` adapter is the composition seam the framework keeps on purpose. `ReportsPlugin` is ADR-0047's
-  consumer: a plugin that owns an endpoint implements `RouteContributor`, `RouteContributions.of` picks the contributors
-  out of the validated list, and the table is built and frozen before anything starts — `PluginExampleTest` then serves
-  that route over a real socket and asserts a `POST` to it is a 405.
+  The `PasswordHashing` adapter is the composition seam the framework keeps on purpose.
+  `ReportsPlugin` (its own public class, `examples/src/main/java/.../plugins/ReportsPlugin.java`) is both of this
+  line's plugin features at once: it is ADR-0047's consumer — a plugin that owns an endpoint implements
+  `RouteContributor`, `RouteContributions.of` picks the contributors out of the validated list, and the table is built
+  and frozen before anything starts — and ADR-0048's, because it is announced in
+  `examples/src/main/resources/META-INF/services/com.barezen.core.plugin.Plugin` and reaches the assembly through
+  `PluginDiscovery.discover()` rather than a constructor call. `PluginExampleTest` serves that route over a real
+  socket, asserts a `POST` to it is a 405, and asserts a second claim on the id `reports` aborts the assembly.
 - **`OpenApiExample`** — `ApiDocument.build()` refuses a malformed document up front, and `document.handler()` serves
   the deterministic JSON from its own route on the application's router.
 
