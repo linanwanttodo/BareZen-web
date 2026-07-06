@@ -8,8 +8,34 @@ Dates are taken from `git log`, not from a plan.
 
 ## [Unreleased]
 
-The whole 2.x line lives under `0.1.0-SNAPSHOT` on `main`. Once a release is actually cut, the phases below get
-grouped under its tag with the real release date; until then this section is the honest state.
+The whole 2.x line and the first phase of the 3.x line live under `0.1.0-SNAPSHOT` on `main`. Once a release is actually
+cut, the phases below get grouped under its tag with the real release date; until then this section is the honest state.
+Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
+to.
+
+### Phase 3.1 — The First Extension Point (2026-10-06)
+
+- `com.barezen.web.RouteContributor` is the framework's first extension point and the tenth contracted type: one method
+  taking the `Router.Builder` the application already holds, declared by the component that owns routes because
+  `barezen-web` names no core type and could not receive a generic extension token (ADR-0047). ADR-0016 §6's forward
+  sentence — the mechanism ships with the first extension point, in the phase that owns it — is discharged here.
+- `Router.Builder.contributing(Iterable<? extends RouteContributor>)` runs the list in the caller's order and returns
+  `this`; it is `route` over a list rather than a third way to register, so the route-table allow-list grew one name and
+  the family it refuses (`size`, `routes`, `replace`, `reload`) is still absent. A contributed route colliding with any
+  other is refused by ADR-0019 §9's existing rule whichever side registered first.
+- `com.barezen.plugins.routes.RouteContributions.of` narrows `Plugin`s to contributors — the one `instanceof` in the
+  mechanism, and the only namespace where `Plugin` and a web type may meet (ADR-0042 rule ①). A pure function on
+  ADR-0041's model: no state, no registry, no lookup, no phase.
+- `Plugin`, `PluginDescriptor`, `PluginRegistration` and `LifecycleOrchestrator` are unchanged, and there is no
+  `PluginContext`, no token, no annotation and no route enumeration. The builder → plugins → `start()` → `build()` →
+  adapter sequence ADR-0016 left to applications collapses to builder → contribute → build → start.
+- `PluginExample` gained `ReportsPlugin`, a plugin that owns an endpoint, and `PluginExampleTest` serves its contributed
+  route over a real socket through the real JDK adapter — the example-level proof, not a test-local fixture.
+- 16 `RouteContributorTest` + 12 `RouteContributionsTest` (web 232 → 248, plugins 102 → 114); both amended allow-lists
+  spike-proven to still bite (1 violation each, build failed); five mutations M1–M5 killed and every source restored
+  md5-identical.
+- Left open by name with their triggers in ADR-0047: plugin discovery (3.2), route enumeration (the OpenAPI double-write's
+  real fix), a second extension point, and per-route security policy.
 
 ### Phase 2.16 — Examples / Release Hardening (2026-10-04)
 

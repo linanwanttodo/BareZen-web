@@ -8,7 +8,8 @@ Design principles: **Simple Core. Composable Everything. Plug and Play. Secure b
 
 Phase 2.9 (HTTP Runtime — JDK adapter), its 2.9.5–2.9.6 contract audit, Phase 2.10 (HTTP semantics stabilization &
 contract hardening), Phase 2.11 (Security), Phase 2.12 (Data), Phase 2.13 (Plugin Ecosystem), Phase 2.14 (OpenAPI),
-Phase 2.15 (TestKit) and Phase 2.16 (Examples / Release Hardening) are implemented.
+Phase 2.15 (TestKit), Phase 2.16 (Examples / Release Hardening) and Phase 3.1 (the first extension point) are
+implemented.
 2.10 decided boundaries rather than
 adding features:
 the HEAD framing boundary (ADR-0028), the asserted framing matrix and the 304 decision (ADR-0029), the response-body
@@ -28,22 +29,34 @@ second top module: `framework/barezen-testkit`, a consumer-facing test tool that
 `127.0.0.1:0`, ships the seven-verb client, the fixtures and the assertions an integration test needs, and depends
 downward and never sideways — the isolation ADR-0044 turns into a build fact by rule. 2.16 closed the 2.x line with a
 leaf `examples` module: seven runnable programs that use only the public developer API, each proving itself twice —
-once by a `main()` that binds a real socket and once by a TestKit-driven test the reactor runs (ADR-0045). What is left
-open is left open by name: every deferred item carries a reopening trigger and a named phase in the ADR that defers it,
-and nothing beyond the 2.x line is claimed as built.
+once by a `main()` that binds a real socket and once by a TestKit-driven test the reactor runs (ADR-0045).
+
+Phase 3.1 opened the extension point ADR-0016 §6 deferred: `com.barezen.web.RouteContributor` is the framework's first
+extension point, declared by the component that owns routes because a contract that names no core type cannot receive a
+generic extension token (ADR-0047). A contributor receives the `Router.Builder` the application is already holding,
+`Router.Builder.contributing` runs the contributors in the caller's order, and
+`com.barezen.plugins.routes.RouteContributions.of` is the one `instanceof` separating contributors from other plugins —
+the only place `Plugin` and a web type may meet, since core cannot name web and web cannot name core. The sequence ADR-0016
+left to the application (builder → construct plugins → `start()` → `build()` → adapter) collapses to builder → contribute
+→ build → start, a contributed route colliding with any other is refused by the existing duplicate rule rather than won
+by whoever ran last, and there is still no `PluginContext`, no registry, no token, no annotation and no route
+enumeration. What is left open is left open by name: every deferred item carries a reopening trigger and a named phase in
+the ADR that defers it, and nothing beyond what a build measured is claimed as working.
 
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, plugin SPI, event bus |
-| `framework/barezen-web` | 2.7–2.9.6, 2.10 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix |
+| `framework/barezen-web` | 2.7–2.9.6, 2.10, 3.1 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix; 3.1 added the contract's first extension point, `RouteContributor`, and the `Router.Builder.contributing` runner, so the shipped jar now names ten contracted types and still zero compile dependencies |
 | `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
-| `framework/barezen-plugins` | 2.13–2.14 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
+| `framework/barezen-plugins` | 2.13–2.14, 3.1 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); 3.1 adds `routes.RouteContributions.of`, the pure narrowing from `Plugin`s to `RouteContributor`s, which is the one `instanceof` in the mechanism and the only namespace where `Plugin` and a web type may meet (ADR-0047); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
 | `framework/barezen-testkit` | 2.15 | a consumer-facing test tool, not a framework service: `TestServer` binds the real JDK adapter to `127.0.0.1:0`, `TestHttpClient` speaks the seven verbs over `java.net.http` with `followRedirects(NEVER)`, `TestFixtures` provides the counting and principal-capturing handlers, `TestDatabase` wraps an application-supplied `DataSource` and owns only the reset, `Assertions` gives the response/count/identity checks (ADR-0044). Five downward compile dependencies (core, web, http-jdk, security, data), no sideways edge to `com.barezen.plugins`, H2 test-scope only, and no class in the shipped reactor may name it — the isolation rule |
 | `examples` | 2.16 | seven runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`. Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
-| Discovery, Extension Points | 3.x | DEFERRED — reopen trigger: a first real component that owns an extension point (ADR-0016) |
+| Discovery | 3.2 | DEFERRED — reopen trigger: a plugin that must arrive without an application naming its constructor; `ADR-0016 §7` keeps it out until then, and `ADR-0025 §5` is the precedent for a seam that may only discover |
+| Route enumeration | 3.x | DEFERRED — reopen trigger: the OpenAPI double-write (a route declared once as a route and once as `OperationMetadata`) costing a real project a wrong document; `ADR-0047` records why the merge step stays refused until then |
+| Second extension point | 3.x | DEFERRED — reopen trigger: a component other than the route table with a plugin that needs to contribute to it (the named candidate is the event bus, consumerless since 2.6 per ADR-0017) |
 | Frontend | non-goal | NON-GOAL — BareZen is a server-side framework; a frontend binding needs a real consumer with named rules (ADR-0016) |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
@@ -88,7 +101,8 @@ barezen-bom/                version contract consumed by applications
 framework/barezen-core/     kernel: lifecycle, thread capability, runtime capability, configuration,
                             assembly (di), plugin SPI, events, errors
 framework/barezen-web/      HTTP contract and route table: handler, request, response, headers, method, router,
-                            route match, server adapter contract — no shipped dependency, no server
+                            route match, server adapter contract, and the contract's first extension point
+                            (RouteContributor, ADR-0047) — no shipped dependency, no server
 framework/barezen-http-jdk/ the JDK adapter: the only module that may name com.sun.net.httpserver, and the only
                             one that registers a ServiceLoader provider
 framework/barezen-security/ security on the contract: the Handler decorator, the three-state authentication result,
@@ -100,8 +114,9 @@ framework/barezen-data/     persistence behind one javax.sql boundary: Database(
 framework/barezen-plugins/  the first plugins on the SPI: AuthPlugin, UserPlugin, OpenApiPlugin — each driven by the
                             one existing lifecycle engine, each filling a port the framework already owned; the
                             2.14 OpenAPI generator projects the collected metadata into a deterministic JSON
-                            document inside this same fence (ADR-0043); the framework names no plugin back
-                            (ADR-0042), H2 test-scope only
+                            document inside this same fence (ADR-0043); 3.1 adds routes/RouteContributions, the pure
+                            narrowing from Plugins to the contract's RouteContributors (ADR-0047); the framework names
+                            no plugin back (ADR-0042), H2 test-scope only
 framework/barezen-testkit/  a consumer-facing test tool (Phase 2.15): TestServer binds the real JDK adapter to
                             127.0.0.1:0, TestHttpClient speaks the seven verbs over java.net.http, TestFixtures
                             hands out the counting and principal-capturing handlers, TestDatabase wraps an
@@ -113,9 +128,11 @@ examples/                   seven runnable programs (Phase 2.16) on the public A
                             hello-world, routing, request/response, security, database, plugin, openapi — each a
                             router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
                             reactor runs; nothing in the framework depends on this leaf (ADR-0045)
-docs/adr/                   architecture decision records, 0001-0046
+docs/adr/                   architecture decision records, 0001-0047
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
+docs/txt/                   the public API reference (`BAREZEN-WEB-PUBLIC-API-REFERENCE.md`) plus the archived
+                            phase prompts and audit specs the phases were executed against
 scripts/                    build guards
 ```
 
@@ -895,4 +912,52 @@ try (TestServer server = TestServer.start(router)) {                            
       .header("Authorization", "Bearer t0ken").send()).statusIs(200).bodyIs("hello, ada");
   Assertions.assertThat(client.get("/who")).statusIs(401);                             // anonymous never reached the delegate
 }                                                                                       // close() released the port here
+```
+
+## Phase 3.1 in one paragraph
+
+`com.barezen.web.RouteContributor` is the framework's first extension point, and ADR-0047 is the record of why it is an
+interface rather than a mechanism: `barezen-web` ships a jar declaring no compile dependency at all (ADR-0018 §12), so a
+generic `ExtensionPoint<T>` token in core could only have been declared *about* routing by somebody other than routing's
+owner — which is the `ExtensionRegistry` ADR-0016 §6 refused, wearing a type parameter. The owner therefore declares one
+interface taking its own `Router.Builder`, `Router.Builder.contributing` runs the list in the caller's order and returns
+`this`, and `com.barezen.plugins.routes.RouteContributions.of` is the single `instanceof` in the whole mechanism because the
+plugin namespace is the only one allowed to hold `Plugin` and a web type in one expression (core cannot name web, web cannot
+name core, and the framework must not name a plugin — ADR-0042 rule ①). `Plugin`, `PluginDescriptor`,
+`PluginRegistration` and `LifecycleOrchestrator` are unchanged: a contribution is assembly-time work, not a fifth lifecycle
+phase, and there is no `install()` for ADR-0016 §2's reason. A contributed route is refused by the existing duplicate rule
+whichever side registered first, so no plugin wins a route by running later and the tests pin both orderings of the same
+collision; a contribution arriving after `build()` cannot reach the frozen table an adapter is serving. The contracted-type
+allow-list and the route-table method allow-list were each amended with a consumer already calling them, and each was then
+spike-proven to still bite (an eleventh web type: 1 violation, build failed; a `Router$Builder.size()`: 1 violation, build
+failed); five mutations M1–M5 (contribution applied to nothing, filter dropped, order reversed, null element skipped,
+duplicate swallowed) were each killed by a real failure and each source restored md5-identical. Discovery (3.2), route
+enumeration, per-route security policy and a second extension point stay open by name with their triggers in ADR-0047, and
+the OpenAPI double-write is recorded there as the honest unfinished half of this line rather than fixed by widening the
+route table.
+
+```java
+// A plugin that owns an endpoint contributes it instead of holding a builder. Verbatim from
+// examples/.../plugins/PluginExample.java, where PluginExampleTest serves the contributed route over a real socket.
+static final class ReportsPlugin implements Plugin, RouteContributor {
+  @Override public PluginDescriptor descriptor() { return new PluginDescriptor("reports", List.of("user")); }
+  @Override public void contributeRoutes(Router.Builder routes) {
+    routes.route(HttpMethod.GET, "/reports/status", (request, ignored) ->
+        new Response(200, Headers.of("Content-Type", "text/plain"), "reports ready".getBytes()));
+  }
+}
+
+static Router router(Wiring wiring) {
+  return Router.builder()
+      .route(HttpMethod.GET, "/health", (request, ignored) ->
+          new Response(200, Headers.of("Content-Type", "text/plain"), "ok".getBytes()))
+      .contributing(RouteContributions.of(PluginRegistration.validate(wiring.plugins())))  // the narrowing, once
+      .build();                                                                            // frozen before anything starts
+}
+
+// PluginExampleTest, the same table on the real JDK adapter:
+try (TestServer server = TestServer.start(PluginExample.router(wiring))) {
+  Assertions.assertThat(server.client().get("/reports/status")).statusIs(200).bodyIs("reports ready");
+  Assertions.assertThat(server.client().request(HttpMethod.POST, "/reports/status").send()).statusIs(405);
+}
 ```
