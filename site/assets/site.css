@@ -21,8 +21,12 @@ header { border-bottom: 1px solid var(--line); padding: 20px 24px; }
 
 /* The reading measure is 68ch; the header uses a wider band so the brand and the five nav links stay on one line at a
    typical desktop width instead of pushing the nav onto its own row. */
-.band { max-width: 68ch; margin: 0 auto; }
-header .band { max-width: 84ch; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+/* Two measures, in rem rather than ch: ch is the width of "0" in the element's own font, so the 16px body column and
+   the 14px footer column both written "68ch" measured 605px and 529px — centred, their left edges started 38px apart and
+   the page's edge visibly jagged between them. rem still follows a reader who raises the root font size; it just stops
+   tracking the font-size of a wrapper. */
+.band { max-width: 41rem; margin: 0 auto; }
+header .band { max-width: 50rem; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 
 .brand { font-weight: 650; font-size: 18px; color: var(--ink); text-decoration: none; letter-spacing: -0.01em; }
 
@@ -32,7 +36,7 @@ nav a { color: var(--ink-soft); text-decoration: none; font-size: 14px; margin-l
 
 nav a:hover, nav a[aria-current="page"] { color: var(--accent); text-decoration: underline; }
 
-main { max-width: 68ch; margin: 0 auto; padding: 40px 24px 72px; }
+main { max-width: 41rem; margin: 0 auto; padding: 40px 24px 72px; }
 
 h1 { font-size: 30px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.02em; }
 h2 { font-size: 20px; margin: 40px 0 10px; letter-spacing: -0.01em; }
@@ -71,8 +75,10 @@ th { font-weight: 600; color: var(--ink-soft); font-size: 13px; text-transform: 
   font-size: 15px;
 }
 
-footer { border-top: 1px solid var(--line); padding: 24px; color: var(--ink-soft); font-size: 14px; }
-footer .band { display: block; }
+/* The horizontal gutter belongs to the band, not to the footer: padding on both indents the text a second time
+   and breaks the shared left edge with <main>. */
+footer { border-top: 1px solid var(--line); padding: 24px 0 28px; color: var(--ink-soft); font-size: 14px; }
+footer .band { display: block; padding: 0 24px; }
 
 /* The language switch sits with the nav but reads as a control, not another page link: it changes how the page is
    written, not where it is. hreflang carries the relationship for anything that reads markup rather than pixels. */

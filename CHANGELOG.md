@@ -48,6 +48,13 @@ to.
   68ch reading column — and on a console those two are stacked neighbours: measured at 962px the account row's text
   started 70px left of the page title's, which reads as a page that cannot decide where it begins. Every band is now
   `52rem`, and the header, the account row, the state line, the title and the footer share one x.
+- **The same finding, in the documentation site's stylesheet.** `ch` is the width of `0` in the element's *own* font, so a
+  16px body column and a 14px footer column both written `68ch` measure 605px and 529px at the same viewport — centred,
+  their left edges start 38px apart and the page's edge jags between them. `site/assets/site.css` now says `41rem` and
+  `50rem` — still two measures, because a docs page holds one kind of block and its header can afford the width, but no
+  longer two that drift with the font-size of whatever wraps them; measured after the change, `h1` and the footer's
+  paragraph both start at x=177. The footer's gutter moved from the `footer` to its `.band` for the same reason: padding
+  on both indents the text twice.
 - **The state line states what the server said.** A static sentence in the page once read 还没有会话 above a header that
   said 已登录：bob, because the script only rewrote it when something was clicked. `checkSession()` now runs on every
   load: it asks `GET /api/session`, prints the answer, drops a token the server no longer honours (so a tab left open past
