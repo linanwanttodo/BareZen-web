@@ -8,6 +8,7 @@ import com.barezen.core.runtime.RuntimeCapabilities;
 import com.barezen.web.HttpServerAdapter;
 import com.barezen.web.Router;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
@@ -82,6 +83,7 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
   private final Router router;
   private final ThreadProvider threads;
   private final BodyLimit bodyLimit;
+  private final Tls tls;
 
   /** {@code true} when this adapter built {@link #threads} and therefore owns the executors created from it. */
   private final boolean ownsThreadProvider;
@@ -108,7 +110,7 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
    */
   public JdkHttpServerAdapter(InetSocketAddress address, Router router) {
     this(address, router, ThreadProviders.create(ThreadPolicy.AUTO, RuntimeCapabilities.detect(),
-        ThreadProviders.DEFAULT_CLOSE_TIMEOUT), true, BodyLimit.unconfigured());
+        ThreadProviders.DEFAULT_CLOSE_TIMEOUT), true, BodyLimit.unconfigured(), null);
   }
 
   /**
@@ -124,7 +126,7 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
    * @throws NullPointerException if any argument is null
    */
   public JdkHttpServerAdapter(InetSocketAddress address, Router router, ThreadProvider threads) {
-    this(address, router, threads, false, BodyLimit.unconfigured());
+    this(address, router, threads, false, BodyLimit.unconfigured(), null);
   }
 
   /**
@@ -146,11 +148,12 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
    */
   public JdkHttpServerAdapter(InetSocketAddress address, Router router, Configuration configuration) {
     this(address, router, ThreadProviders.create(ThreadPolicy.AUTO, RuntimeCapabilities.detect(),
-        ThreadProviders.DEFAULT_CLOSE_TIMEOUT), true, BodyLimit.from(configuration));
+        ThreadProviders.DEFAULT_CLOSE_TIMEOUT), true, BodyLimit.from(configuration),
+        Tls.from(configuration));
   }
 
   private JdkHttpServerAdapter(InetSocketAddress address, Router router, ThreadProvider threads,
-                               boolean ownsThreadProvider, BodyLimit bodyLimit) {
+                               boolean ownsThreadProvider, BodyLimit bodyLimit, Tls tls) {
     this.address = Objects.requireNonNull(address,
         "the address to bind; a server with nowhere to listen cannot be started");
     this.router = Objects.requireNonNull(router,
@@ -161,6 +164,9 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
     this.ownsThreadProvider = ownsThreadProvider;
     this.bodyLimit = Objects.requireNonNull(bodyLimit,
         "the request-body limit; an adapter that reads a body without a bound is the shape ADR-0031 removes");
+    // null is a decision, not an absence: it means no keystore was configured, so this adapter serves plaintext, which
+    // is every deployment's starting state (ADR-0050).
+    this.tls = tls;
   }
 
   /**
@@ -185,7 +191,10 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
       }
       HttpServer created = null;
       try {
-        created = HttpServer.create(address, DEFAULT_BACKLOG);
+        created = Tls.openServer(address, DEFAULT_BACKLOG, tls);
+        if (created instanceof HttpsServer secure && tls != null) {
+          tls.apply(secure);
+        }
         // The executor is created from the provider rather than passed in, so that ownership of the threads stays
         // wherever ADR-0024 §4 puts it: with this adapter when it built the provider, with the provider's owner when
         // it did not.
@@ -206,7 +215,14 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
       }
       server = created;
       state = State.RUNNING;
-      log.info("JDK HTTP server listening on {} with {}", created.getAddress(), router);
+      if (tls == null) {
+        log.info("JDK HTTP server listening on {} with {}", created.getAddress(), router);
+      } else {
+        // The keystore is named and no credential is: ADR-0050's rule that a log line may say which certificate file
+        // is in use and never what opened it.
+        log.info("JDK HTTPS server listening on {} with {} (keystore {})", created.getAddress(), router,
+            tls.keystore());
+      }
     }
   }
 

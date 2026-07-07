@@ -56,6 +56,17 @@
       </dependency>
 
       <!--
+        Static content on the web contract (Phase 3.4): a Handler per file, an ETag, and the conditional GET that goes
+        with them. One compile dependency (barezen-web), no adapter, and nothing in the framework depends on it — an
+        application that serves no files does not carry it.
+      -->
+      <dependency>
+        <groupId>com.barezen</groupId>
+        <artifactId>barezen-content</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!--
         Security middleware on the web contract (Phase 2.11). It depends on barezen-web, never on an adapter,
         so an application wires it around a Router without taking a server dependency.
       -->

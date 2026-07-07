@@ -331,12 +331,18 @@ class BarezenHttpJdkArchitectureTest {
       .that().resideInAPackage(HTTP)
       .should().dependOnClassesThat(outsideTheAllowedAdapterBase())
       .as("barezen-http-jdk may use java.lang, java.io, java.net, java.util, java.nio.charset, java.time,"
-          + " com.barezen.web, com.barezen.core, its own package, org.slf4j and com.sun.net.httpserver — nothing else,"
+          + " com.barezen.web, com.barezen.core, its own package, org.slf4j, the JSSE and java.nio.file for a"
+          + " keystore, and com.sun.net.httpserver — nothing else,"
           + " and specifically no server library (ADR-0021 §2)");
 
   private static DescribedPredicate<JavaClass> outsideTheAllowedAdapterBase() {
+    // Amended by Phase 3.4 (ADR-0050): the three packages a keystore and an SSLContext need. java.nio.file is where a
+    // keystore lives, javax.net.ssl and java.security are the JSSE, and all three are JDK types — the rule's subject
+    // is a third-party dependency arriving inside an adapter, and that is still forbidden by this list and named again
+    // by no_server_framework_or_container_appears_here below.
     return resideOutsideOfPackages("java.lang..", "java.io..", "java.net..", "java.util..", "java.nio.charset..",
-        "java.time..", "com.barezen.web..", "com.barezen.core..", "com.barezen.http..", "org.slf4j..", JDK_SERVER);
+        "java.nio.file..", "java.security..", "java.time..", "javax.net.ssl..",
+        "com.barezen.web..", "com.barezen.core..", "com.barezen.http..", "org.slf4j..", JDK_SERVER);
   }
 
   /**
