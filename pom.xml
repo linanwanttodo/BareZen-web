@@ -32,6 +32,12 @@
       made structural. Their tests are the build's "the documented examples actually run and pass" signal.
     -->
     <module>examples</module>
+    <!--
+      The console application is the reactor's last module (Phase 4.1): the consumer ADR-0016 asked for, built
+      on public API only and depended on by nothing, so it is a compile-time fact that the framework cannot
+      reach it (ADR-0045's leaf rule, applied a third time).
+    -->
+    <module>app</module>
   </modules>
 
   <properties>

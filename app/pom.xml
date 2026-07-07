@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.barezen</groupId>
+    <artifactId>barezen-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>barezen-app</artifactId>
+  <packaging>jar</packaging>
+
+  <name>BareZen Console Application</name>
+  <description>
+    A small application that consumes the framework the way a project would (Phase 4.1, ADR-0055): a sign-in form, a
+    session, a table of reports whose routes arrive from a plugin, and a page that shows the contract's own answers
+    rather than a stylised idea of them. This is the module ADR-0016 asked for before the project would talk about a
+    frontend — a real consumer with named rules — and like every leaf it is compiled against public API only, so the
+    framework cannot reach it and it cannot reach into the framework's package-private internals. It is not in the BOM:
+    an application depends on the framework, never the other way around.
+  </description>
+
+  <dependencies>
+    <!--
+      Compile scope: the console assembles the whole stack the way a deployed application does. Each edge points down
+      at a shipped framework module; none of them is a test tool.
+    -->
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-http-jdk</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-content</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-data</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-plugins</artifactId>
+    </dependency>
+
+    <!--
+      The application names its own database, which is exactly the choice ADR-0038 forbids a framework module from
+      making: barezen-data speaks javax.sql and receives a DataSource, and nothing in the framework knows a driver's
+      name. Compile scope rather than runtime, because Console.dataSource() constructs the driver's own
+      JdbcDataSource — an application that instantiates a driver needs it on the compile path, which is the line
+      ADR-0038 draws: this decision belongs to the consumer, and here it visibly does.
+    -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.barezen</groupId>
+      <artifactId>barezen-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -82,7 +82,8 @@ collaborator is a lookup, and ADR-0006 refuses it in three places. Constructing 
 path, and it keeps the reader of the call site able to see what the plugin needs.
 
 `barezen-auth`'s three shipped plugins are all in the second row — `AuthPlugin`, `UserPlugin`, `OpenApiPlugin` take
-collaborators and are therefore built by hand. `ReportsPlugin` in `examples/` is the discoverable one.
+collaborators and are therefore built by hand. `ReportsPlugin` in `examples/` is the discoverable one, and
+`app/` carries a second contributor that a running application never registers by hand (ADR-0055).
 
 ## 4. Dependencies, and where they are enforced
 

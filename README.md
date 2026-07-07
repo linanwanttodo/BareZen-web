@@ -96,6 +96,19 @@ program (`staticcontent/StaticFileExample`, which also discovered and now pins t
 What is left open is left open by name: every deferred item carries a reopening trigger
 and a named phase in the ADR that defers it, and nothing beyond what a build measured is claimed as working.
 
+Phase 4.1 built the consumer ADR-0016 had been asking for since 2.5: `app/`, a console application with a sign-in form,
+a session and a table of reports (ADR-0055) — the reactor's twelfth module, with a different twelfth than 3.6 had,
+since `barezen-app` takes the place the retired `barezen-site` left. It was written **without changing the framework at all**, which is the point —
+`AuthPlugin` and `UserPlugin` issue and authorise, `SecurityMiddleware` answers 401 and 403 unchanged, the page and its
+stylesheet arrive through `barezen-content`, and the report endpoints are contributed at assembly by an
+application-owned `ReportsPlugin` implementing ADR-0047's `RouteContributor`: the first time that extension point was used
+by something that is neither an example nor a test. The credential is a bearer token held in one JavaScript variable
+rather than a cookie, because `SecurityMiddleware` reads credentials from `Authorization` and no second source exists —
+option A in that record is a named reopening trigger, not a gap; the consequence (a reload signs you out) is stated on
+the page instead of hidden by `localStorage`. The UI copies the documentation site's design system rather than sharing
+its stylesheet, and the page's real deliverable is an answer log that shows each status, header and body as it arrived —
+`bob` is seeded with no permissions so that 403 sits next to 401 instead of being described.
+
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
@@ -111,8 +124,9 @@ and a named phase in the ADR that defers it, and nothing beyond what a build mea
 | `examples` | 2.16, 3.8 | eight runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`, `StaticFileExample`; `PluginExample` also carries the plugin that announces itself in `META-INF/services` (3.2), and `StaticFileExample` is `barezen-content`'s consumer in shipped code (3.8, ADR-0054). Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
 | Route enumeration | 3.x | DEFERRED — reopen trigger: the OpenAPI double-write (a route declared once as a route and once as `OperationMetadata`) costing a real project a wrong document; `ADR-0047` records why the merge step stays refused until then |
 | Second extension point | 3.x | DEFERRED — reopen trigger: a component other than the route table with a plugin that needs to contribute to it (the named candidate is the event bus, consumerless since 2.6 per ADR-0017) |
+| `app` | 4.1 | the console application, the frontend consumer ADR-0016 asked for (ADR-0055): sign in over `POST /api/sessions` for a bearer token, `GET /api/reports` contributed at assembly by an application-owned `ReportsPlugin` (ADR-0047's extension point, used for the first time by something that is neither an example nor a test), the page and its stylesheet served by `barezen-content`, and `/api/document` generated from declared OpenAPI data. A leaf like the examples: public API only, depended on by nothing, absent from the BOM, its own copy of the class-major contract; the application names its own H2 driver at compile scope (ADR-0038's decision made where it belongs) |
 | `site/` | 3.6, 3.7, 3.8 | **not a module** (ADR-0054): the project's documentation as twelve static files in two languages — English at `site/index.html` + `site/docs/*.html`, Chinese at `site/zh/…`, one stylesheet, every address relative, deployed as a folder by any static host (GitHub Pages: branch `main`, folder `/site`). It lost a server and with it conditional `GET`, `/health` and a published `/openapi.json`; it gained a shape the deployment target can actually serve. `scripts/check-site.sh` keeps the four guarantees the module's tests used to: links resolve on disk, every page reachable, the two languages paired, no absolute address |
-| A frontend for this project | non-goal | NON-GOAL, **re-opened rather than met** — 3.6 recorded ADR-0016's condition as satisfied by `site/`; 3.8 corrects that (ADR-0054): a documentation folder is not an application UI, and the "real consumer with named rules" ADR-0016 asks for still has to arrive before the framework grows a frontend binding. What 3.6 did prove stands: publishing these pages needed no templating and no markdown capability |
+| A frontend for this project | non-goal | **MET in 4.1 by `app/`** (ADR-0055) — and note what "met" means here: ADR-0016's condition was that a frontend *binding inside the framework* needs a real consumer with named rules. The consumer arrived, and **no binding turned out to be needed**: the console is HTML plus `fetch` against the contract's JSON, with no templating, no framework-side locale and no new module type. The framework still has no frontend capability and now has evidence for keeping it that way. 3.6's claim about `site/` stays retracted (ADR-0054); what survived from it is that publishing pages needs no markdown capability |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
 
@@ -388,6 +402,10 @@ framework/barezen-testkit/  a consumer-facing test tool (Phase 2.15): TestServer
                             response/count/identity checks; five downward compile dependencies, no sideways edge
                             to com.barezen.plugins, H2 test-scope only, and the reactor names nothing here
                             (ADR-0044)
+app/                      the console application (Phase 4.1, ADR-0055): Console.wiring()/assemble()/
+                            router()/start()/seed(), a bearer session over AuthPlugin and UserPlugin, a
+                            ReportsPlugin that contributes /api/reports at assembly, and its own page
+                            served by barezen-content; a leaf, public API only, not in the BOM
 site/                     the project's documentation (Phases 3.6, 3.7, 3.8): index.html, docs/*.html,
                             zh/index.html, zh/docs/*.html and assets/site.css — twelve static files, every
                             address relative, deployed as a folder; not a module, served by no code of ours,
@@ -397,7 +415,7 @@ examples/                   eight runnable programs (Phases 2.16, 3.8) on the pu
                             static-content — each a
                             router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
                             reactor runs; nothing in the framework depends on this leaf (ADR-0045)
-docs/adr/                   architecture decision records, 0001-0054
+docs/adr/                   architecture decision records, 0001-0055
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
 docs/guide/                  the long-form developer guide (authoring a plugin, and the rest as it is written)
@@ -1342,6 +1360,9 @@ as bodiless would be a claim about bytes that never arrive. And the honest negat
 contributes no routes and discovers nothing, so ADR-0047 and ADR-0048 still have their only real consumers in
 `examples/` and in the tests — a website is proof about serving, not about extension.
 
+Said plainly in 3.6, and no longer true: `app/` gave ADR-0047 a consumer in a running application in 4.1, so the
+extension point is no longer exercised only by examples and tests (ADR-0055).
+
 **Corrected by 3.8.** Two of the claims above were wrong in ways that only a deployment exposed. Serving the pages from
 `target/classes` through our own adapter was not a capability worth having — it was a server that cannot be deployed where
 the documentation goes (ADR-0054) — and calling this consumer the thing that met ADR-0016's frontend condition overstated
@@ -1361,3 +1382,30 @@ registers one route per file and asserts over a real socket the 200-with-a-lengt
 states a length it does not send. Writing that program against the contract also surfaced a fact the site had been hiding:
 `HEAD` is not a folded `GET` (ADR-0028), so a GET-only file answers 405 to a HEAD probe — which the pages that used to be
 served here would have done too, and nobody sent one, because nothing tested it.
+
+## Phase 4.1 in one paragraph
+
+`app/` is the consumer ADR-0016 asked for, and the finding is what it cost: **nothing** (ADR-0055). The console signs in
+over `POST /api/sessions` and gets an opaque bearer token from `AuthPlugin`; `GET /api/session` hands the identity to a
+`SecuredHandler` as a third argument because ADR-0033 refuses a thread-local; `/api/reports` is not written by the
+application at all — an application-owned `ReportsPlugin` contributes it at assembly through ADR-0047's `RouteContributor`,
+and a test asserts the route is in the frozen table before any lifecycle phase has run, which is the promise that makes a
+contributor unable to open a socket. The page, its script and its stylesheet are three named routes served by
+`barezen-content` (ADR-0051) for `GET` **and** `HEAD`, because 3.8 learned that a GET-only file refuses a HEAD probe. The
+document at `/api/document` comes from declared `OperationMetadata` (ADR-0043) and deliberately omits the HTML page,
+because `ApiResponse` can describe a JSON body or no body.
+
+Two decisions in that record are worth reading as refusals. The credential is a bearer header rather than a cookie:
+`SecurityMiddleware.credentialFrom` reads `Authorization` and is private by design, so a cookie session would need a new
+framework seam plus CSRF protection — that is option A, kept as a named reopening trigger rather than built because a
+demo page wanted it; and the token lives in one JS variable rather than `localStorage`, because a token stored there is a
+token any script on the origin can read. The page's UI is honest about the consequence: reload and you are signed out, in
+text, next to the reason.
+
+The second refusal is the stylesheet. The console copies the documentation site's design system — the same six tokens,
+band header, measure, tables and notes box — instead of sharing one file, because a static folder and a served application
+are two deployment shapes and a shared CSS would make every docs edit an application change. The ~110 duplicated lines are
+named in the record rather than left to be rediscovered. What the console adds, the docs page had no reason to carry: a
+form, buttons, and an answer log where the status column is the only coloured thing on the page. `bob` is seeded with no
+permissions precisely so that 403 sits next to 401 instead of being prose about them, and 16 tests (12 over a real socket,
+plus this module's copy of the class-major contract) pin the answers the page shows.

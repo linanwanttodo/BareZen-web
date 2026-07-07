@@ -78,8 +78,10 @@ Router routes = Router.builder()
       no-argument constructor, so a plugin that needs a <code>DataSource</code>, a <code>SessionStore</code> or another
       plugin cannot be discovered. The application constructs those, which is the arrangement the SPI started with — and
       the only mechanism that would let a discovered plugin fetch a collaborator is a lookup, which ADR-0006 refuses.
-      None of the three shipped plugins is discoverable; <code>ReportsPlugin</code> in <code>examples/</code> is, and it
-      owns a route.</p>
+      None of the three shipped plugins is discoverable; the <code>ReportsPlugin</code> in <code>examples/</code> is,
+      and it owns a route. Since 4.1 there is a second one in <code>app/</code>, contributing
+      <code>/api/reports</code> to a running application (ADR-0055) — the first consumer of this extension point
+      that is neither an example nor a test.</p>
   </div>
 
   <h2>What a plugin may not do</h2>

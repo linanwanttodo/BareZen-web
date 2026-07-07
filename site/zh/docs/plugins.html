@@ -75,7 +75,8 @@ Router routes = Router.builder()
       所以一个需要 <code>DataSource</code>、<code>SessionStore</code> 或另一个插件的插件无法被发现。
       这些东西由应用构造 —— 这正是 SPI 一开始的安排 —— 而唯一能让被发现的插件自己去取协作者的机制是查找，
       ADR-0006 拒绝它。三个内置插件没有一个可被发现；<code>examples/</code> 里的 <code>ReportsPlugin</code> 可以，
-      而它拥有一条路由。</p>
+      而它拥有一条路由。从 4.1 起，<code>app/</code> 里还有第二个，把 <code>/api/reports</code> 贡献给一个在跑的
+      应用（ADR-0055）—— 这是这个扩展点第一次被既不是示例也不是测试的消费者用上。</p>
   </div>
 
   <h2>插件不许做什么</h2>

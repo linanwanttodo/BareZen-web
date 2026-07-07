@@ -19,6 +19,47 @@ cut, the phases below get grouped under its tag with the real release date; unti
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
 
+### Phase 4.1 — The Console Application, and the Frontend Condition Finally Met (2026-10-07)
+
+- `app/`: a small application that signs in, holds a session, and lists reports — the "real consumer with named rules"
+  ADR-0016 has asked for since 2.5, and the first thing to satisfy it after ADR-0054 retracted the documentation site's
+  claim to have. It was written **without changing the framework**, which is the finding worth more than the module
+  (ADR-0055).
+- The report endpoints are not written by the application: `ReportsPlugin` lives in `app/`, implements
+  `Plugin, RouteContributor`, and contributes `/api/reports` at assembly. This is ADR-0047's extension point used by
+  something that is neither an example nor a test for the first time, and a test asserts the contributed route is in the
+  frozen table before any lifecycle phase runs.
+- The credential is `Authorization: Bearer <opaque token>` kept in one JavaScript variable. No cookie, because
+  `SecurityMiddleware` reads its credential from `Authorization` alone and widening that is a framework capability
+  arriving for one page (recorded as option A with a named reopening trigger, together with the CSRF work it would
+  entail); no `localStorage`, because a token stored there is readable by any script on the origin. The page states the
+  consequence — reload signs you out — rather than hiding it.
+- The UI copies the documentation site's design system rather than sharing its stylesheet: the same six tokens, band
+  header, measure, table and notes treatment, with a form, buttons and an answer log added. A static folder and a served
+  application are two deployment shapes; the ~110 duplicated CSS lines are named in the record.
+- Bodies are form-encoded and the application writes its own JSON: the framework has no parser (ADR-0030) and keeps its
+  writer package-private (ADR-0043), so a leaf that needed neither grew no dependency.
+- The application names its own database — `Console.dataSource()` builds H2's `JdbcDataSource` at compile scope, which is
+  ADR-0038's decision made by the consumer that has to make it. Two accounts are seeded, `ada` with grants and `bob`
+  without, so 403 is an observable answer beside 401 rather than a sentence about it.
+- `/api/document` is generated from declared `OperationMetadata` and omits the HTML page for the reason ADR-0052 recorded
+  the first time: `ApiResponse` describes a JSON body or no body.
+- The reactor is twelve modules again with a different twelfth (`barezen-app` for the retired `barezen-site`); the BOM is
+  unchanged, because an application is never a BOM entry. `app/` carries its own copy of the class-file-major contract
+  test, per ADR-0032's convention that each module asserts its own outputs.
+- 16 new tests: `ConsoleTest`'s 12 over a real socket (bearer issues and is recognised; wrong password and unknown user
+  are one 401 with one body; sign-out makes the *same* credential answer 401 and empties the store; **no bearer is 401
+  while a bearer without grants is 403**; a contributed route is in the table before any phase; a write shows up in the
+  next read; a body over 1 MiB is 413 before the plugin's handler; `PUT` is 405 with `Allow: GET, POST`; the page is
+  `text/html; charset=utf-8` with a tag, a conditional reload is a body-free 304 with no length, and `HEAD` states the
+  length without the bytes for page, script and stylesheet alike; the document declares the JSON endpoints and not the
+  page; an unregistered address is the adapter's plain 404) plus this module's 4 class-major tests.
+- Verified in a browser: nine flows driven against the real listeners in one session — `POST /api/sessions 200`,
+  `GET /api/reports 200` with `X-Reader: ada`, bob's login then `GET /api/reports 403`, an oversized body `413 Content
+  Too Large`, `/api/document 200` (2488 bytes, `openapi 3.0.3`), `DELETE /api/sessions 204`, then `401`. Stylesheet
+  applied, no horizontal overflow at this environment's 962px width. Pointer delivery does not work in this environment's
+  hidden browser panel, so the clicks themselves are unverified — the flows were driven through DOM events.
+
 ### Phase 3.8 — Documentation Becomes a Folder (2026-10-07)
 
 - `site/` is no longer a Maven module. `Site.java`, `SiteTest.java` and `site/pom.xml` are deleted, `<module>site</module>`
