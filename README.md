@@ -54,6 +54,16 @@ container decodes `getPathInfo()`; and three things the container refuses before
 slash, a body shorter than its declared length, and `TRACE` — arrive as the container's HTML rather than the contract's
 plain answer, which is recorded as the difference 3.4 inherits rather than smoothed over.
 
+Phase 3.4 made the framework's own server servable and its own content reachable: HTTPS arrives in the JDK adapter by
+naming a keystore (`barezen.http.jdk.tls.keystorePath` and its password) rather than by an `enableTls` flag, and it adds
+no public API — a path without a password fails construction, a bad value never falls back quietly, and the password
+appears in no message or log line (ADR-0050). Static content arrives as `framework/barezen-content`, one `Handler` per
+file, because the router refuses a wildcard and a fall-through would be a middleware chain (ADR-0051). That module is
+also the conditional-GET consumer ADR-0029 D1 named as its trigger: measured over a socket, a 200 states its length, a
+HEAD states a length it does not send, and a 304 still states nothing — the decision was re-measured with the size finally
+knowable in-process and kept, because stating it would need a handler→adapter channel for a field no client here can act
+on, and ADR-0027 §5 keeps framing out of handlers' hands.
+
 What is left open is left open by name: every deferred item carries a reopening trigger
 and a named phase in the ADR that defers it, and nothing beyond what a build measured is claimed as working.
 
@@ -62,8 +72,9 @@ and a named phase in the ADR that defers it, and nothing beyond what a build mea
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
 | `framework/barezen-core` | 2.1–2.6, 3.2 | lifecycle engine, thread capability, configuration, dependency injection, assembly boundary, event bus, and the plugin SPI — `Plugin`, `PluginDescriptor`, `PluginRegistration` (2.13) and since 3.2 `PluginDiscovery`, the search that finds announced plugins and keeps none of them (ADR-0048); the container and the bus still may not scan or enumerate a service |
 | `framework/barezen-web` | 2.7–2.9.6, 2.10, 3.1 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix; 3.1 added the contract's first extension point, `RouteContributor`, and the `Router.Builder.contributing` runner, so the shipped jar now names ten contracted types and still zero compile dependencies |
-| `framework/barezen-http-jdk` | 2.9–2.10 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit |
+| `framework/barezen-http-jdk` | 2.9–2.10, 3.4 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit; 3.4 added HTTPS, turned on by naming a keystore rather than by a flag, with no change to the adapter's public surface (ADR-0050) |
 | `framework/barezen-http-servlet` | 3.3 | the second server, as an integration: one `BarezenServlet` routes the same `Router` inside an existing Tomcat, Jetty or Wildfly deployment, with `jakarta.servlet-api` `provided` and the container at test scope only; it is deliberately **not** an `HttpServerAdapter` (ADR-0024 — a servlet owns no port), it states `Content-Length` so ADR-0029's framing matrix holds across both servers, it enforces the same 1 MiB body limit through the container's own init-parameter, and it depends on `barezen-web` and the log facade alone — never on the kernel, security, data, plugins or the other adapter (ADR-0049) |
+| `framework/barezen-content` | 3.4 | static content on the contract: `StaticContent.file(path)` is one `Handler` per route — an `ETag` derived from the bytes (no clock, no mtime), `If-None-Match` answered with a body-free 304, a fixed extension table instead of the host's MIME database, and a plain 404 that names no path. One compile dependency (`barezen-web`), no adapter, no wildcard route and no directory listing (ADR-0051) |
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
 | `framework/barezen-plugins` | 2.13–2.14, 3.1 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); 3.1 adds `routes.RouteContributions.of`, the pure narrowing from `Plugin`s to `RouteContributor`s, which is the one `instanceof` in the mechanism and the only namespace where `Plugin` and a web type may meet (ADR-0047); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
@@ -121,11 +132,14 @@ framework/barezen-web/      HTTP contract and route table: handler, request, res
                             route match, server adapter contract, and the contract's first extension point
                             (RouteContributor, ADR-0047) — no shipped dependency, no server
 framework/barezen-http-jdk/ the JDK adapter: the only module that may name com.sun.net.httpserver, and the only
-                            one that registers a ServiceLoader provider
+                            one that registers a ServiceLoader provider; it is also the only place TLS is decided, by
+                            the presence of a configured keystore (ADR-0050)
 framework/barezen-http-servlet/
                             the second server as an integration: BarezenServlet routes a Router inside an existing
                             servlet container (ADR-0049); jakarta.servlet is provided, Tomcat is test-only, and no
                             other framework module may name a container API
+framework/barezen-content/  static content on the contract: one Handler per file, an ETag from the bytes, a body-free
+                            304 to a matching If-None-Match, and a fixed type table (ADR-0051) — no directory route
 framework/barezen-security/ security on the contract: the Handler decorator, the three-state authentication result,
                             PBKDF2 hashing and the opaque session store — one compile dependency (barezen-web),
                             no server, no JDBC, no logging facade, no thread-local
@@ -149,7 +163,7 @@ examples/                   seven runnable programs (Phase 2.16) on the public A
                             hello-world, routing, request/response, security, database, plugin, openapi — each a
                             router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
                             reactor runs; nothing in the framework depends on this leaf (ADR-0045)
-docs/adr/                   architecture decision records, 0001-0049
+docs/adr/                   architecture decision records, 0001-0051
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
 docs/txt/                   the public API reference (`BAREZEN-WEB-PUBLIC-API-REFERENCE.md`) plus the archived
@@ -1037,3 +1051,34 @@ but `start()` returns unless the container is told to fail the context, so the p
 58 tests run against an embedded Tomcat or against `init()` directly; one spike class fired six of the eight architecture
 rules and the two that could not fire are javac-enforced and say so; M1–M5 and M7 were killed and M6 turned out not to
 compile, which is itself the structural fact the ADR records.
+
+## Phase 3.4 in one paragraph
+
+Two capabilities, each with the boundary that shaped it. **TLS** is decided by the presence of a configured keystore
+(`barezen.http.jdk.tls.keystorePath` plus `barezen.http.jdk.tls.keystorePassword`, both with no default), resolved once
+in the constructor that already took a `Configuration`, so `JdkHttpServerAdapter`'s public surface grows by nothing and
+there is no `enableTls` that could be `true` with nothing behind it (ADR-0050). A keystore named without a password fails
+the deployment naming both keys — the JDK's own failure cannot tell "no password" from "wrong password", and the operator
+deserves to know which one was sent. The password appears in no exception message and no log line, both asserted;
+protocol, cipher suites and mTLS are deliberately not configurable, so no weaker default can arrive here by accident; and
+`start()`, `stop()`, `isRunning()` and `port()` behave identically over an encrypted socket, because TLS is a property of
+the wire rather than of who owns the lifecycle (ADR-0024).
+
+**Static content** could not be the thing people expect, because `Router` answers one question — method plus raw path, to
+a handler — and its pattern language is a literal or a single `{name}` segment by refusal: `PathPattern`, `PathMatcher`
+and `RouteRegistry` are named in ADR-0019 §19 precisely because a prefix match turns routing into an ordering problem,
+and a static fall-through is a middleware chain wearing a different name (ADR-0033). So `framework/barezen-content`
+serves one file per route, which has a security dividend nobody had to code: no request ever supplies a path, so there
+is no traversal to defend against. The `ETag` is eight bytes of the content's SHA-256 — a clock is not an argument here,
+so the tag survives a restart, a second machine and a filesystem with no mtime — and `Last-Modified` is refused rather
+than deferred, because it would import the very thing the phase keeps out and add a second validator that answers this one
+worse. Types come from a fixed table because `Files.probeContentType` reads the host, and two deployments answering one
+file differently is a wire-format bug (ADR-0018 §12's rule about behaviour that depends on a platform).
+
+The part worth more than either feature: ADR-0029 D1 deferred the 304-length question until "a real conditional-GET
+consumer" arrived, and this is that consumer — the first component that genuinely knows the size of the representation it
+is declining to send. Measured over a socket, the matrix is 200 with `Content-Length: 14`, HEAD with `14` and no body, and
+304 with no length at all. **The decision stands**: RFC 9110 §8.6.1 permits that length rather than requiring it, the only
+way to state it would be a new handler→adapter channel for a fact the handler cannot be trusted to assert (ADR-0027 §5
+keeps framing fields away from handlers for exactly this reason), and no client in this framework acts on it. A trigger
+met is not a decision reversed; it is the moment the decision gets tested against the thing it was waiting for.

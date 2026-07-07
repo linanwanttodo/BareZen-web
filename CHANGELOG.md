@@ -19,6 +19,34 @@ cut, the phases below get grouped under its tag with the real release date; unti
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
 
+### Phase 3.4 — HTTPS and Static Content (2026-10-06)
+
+- TLS on the framework's own server, turned on by naming a keystore and never by a flag:
+  `barezen.http.jdk.tls.keystorePath` with `...keystorePassword`, both with no default, resolved once at construction.
+  A path without a password fails the construction naming both keys; a blank path reads as no path. `Tls` is
+  package-private, so `JdkHttpServerAdapter`'s public surface is unchanged and no fourth constructor was added
+  (ADR-0050).
+- The password appears in no message this code can write and in no log line, asserted rather than reviewed; protocol,
+  ciphers and mTLS are deliberately unconfigured, so no weaker default can arrive by accident. `isRunning()`, `port()`
+  and `stop()` behave exactly as they do in plaintext (ADR-0024).
+- `framework/barezen-content`: `StaticContent.file(path)` is one `Handler` per route. An `ETag` of eight bytes of the
+  content's SHA-256 (no clock, no mtime, survives a restart), `If-None-Match` answered with a body-free 304 that carries
+  the tag forward, weak validators and comma lists handled, a fixed extension table rather than the host's MIME database,
+  unknown types falling to `application/octet-stream`, and a plain 404 naming no path when the file is gone (ADR-0051).
+- One file per route, deliberately: the router refuses a wildcard by name (ADR-0019 §19) and a static fall-through would
+  be a middleware chain (ADR-0033). The consequence is that no request ever supplies a path, so traversal is structurally
+  absent rather than defended against.
+- **ADR-0029 D1 re-measured and kept.** Its named trigger — a real conditional-GET consumer — arrived, and this is the
+  first component that genuinely knows the stored representation's size. Measured over a socket: 200 states
+  `Content-Length: 14`, HEAD states 14 and sends nothing, 304 states nothing. Stating it would need a channel from
+  handler to adapter for a field no client here can act on, so the decision stands on new evidence rather than on the
+  old absence of one.
+- 12 TLS tests (keystore generated per run by the running JDK's `keytool`, nothing committed) + 22 content tests + 6
+  new architecture rules; spikes fired 4 content rules (2/1/1/1) and `no_thread_local` (3); mutations T1–T4 and
+  C1–C4, C6 killed with every file md5-restored, C5 recorded as not expressible rather than as passing.
+- No existing rule, contract or public type needed amending; the content module's "depends on the contract only" rule is
+  javac-enforced for its upper half, which is stated rather than counted as a passing guard.
+
 ### Phase 3.3 — A Second Server, as a Servlet (2026-10-06)
 
 - `framework/barezen-http-servlet`: `BarezenServlet` routes the same `Router` inside an existing Tomcat, Jetty or Wildfly
