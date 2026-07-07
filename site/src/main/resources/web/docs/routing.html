@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Routing &amp; HTTP — BareZen</title>
 <link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="zh" href="/zh/docs/routing">
 </head>
 <body>
 <header>
@@ -16,6 +17,7 @@
       <a href="/docs/plugins">Plugins</a>
       <a href="/docs/security-and-data">Security &amp; data</a>
       <a href="/docs/reference">Reference</a>
+      <a class="lang" hreflang="zh" href="/zh/docs/routing">中文</a>
     </nav>
   </div>
 </header>
@@ -62,8 +64,9 @@ Router frozen    = routes.build();                        // List.copyOf: no vie
       framing header is refused even when its two values agree (ADR-0027 §5, ADR-0029).</li>
     <li>Which handler runs follows the folded method; which bytes go on the wire follows the raw token the server
       compares exactly. So <code>HEAD /doc</code> states the length of the body it does not send, and a
-      <code>head /doc</code> token gets the body its representation has — measured on both JDKs before it was
-      decided, because the earlier rule produced a false <code>Content-Length: 0</code> (ADR-0028).</li>
+      <code>head /doc</code> token gets the body its representation has. It was measured before it was decided —
+      ADR-0028 records the Temurin 17.0.20.1+1 and 21.0.12.1+1 outputs being diffed, because the earlier rule produced a
+      false <code>Content-Length: 0</code>.</li>
     <li>A <code>304</code> carries no <code>Content-Length</code>. The decision was deferred until something could
       know the stored representation's size; when <code>StaticContent</code> arrived and did know it, the decision was
       re-measured over a socket and kept (ADR-0029 D1, ADR-0051).</li>

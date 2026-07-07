@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参考 — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="en" href="/docs/reference">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/zh/">BareZen</a>
+    <nav>
+      <a href="/zh/docs/quick-start">快速开始</a>
+      <a href="/zh/docs/routing">路由</a>
+      <a href="/zh/docs/plugins">插件</a>
+      <a href="/zh/docs/security-and-data">安全与数据</a>
+      <a href="/zh/docs/reference" aria-current="page">参考</a>
+      <a class="lang" hreflang="en" href="/docs/reference">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>参考</h1>
+  <p class="lede">模块、两个服务器、它们背后的决策，以及仍然敞开的那些缺口 —— 按名字列出来。</p>
+
+  <h2>模块</h2>
+  <table>
+    <thead><tr><th>Artifact</th><th>依赖</th><th>它是什么</th></tr></thead>
+    <tbody>
+      <tr><td><code>barezen-bom</code></td><td>—</td><td>版本清单，被应用的 dependency management 消费</td></tr>
+      <tr><td><code>barezen-core</code></td><td><code>slf4j-api</code></td><td>生命周期引擎、线程能力探测、配置、显式 DI、事件总线、插件 SPI</td></tr>
+      <tr><td><code>barezen-web</code></td><td><strong>谁都不依赖</strong></td><td>HTTP 契约：<code>Handler</code>、<code>Request</code>、<code>Response</code>、<code>Headers</code>、<code>HttpMethod</code>、<code>Router</code>、<code>RouteMatch</code>、适配器与 provider 的两个 seam，以及 <code>RouteContributor</code></td></tr>
+      <tr><td><code>barezen-http-jdk</code></td><td>web、core、<code>slf4j-api</code></td><td>契约背后的 JDK 服务器、它的 body 上限，以及"配置了 keystore 就有了"的 TLS</td></tr>
+      <tr><td><code>barezen-http-servlet</code></td><td>web、<code>slf4j-api</code>、<code>jakarta.servlet</code>（provided）</td><td>一个 servlet，把一个 <code>Router</code> 路由进你已经在跑的容器</td></tr>
+      <tr><td><code>barezen-security</code></td><td>web</td><td>认证/授权装饰器、PBKDF2 散列、不透明会话</td></tr>
+      <tr><td><code>barezen-data</code></td><td><strong>谁都不依赖</strong></td><td><code>Database(DataSource)</code>、那个决定权是包私有的事务、迁移历史表</td></tr>
+      <tr><td><code>barezen-content</code></td><td>web</td><td>静态文件：一个文件一条路由、由字节算出的 ETag、不带 body 的 304</td></tr>
+      <tr><td><code>barezen-plugins</code></td><td>core、web、security、data</td><td>auth、user、OpenAPI 三个插件、路由的收窄，以及文档生成器</td></tr>
+      <tr><td><code>barezen-testkit</code></td><td>core、web、http-jdk、security、data</td><td>一个会绑定真实适配器的测试工具；按规则，框架不许依赖它</td></tr>
+      <tr><td><code>examples</code>、<code>site</code></td><td>只用公共 API</td><td>叶子：七个可运行的程序，以及这个网站</td></tr>
+    </tbody>
+  </table>
+
+  <h2>两个服务器，一张表</h2>
+  <p>两边被断言一致的部分：六种应答和它们的 body、<code>Allow</code> 的排序、分帧（有 body 才给长度，204/304 不给）、
+    HEAD 声明一个它并不发送的长度、小写 token 带来的不对称、1 MiB 的默认上限，
+    以及 handler 的异常进日志而不是进 socket。</p>
+  <p>三件 servlet 容器抢在 BareZen 能回答之前就替它决定了的事，实测并记录下来了，没有被抹平：路径里百分号编码的斜杠、
+    比声明的 <code>Content-Length</code> 更短的 body，以及 <code>TRACE</code> —— 三者都带着容器自己的 HTML 错误页回来
+    （其中一个还带着异常报告），而容器还会重写 <code>Content-Type</code> 参数里的空白。
+    替换这些页面属于部署策略，作为未完成工作点名（ADR-0049 §7）。</p>
+
+  <h2>决策，按编号</h2>
+  <p>五十三份 ADR 在 <code>docs/adr/</code> 里，每份一个决策，都写明它拒绝了哪些替代方案、哪些测试证明它、
+    一份非目标清单，以及一个重新开启的触发条件。跟你刚读这几页直接相关的：
+    <span class="pill">0003 两阶段启动</span>
+    <span class="pill">0006 不做 service locator</span>
+    <span class="pill">0013 配置在装配期定</span>
+    <span class="pill">0014 显式依赖注入</span>
+    <span class="pill">0016 插件就是参与者</span>
+    <span class="pill">0018 HTTP 是契约</span>
+    <span class="pill">0019 路由语义</span>
+    <span class="pill">0024 服务器生命周期</span>
+    <span class="pill">0027/0028/0029 分帧、HEAD、304</span>
+    <span class="pill">0031 body 上限</span>
+    <span class="pill">0032 class-major 契约</span>
+    <span class="pill">0033–0037 安全</span>
+    <span class="pill">0038–0040 数据</span>
+    <span class="pill">0041–0043 插件与 OpenAPI</span>
+    <span class="pill">0044 TestKit</span>
+    <span class="pill">0045 示例</span>
+    <span class="pill">0047 扩展点</span>
+    <span class="pill">0048 发现机制</span>
+    <span class="pill">0049 servlet</span>
+    <span class="pill">0050 TLS</span>
+    <span class="pill">0051 静态内容</span>
+    <span class="pill">0052 这个站点</span>
+    <span class="pill">0053 两种语言</span>
+  </p>
+
+  <h2>仍然敞开的，按名字</h2>
+  <ul>
+    <li><strong>路由枚举。</strong>一条路由被声明两次 —— 一次作为路由、一次作为 OpenAPI 元数据，
+      因为路由表不对外提供查看的答案。修法需要给 ADR-0019 §19 打补丁，并配一个测试来证明"合并这一步"不是拿到的替代品
+      （ADR-0047、ADR-0042）。</li>
+    <li><strong>给被发现的插件注入。</strong>被发现的插件什么都不需要；一旦需要点什么，答案是显式的工厂，
+      不是查找（ADR-0048）。</li>
+    <li><strong>第二个扩展点。</strong>事件总线自 2.6 之后没有消费者，它是指名的候选（ADR-0047）。</li>
+    <li><strong>流式 body、range 请求、条件 <code>Last-Modified</code>、缓存策略、错误页的表示形式、mTLS、
+      嵌入式容器适配器、许可证文件、已发布的构件。</strong>每一个都是一条带着触发条件的推迟，
+      写在它旁边那份记录里；没有一个只是 TODO。</li>
+    <li><strong>翻译对齐。</strong>中文页与英文页一对一手工维护，没有机器翻译，也没有翻译记忆库；
+      测试只钉住"每个文件都有对应页、每对链接都双向可达"（ADR-0053）。</li>
+  </ul>
+
+  <h2>在本地跑起这个站点</h2>
+  <pre><code>mvn -o -B -ntp -pl site -am verify
+java -cp "site/target/classes:framework/barezen-web/target/classes:\
+framework/barezen-core/target/classes:framework/barezen-http-jdk/target/classes:\
+framework/barezen-content/target/classes:framework/barezen-plugins/target/classes:\
+framework/barezen-security/target/classes:framework/barezen-data/target/classes:\
+$HOME/.m2/repository/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar:\
+$HOME/.m2/repository/ch/qos/logback/logback-classic/1.5.6/logback-classic-1.5.6.jar:\
+$HOME/.m2/repository/ch/qos/logback/logback-core/1.5.6/logback-core-1.5.6.jar" \
+  com.barezen.site.Site 8080</code></pre>
+  <p>然后访问 <code>http://127.0.0.1:8080/</code>，中文在 <code>http://127.0.0.1:8080/zh/</code>。
+    端口是命令行参数，不是系统属性、也不是环境变量 —— 框架那条关于"不许有隐藏配置"的规则同样适用于它自己。
+    页面带着一个由字节算出的 <code>ETag</code> 被提供，所以改完之后刷新是 200，改之前刷新是 304。</p>
+
+  <h2>构建与验证</h2>
+  <pre><code>mvn -o -B -ntp clean verify          # 单元、集成、架构、覆盖率门槛
+./scripts/check-jdk-baseline.sh      # 声明的 release 仍然是 17
+./scripts/check-class-major.sh       # 每个产出的 class 文件都是 major 61</code></pre>
+  <p>JDK 17 是兼容基线，JDK 21 及以上是建议的运行环境；虚拟线程是启动时探测到的运行时能力，
+    从来不是一个构建变体（ADR-0002、ADR-0010）。</p>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 参考 · 这一页由它所描述的那些模块提供：<code>site/</code>，
+    一个只针对公共 API 编译的叶子（ADR-0052）。</p></div>
+</footer>
+</body>
+</html>

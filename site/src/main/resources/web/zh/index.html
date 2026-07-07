@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BareZen —— 可插拔、能放进现有项目的 Java Web 框架</title>
+<meta name="description" content="轻量、模块化的 Java Web 框架：不可变路由表、带真实扩展点的插件 SPI，以及能跑在你已有容器里的 servlet 集成。">
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="en" href="/">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/zh/">BareZen</a>
+    <nav>
+      <a href="/zh/docs/quick-start">快速开始</a>
+      <a href="/zh/docs/routing">路由</a>
+      <a href="/zh/docs/plugins">插件</a>
+      <a href="/zh/docs/security-and-data">安全与数据</a>
+      <a href="/zh/docs/reference">参考</a>
+      <a class="lang" hreflang="en" href="/">EN</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>内核很小，接缝是真的。</h1>
+  <p class="lede">BareZen 是给这样的人用的 Java Web 框架：你要把路由、会话和持久化放进一个<strong>已经存在</strong>的
+    项目里 —— 用它已有的服务器、它的容器、它的数据库。</p>
+
+  <p>启动一个应用只需要三个对象：一个 <code>Handler</code>、一个 <code>Router</code>，以及运行它的服务器。没有注解要扫描，
+    没有容器替你决定哪些组件存在，也没有一个把你本该负责的装配逻辑藏起来的
+    <code>BareZenApplication.run()</code>。除此之外都是你按需添加的模块，而它们下面的框架永远不会知道你加了什么。</p>
+
+  <pre><code>Router routes = Router.builder()
+    .route(GET, "/health", (req, params) -&gt; ok())
+    .route(GET, "/users/{id}", (req, params) -&gt; user(params.get("id")))
+    .build();
+
+var server = new JdkHttpServerAdapter(loopback(0), routes);
+server.start();</code></pre>
+
+  <h2>它适合什么情况</h2>
+
+  <table>
+    <thead>
+      <tr><th>你已经有的</th><th>BareZen 给你的</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>一个 Spring Boot / Tomcat / Jetty / Wildfly 部署</td>
+        <td><code>BarezenServlet</code> 把 <code>Router</code> 路由进你已经在跑的容器。它不拥有端口也不拥有线程池，
+          因为那些是你的（ADR-0024、ADR-0049）。</td>
+      </tr>
+      <tr>
+        <td>一个不想再引入容器的小服务</td>
+        <td>JDK 适配器；HTTPS 通过"指定 keystore"来开启，而不是靠一个开关（ADR-0050）。</td>
+      </tr>
+      <tr>
+        <td>要自己交付接口的业务团队</td>
+        <td>插件实现 <code>Plugin</code> 加 <code>RouteContributor</code>，它的路由在任何东西启动之前就已在表里。
+          在 <code>META-INF/services</code> 里自我声明的 jar，会被 <code>PluginDiscovery</code> 找到
+          （ADR-0047、ADR-0048）。</td>
+      </tr>
+      <tr>
+        <td>一个已有的数据库和它的驱动</td>
+        <td><code>Database</code> 接收你的 <code>DataSource</code>，不点名任何驱动；它交给回调的
+          <code>Transaction</code>，其 <code>commit</code> 与 <code>rollback</code> 是仓储层调不动的
+          （ADR-0038、ADR-0039）。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>接缝，以及它们拒绝什么</h2>
+
+  <p>插件是一个"能说出自己名字的生命周期参与者"，再加上它所贡献能力的所有者声明的扩展点。这个范围是刻意收窄的：
+    没有 <code>PluginContext</code>，没有 <code>contribute(ExtensionPoint, T)</code> 注册表，也没有
+    <code>require(Class)</code> —— 因为那就是一步步走向 <code>ApplicationContext</code> 的那串"小方便"。
+    插件若需要协作者，就在构造函数里拿，这样读调用点的人能直接看见它需要什么；也因此，需要协作者的插件无法被自动发现，
+    因为 <code>ServiceLoader</code> 的 provider 只能是无参构造。这个限制是明说的，不是绕过去的。</p>
+
+  <p>路由表只回答两个问题 —— 方法加原始路径对应哪个 handler，以及某个路径允许哪些方法 —— 其他什么都不暴露。
+    没有通配模式，也没有路由枚举，两者都是被名字明确拒绝的（ADR-0019 §19、ADR-0051）：一个接受前缀的匹配器，
+    会把路由变成一个排序问题。静态文件因此是一个文件一条路由。</p>
+
+  <div class="notes">
+    <p>这个站点就是由它所文档化的框架提供的：手写的 HTML、一个样式表、通过 <code>Router</code> 注册的路由、由
+      <code>StaticContent</code> 提供的文件（ETag 由内容算出），以及由 OpenAPI 插件生成的
+      <code>/openapi.json</code>。它的源码就在仓库的 <code>site/</code> 目录里，而页面由"必须覆盖到每一个文件"的测试来把关。</p>
+  </div>
+
+  <h2>接下来读什么</h2>
+
+  <ul>
+    <li><a href="/zh/docs/quick-start">快速开始</a> —— 三个对象、Maven 坐标，以及 handler 能要什么、不能要什么。</li>
+    <li><a href="/zh/docs/plugins">插件</a> —— 怎么写一个、怎么贡献路由、怎么被发现，以及那些防止插件变成容器的规则。</li>
+    <li><a href="/zh/docs/routing">路由与 HTTP</a> —— 模式、framing、六种错误应答、HEAD 与 304。</li>
+    <li><a href="/zh/docs/security-and-data">安全与数据</a> —— 装饰器、三态认证、不透明会话、PBKDF2，以及仓储无法提交的事务。</li>
+    <li><a href="/zh/docs/reference">参考</a> —— 模块清单、背后的决策，以及如何在本地跑起这个站点。</li>
+  </ul>
+</main>
+
+<footer>
+  <div class="band">
+    <p>BareZen · <code>com.barezen</code> · <code>0.1.0-SNAPSHOT</code>，未发布 · JDK 17 为兼容基线，建议 JDK 21 及以上
+      · 框架唯一的第三方编译依赖是 <code>slf4j-api</code>，没有别的。</p>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>插件 — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="en" href="/docs/plugins">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/zh/">BareZen</a>
+    <nav>
+      <a href="/zh/docs/quick-start">快速开始</a>
+      <a href="/zh/docs/routing">路由</a>
+      <a href="/zh/docs/plugins" aria-current="page">插件</a>
+      <a href="/zh/docs/security-and-data">安全与数据</a>
+      <a href="/zh/docs/reference">参考</a>
+      <a class="lang" hreflang="en" href="/docs/plugins">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>插件</h1>
+  <p class="lede">插件是一个"能为自己命名的生命周期参与者"，再加上它所贡献的那个组件自己声明的扩展点。
+    这个范围窄，就是它的功能所在。</p>
+
+  <h2>SPI</h2>
+  <pre><code>public interface Plugin extends LifecycleParticipant {
+  PluginDescriptor descriptor();                 // record PluginDescriptor(String id, List&lt;String&gt; dependencies)
+}</code></pre>
+  <p>四个阶段来自 <code>LifecycleParticipant</code> —— <code>initialize</code>、<code>start</code>、<code>stop</code>、
+    <code>abort</code> —— 全部带空默认实现，由构建里唯一的那个生命周期引擎驱动：所有参与者先完成初始化，
+    然后才有任何东西 start；<code>stop()</code> 逆序执行，并且汇报失败项而不是抛出（ADR-0003、ADR-0005）。
+    没有 <code>install()</code>，因为它只是 <code>initialize()</code> 换了个名字、又多了一套顺序。</p>
+
+  <h2>贡献：目前是路由</h2>
+  <p>在 BareZen 里，一个扩展点就是一个接口，由"被贡献之物"的所有者声明。路由是第一个所有者：</p>
+  <pre><code>public final class ReportsPlugin implements Plugin, RouteContributor {
+
+  @Override public PluginDescriptor descriptor() {
+    return new PluginDescriptor("reports", List.of("user"));    // 我的协作者在我之前初始化
+  }
+
+  @Override public void contributeRoutes(Router.Builder routes) {
+    routes.route(HttpMethod.GET, "/reports/status", this::status);
+  }
+}</code></pre>
+  <p>一条被贡献的路由<em>就是</em>一条已注册的路由：重复拒绝同样生效，所以插件不可能靠"跑得更晚"抢下一条路径，
+    也不存在任何优先级或权重字段需要推理。贡献发生在装配期，在 <code>build()</code> 之前、在任何阶段之前 ——
+    这就是为什么一个贡献者不许启动线程、也不许打开 socket。</p>
+  <p>没有 <code>PluginContext</code>，没有 <code>ExtensionPoint&lt;T&gt;</code> token，也没有
+    <code>contribute(point, item)</code>。token 本来也做不到：<code>barezen-web</code> 发布的是一个没有任何编译期依赖的
+    jar，所以路由层既无法声明也无法接收这样一个 token —— 让"所有者声明一个接口"成为这个形状的理由是这件事，
+    而不是偏好（ADR-0018 §12、ADR-0047）。</p>
+
+  <h2>被找到</h2>
+  <pre><code>META-INF/services/com.barezen.core.plugin.Plugin
+  com.example.ReportsPlugin</code></pre>
+  <pre><code>List&lt;Plugin&gt; everything = new ArrayList&lt;&gt;(List.of(auth, user, openapi));  // 需要协作者：手工构造
+everything.addAll(PluginDiscovery.discover());                            // 什么都不需要：自我声明
+List&lt;Plugin&gt; ordered = PluginRegistration.validate(everything);            // 拒绝重复 id、
+                                                                          // 缺失依赖、环
+Router routes = Router.builder()
+    .route(HttpMethod.GET, "/health", health)
+    .contributing(RouteContributions.of(ordered))                          // 整个机制里唯一的 instanceof
+    .build();</code></pre>
+  <p>发现机制什么都不保留：每次调用都重新读取 provider 配置，返回一批新实例和一个新的不可变列表，所以它没法回答
+    "把 auth 插件给我"，也没法把某个组件留到那次调用之后。加载不起来的 provider 会用 JDK 自己的消息中止本次调用并点名它 ——
+    启动一个悄悄缺了某个集成应用，是没人能调试的那种失败（ADR-0048）。</p>
+
+  <div class="notes">
+    <p><strong>把限制说清楚。</strong><code>ServiceLoader</code> 的 provider 必须是一个公共类加一个公共无参构造，
+      所以一个需要 <code>DataSource</code>、<code>SessionStore</code> 或另一个插件的插件无法被发现。
+      这些东西由应用构造 —— 这正是 SPI 一开始的安排 —— 而唯一能让被发现的插件自己去取协作者的机制是查找，
+      ADR-0006 拒绝它。三个内置插件没有一个可被发现；<code>examples/</code> 里的 <code>ReportsPlugin</code> 可以，
+      而它拥有一条路由。</p>
+  </div>
+
+  <h2>插件不许做什么</h2>
+  <table>
+    <thead><tr><th>禁止</th><th>由谁执行</th></tr></thead>
+    <tbody>
+      <tr><td>按类型或名字查找任何东西</td><td>ADR-0006；<code>nobody_exposes_a_type_lookup</code></td></tr>
+      <tr><td>在请求期读配置</td><td>ADR-0013；<code>plugins_do_not_reach_the_layers_the_application_assembles</code></td></tr>
+      <tr><td>持有静态可变状态</td><td><code>no_static_mutable_state</code></td></tr>
+      <tr><td>把身份停在某个线程上</td><td><code>no_thread_local</code>，ADR-0033</td></tr>
+      <tr><td>点名某个服务器实现</td><td><code>no_adapter_dependency</code>，ADR-0018 §12</td></tr>
+      <tr><td>点名另一个插件的具体类</td><td><code>plugins_do_not_name_each_others_concrete_types</code> —— 通过一个 port 对话</td></tr>
+      <tr><td>被框架依赖</td><td><code>the_framework_does_not_know_plugins_exist</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>安全：你的路由不会因为来自插件就被保护</h2>
+  <p>安全模块装饰的是 handler，所以一个贡献了裸 handler 的插件贡献的是一个公开端点。
+    要保护你自己的端点，就在构造函数里收下那些 port，并把注册的东西包起来：</p>
+  <pre><code>@Override public void contributeRoutes(Router.Builder routes) {
+  routes.route(HttpMethod.GET, "/reports/status",
+      SecurityMiddleware.wrap(authentication, authorization, Permission.of("report:read"), new StatusHandler()));
+}</code></pre>
+  <p>事后没有任何东西能给一次贡献补上策略，这是一个决定：一条路由的保护是它"是什么"的一部分，
+    所以它就该在路由被组装的地方被组装。</p>
+
+  <h2>测试一个插件</h2>
+  <p>插件应当不需要数据库、不需要服务器就能单元测试 —— 这正是构造函数注入买来的东西：<code>AuthPlugin</code>
+    是对着一个 lambda verifier 测的。集成的那一半，TestKit 会在一个临时端口上绑定真实的 JDK 适配器，
+    然后断言状态码、头、body、handler 被调用的次数，以及送达的身份。对任何插件都值得钉住的三件事：它观察到的阶段顺序、
+    协作者失败会以启动失败的形式浮现而不是一条被吞掉的日志，以及 <code>stop()</code> 释放了 <code>start()</code>
+    打开的东西。</p>
+
+  <p>长版本（含打包方式与推迟清单）在
+    <a href="/zh/docs/reference">参考页</a>，紧挨着它所依据的那些 ADR（ADR-0016、ADR-0041、ADR-0042、ADR-0047、ADR-0048）。</p>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 插件 · 完整指南见仓库里的 <code>docs/guide/authoring-a-plugin.md</code>。</p></div>
+</footer>
+</body>
+</html>

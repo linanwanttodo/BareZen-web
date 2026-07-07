@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reference — BareZen</title>
 <link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="zh" href="/zh/docs/reference">
 </head>
 <body>
 <header>
@@ -16,6 +17,7 @@
       <a href="/docs/plugins">Plugins</a>
       <a href="/docs/security-and-data">Security &amp; data</a>
       <a href="/docs/reference" aria-current="page">Reference</a>
+      <a class="lang" hreflang="zh" href="/zh/docs/reference">中文</a>
     </nav>
   </div>
 </header>
@@ -52,7 +54,7 @@
     policy, named as open work (ADR-0049 §7).</p>
 
   <h2>The decisions, by number</h2>
-  <p>Fifty-two ADRs sit in <code>docs/adr/</code>, each one decision, each with the alternatives it refused, the tests
+  <p>Fifty-three ADRs sit in <code>docs/adr/</code>, each one decision, each with the alternatives it refused, the tests
     that prove it, a non-goal list and a reopening trigger. The load-bearing ones for the pages you just read:
     <span class="pill">0003 two-phase startup</span>
     <span class="pill">0006 no service locator</span>
@@ -75,6 +77,8 @@
     <span class="pill">0049 the servlet</span>
     <span class="pill">0050 TLS</span>
     <span class="pill">0051 static content</span>
+    <span class="pill">0052 the site</span>
+    <span class="pill">0053 two languages</span>
   </p>
 
   <h2>Still open, by name</h2>
@@ -89,6 +93,10 @@
     <li><strong>Streaming bodies, range requests, conditional <code>Last-Modified</code>, cache policy, error-page
       representation, mTLS, an embedded container adapter, a license file, a published artifact.</strong> Each is a
       deferral with a trigger in the record named beside it; none is a TODO.</li>
+    <li><strong>Translation alignment.</strong> The Chinese pages are a hand-maintained mirror of these ones, file for
+      file. The build proves a counterpart exists and that the two links resolve in both directions; it cannot prove a
+      Chinese paragraph still says what the English one says. That drift is bounded by "both files in one commit", not
+      by a machine (ADR-0053).</li>
   </ul>
 
   <h2>Run this site locally</h2>
@@ -98,9 +106,11 @@ framework/barezen-core/target/classes:framework/barezen-http-jdk/target/classes:
 framework/barezen-content/target/classes:framework/barezen-plugins/target/classes:\
 framework/barezen-security/target/classes:framework/barezen-data/target/classes:\
 $HOME/.m2/repository/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar:\
-$HOME/.m2/repository/ch/qos/logback/logback-classic/1.5.6/logback-classic-1.5.6.jar" \
+$HOME/.m2/repository/ch/qos/logback/logback-classic/1.5.6/logback-classic-1.5.6.jar:\
+$HOME/.m2/repository/ch/qos/logback/logback-core/1.5.6/logback-core-1.5.6.jar" \
   com.barezen.site.Site 8080</code></pre>
-  <p>Then <code>http://127.0.0.1:8080/</code>. The port is an argument, not a system property or an environment
+  <p>Then <code>http://127.0.0.1:8080/</code>, and the Chinese documentation at
+    <code>http://127.0.0.1:8080/zh/</code>. The port is an argument, not a system property or an environment
   variable — the framework's own rule about hidden configuration applies to itself. Pages are served with an
   <code>ETag</code> derived from their bytes, so a reload after an edit is a 200 and a reload before one is a 304.</p>
 

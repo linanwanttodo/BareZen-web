@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安全与数据 — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="en" href="/docs/security-and-data">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/zh/">BareZen</a>
+    <nav>
+      <a href="/zh/docs/quick-start">快速开始</a>
+      <a href="/zh/docs/routing">路由</a>
+      <a href="/zh/docs/plugins">插件</a>
+      <a href="/zh/docs/security-and-data" aria-current="page">安全与数据</a>
+      <a href="/zh/docs/reference">参考</a>
+      <a class="lang" hreflang="en" href="/docs/security-and-data">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>安全与数据</h1>
+  <p class="lede">两个能力模块，只依赖那个契约、不依赖别的任何东西，所以应用可以只取其中一个、把另一个留下。</p>
+
+  <h2>安全是一个装饰器，不是一条链</h2>
+  <p><code>SecurityMiddleware.wrap(...)</code> 接收一个 handler，返回一个 handler。它先认证、再授权、然后调用它包住的那个 ——
+    而在每一次拒绝时，被包住的 handler 都不会被调用，这一点是用计数器断言的，不是假设的（ADR-0033、ADR-0037）。</p>
+  <ul>
+    <li><strong>三种状态，不是两种。</strong>已认证、认证失败、什么都没提供，是不同的答案：第一次 401 是一句挑战，
+      第二次 401 带着一个只留在服务器上的原因。一个 sealed 类型装下这些；一个 <code>Optional</code> 会把它们压成一个
+      错误答案（ADR-0034）。</li>
+    <li><strong>身份作为参数到达。</strong>需要它的 handler 实现 <code>SecuredHandler</code>，
+      收到一个作为第三个参数的 <code>SecurityContext</code>。没有 thread-local，因为容器会复用线程，
+      于是一个请求的主体就会变成下一个请求的主体（ADR-0033）。</li>
+    <li><strong>会话是不透明的、可撤销的。</strong>是一条 256 bit 的服务端记录，不是 JWT：撤销是一次 map 删除，
+      轮换会杀掉旧 token，过期是查询时用一个被注入的 <code>Clock</code> 检查。JWT 在四条理由上被拒绝，
+      第一条是撤销反正仍然需要服务端状态（ADR-0036）。</li>
+    <li><strong>口令用 PBKDF2-HMAC-SHA256 散列</strong> —— 600,000 轮、16 字节 salt、32 字节 key，
+      编码成 <code>algorithm$iterations$salt$key</code>，好让轮数上升时不必作废已存的散列。bcrypt 因为引入新的第三方依赖
+      被拒绝，Argon2 因为 JDK 里没有。一个格式错误的已存散列验证为 false 而不是抛出，而这个模块连一个 logger 都点不出名，
+      所以原始口令或散列不可能到达日志（ADR-0035）。</li>
+    <li><strong>401 或 403，绝不靠猜。</strong>没有身份或身份失败是 401；被拒绝的身份是 403；
+      抛异常的协作者是 500；默认是拒绝（ADR-0037）。</li>
+  </ul>
+
+  <h2>数据是一个边界，外加一个回调做不了的决定</h2>
+  <pre><code>Database database = new Database(pool);                       // 你的 DataSource；框架不点名任何驱动
+List&lt;String&gt; names = database.query("select name from users where active = ?",
+    (rs, row) -&gt; rs.getString(1), true);
+int updated = database.transaction(tx -&gt; tx.executeUpdate("update users set name = ? where id = ?", name, id));
+List&lt;AppliedMigration&gt; applied = Migrator.of(database).migrate(List.of(new AddUsersTable(1L, "users", ddl)));</code></pre>
+  <ul>
+    <li><strong>零编译依赖。</strong><code>barezen-data</code> 说的是 <code>javax.sql</code>，
+      接收应用提供的 <code>DataSource</code>；H2 是测试依赖，出货代码里永远不点名驱动（ADR-0038）。</li>
+    <li><strong>事务是交给你的，而且不由你决定。</strong><code>commit</code> 与 <code>rollback</code> 是包私有，
+      所以仓储层想绕过就是编译错误 —— 而且有一个反射探针守着这个可见性本身，因为"一条关于行为、而后一次重构就能删掉"
+      的规则，价值不如一个"它变了就会失败"的测试（ADR-0039）。</li>
+    <li><strong>嵌套有答案。</strong>第二次 <code>transaction(...)</code> 会在第二个连接上开一个独立的事务，
+      这一条由测试钉住，而不是留在隐含里。</li>
+    <li><strong>每一个 <code>SQLException</code> 变成一个 unchecked 的 <code>DataAccessException</code></strong>，
+      而你自己回调里抛出的 runtime exception 保持原样 —— 翻译点只有一个，而且看得见（ADR-0038）。</li>
+    <li><strong>迁移只承诺一句话。</strong>一个版本被记录，当且仅当它的 <code>apply</code> 跑完了，
+      那一行与变更共享同一个事务。失败之后的 schema 完整性是产品自己要回答的问题，因为 H2 被实测出会隐式提交 DDL ——
+      初稿承诺的是原子性，一个独立探针把它证伪了，于是那句话被重写（ADR-0040）。</li>
+  </ul>
+
+  <div class="notes">
+    <p>两个模块都只有一层依赖：<code>barezen-security</code> 只依赖 <code>barezen-web</code>，
+      <code>barezen-data</code> 谁都不依赖。它们都不知道服务器存在 —— 这就是同一串 handler 既能跑在 JDK 适配器下、
+      也能跑在 Tomcat 里面的原因。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 安全与数据 · <code>PasswordHasherTest</code>、<code>SessionStoreTest</code>、
+    <code>TransactionTest</code>、<code>MigratorTest</code>，以及 6 个 socket 级别的安全测试。</p></div>
+</footer>
+</body>
+</html>

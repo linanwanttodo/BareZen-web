@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>路由与 HTTP — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="en" href="/docs/routing">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/zh/">BareZen</a>
+    <nav>
+      <a href="/zh/docs/quick-start">快速开始</a>
+      <a href="/zh/docs/routing" aria-current="page">路由</a>
+      <a href="/zh/docs/plugins">插件</a>
+      <a href="/zh/docs/security-and-data">安全与数据</a>
+      <a href="/zh/docs/reference">参考</a>
+      <a class="lang" hreflang="en" href="/docs/routing">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>路由与 HTTP</h1>
+  <p class="lede">路由器只回答一个问题。服务器决定线上写什么。把这两件事分开，是第二个服务器能作为一个模块存在、
+    而不是一次重写的原因。</p>
+
+  <h2>一个模式允许是什么</h2>
+  <p>一条路由是一个方法、一个原始路径模式和一个 handler。一个模式要么是一段字面路径，要么是一个恰好是
+    <code>{name}</code> 的段，捕获一个非空的原始段。没有通配符、没有正则、没有可选段、没有重复段、没有前缀匹配 ——
+    每一个都是在 <code>build()</code> 时被点名拒绝的（<code>no_preemptive_routing_or_middleware_types</code>，
+    ADR-0019 §19），而不是"碰巧没实现"。</p>
+  <p>理由只有一句话：一个接受前缀的匹配器会让 <code>GET /a/b</code> 同时匹配两条路由，于是必须有东西来决定哪条赢。
+    那个"有东西"就是一条优先级规则，而优先级是一个路由器存在的理由恰恰是不去问的排序问题。</p>
+  <pre><code>Optional&lt;RouteMatch&gt; match  = routes.match(request);      // 这个问题
+Set&lt;HttpMethod&gt;   allowed = routes.methodsFor("/users/7"); // 空表示 404，非空表示 405
+Router frozen    = routes.build();                        // List.copyOf：不是正在增长的 builder 的视图</code></pre>
+
+  <p>重复 —— 同一个方法、同一个形状 —— 在注册时就被拒绝，永远不会靠"后者覆盖前者"来解决。就这一个决定，
+    让插件可以贡献路由，而应用不必去推理插件之间的顺序。</p>
+
+  <h2>六种应答，各自由谁写出</h2>
+  <table>
+    <thead><tr><th>状态码</th><th>什么时候</th><th>Body</th></tr></thead>
+    <tbody>
+      <tr><td>200…599</td><td>handler 返回的</td><td>handler 返回什么就是什么</td></tr>
+      <tr><td>404</td><td>这个路径上什么都没有</td><td><code>Not Found</code>，不点名任何路径 —— 一个会把目标回显出来的 404，
+        等于教给探测者"服务器能区分哪些路径"</td></tr>
+      <tr><td>405</td><td>这里有东西，但这个方法不是它的用法</td><td><code>Method Not Allowed</code>，
+        外加一个按 HTTP 自身顺序而不是哈希顺序排列的、稳定的 <code>Allow</code></td></tr>
+      <tr><td>500</td><td>handler 抛了</td><td>只有 <code>Internal Server Error</code>：没有消息、没有类名、没有栈。
+        异常进日志</td></tr>
+      <tr><td>400</td><td>连请求都构造不出来 —— 契约拒绝的 target，或者 body 根本没到</td><td><code>Bad Request</code></td></tr>
+      <tr><td>413</td><td>内容超限，无论是声称的还是数出来的</td><td><code>Content Too Large</code></td></tr>
+    </tbody>
+  </table>
+  <p>是否已经承诺发送，和状态码本身同样重要：字节一旦上线就没有第二个应答可发了，所以写侧失败会被记录并放弃，
+    而不是转成一个根本送不出去的 500（ADR-0023 §6）。</p>
+
+  <h2>分帧、HEAD 与 304</h2>
+  <ul>
+    <li><code>Response</code> 拒绝 <code>Content-Length</code> 和 <code>Transfer-Encoding</code>；一个重复的分帧头
+      即使两个值一致也会被拒绝（ADR-0027 §5、ADR-0029）。</li>
+    <li>跑哪个 handler 取决于折叠后的方法；线上发哪些字节取决于服务器逐字比较的那个原始 token。于是
+      <code>HEAD /doc</code> 会声明一个它并不发送的 body 的长度，而一个 <code>head /doc</code> token 拿到的是
+      它的表示本来就有的 body。这个决定是实测之后才做的 —— ADR-0028 记录了 Temurin 17.0.20.1+1 与 21.0.12.1+1
+      两轮输出的对照，因为之前那条规则会造出一个假的 <code>Content-Length: 0</code>。</li>
+    <li><code>304</code> 不带 <code>Content-Length</code>。这个决策曾被推迟，直到有一个东西能知道已存储表示的大小；
+      当 <code>StaticContent</code> 到来并且确实知道之后，这个决策在真实 socket 上被重新测量并保留了下来
+      （ADR-0029 D1、ADR-0051）。</li>
+    <li>HTTP 规定不给 body 的那些状态码，在构造时就被逐个拒绝，而不是在 socket 上被悄悄丢掉。</li>
+  </ul>
+
+  <h2>Body 就是字节</h2>
+  <p>请求 body 被完整地读取且有上限；响应 body 是一个 <code>byte[]</code>。流式写入对照三个列明的条件做过衡量，
+    最终没有构建 —— 因为一个活的 writer 会破坏上面那张分帧表，包括静态文件现在正依赖的 HEAD 那一行
+    （ADR-0030、ADR-0051）。两个服务器的默认上限都是 1 MiB，所以客户端不能靠选择部署模型来多发内容。</p>
+
+  <div class="notes">
+    <p>两个服务器，一张表：<a href="/zh/docs/reference">参考页</a>列出了它们在哪些点上是被断言为一致的，
+      以及三件 servlet 容器抢在 BareZen 看见之前就替它决定了的事。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 路由与 HTTP · 断言活在 <code>RouterTest</code>、<code>JdkErrorSemanticsTest</code>、
+    <code>JdkResponseBodySemanticsTest</code> 和 <code>ServletContractSemanticsTest</code> 里。</p></div>
+</footer>
+</body>
+</html>

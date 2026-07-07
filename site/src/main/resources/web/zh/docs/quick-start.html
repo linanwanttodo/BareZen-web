@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>快速开始 — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="alternate" hreflang="en" href="/docs/quick-start">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/zh/">BareZen</a>
+    <nav>
+      <a href="/zh/docs/quick-start" aria-current="page">快速开始</a>
+      <a href="/zh/docs/routing">路由</a>
+      <a href="/zh/docs/plugins">插件</a>
+      <a href="/zh/docs/security-and-data">安全与数据</a>
+      <a href="/zh/docs/reference">参考</a>
+      <a class="lang" hreflang="en" href="/docs/quick-start">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>快速开始</h1>
+  <p class="lede">一个 handler、一张路由表、一个服务器。其余都是你按需添加的模块。</p>
+
+  <h2>坐标</h2>
+  <p>引入一次 BOM，然后只依赖你要用的东西。框架里没有任何模块依赖
+    <code>barezen-security</code>、<code>barezen-data</code>、<code>barezen-content</code>、
+    <code>barezen-plugins</code>、<code>barezen-http-servlet</code> 或 <code>barezen-testkit</code> ——
+    方向是单向的，这正是第二个应用可以选用另一套模块的前提。</p>
+
+  <pre><code>&lt;dependencyManagement&gt;&lt;dependencies&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.barezen&lt;/groupId&gt;&lt;artifactId&gt;barezen-bom&lt;/artifactId&gt;
+    &lt;version&gt;0.1.0-SNAPSHOT&lt;/version&gt;&lt;type&gt;pom&lt;/type&gt;&lt;scope&gt;import&lt;/scope&gt;
+  &lt;/dependency&gt;
+&lt;/dependencies&gt;&lt;/dependencyManagement&gt;
+
+&lt;dependencies&gt;
+  &lt;dependency&gt;&lt;groupId&gt;com.barezen&lt;/groupId&gt;&lt;artifactId&gt;barezen-web&lt;/artifactId&gt;&lt;/dependency&gt;
+  &lt;dependency&gt;&lt;groupId&gt;com.barezen&lt;/groupId&gt;&lt;artifactId&gt;barezen-http-jdk&lt;/artifactId&gt;&lt;/dependency&gt;
+&lt;/dependencies&gt;</code></pre>
+
+  <p>这个仓库还没有发布任何东西 —— 没有远端、没有构件、没有许可证文件 —— 所以同级项目目前只能用
+    <code>mvn install</code> 来消费它。这个"缺失"记录在 ADR-0046 里，而不是用一个看起来合理的 URL 填上。</p>
+
+  <h2>第一条路由</h2>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", (request, params) -&gt;
+        new Response(200, Headers.of("Content-Type", "text/plain"), OK))
+    .route(HttpMethod.GET, "/users/{id}", (request, params) -&gt;
+        new Response(200, Headers.of("Content-Type", "application/json"),
+            ("{\"id\":\"" + params.get("id") + "\"}").getBytes(StandardCharsets.UTF_8)))
+    .build();
+
+JdkHttpServerAdapter server = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", 0), router);
+server.start();
+int port = server.port().getAsInt();
+server.stop();</code></pre>
+
+  <p>端口写 <code>0</code> 是向操作系统要一个；否则就写你部署环境拥有的那个端口。<code>start()</code> 每个实例只能调用一次，
+    <code>stop()</code> 幂等且不抛异常 —— 一个实例就是一个服务器生命周期；让同一个对象重新开始，意味着调用方手里的引用
+    指向的是一个已经不存在的服务器（ADR-0024、ADR-0012、ADR-0005）。</p>
+
+  <h2>handler 能要什么</h2>
+  <p>handler 就是 <code>Response handle(Request request, Map&lt;String,String&gt; parameters)</code>。
+    这就是 web 层全部的扩展面，而它刻意做得很短：</p>
+  <ul>
+    <li>请求带着客户端发来的东西 —— 方法、原始路径、原始 query（不存在与为空是两回事）、每个值一行的头字段、
+      以及 body 字节；</li>
+    <li>捕获到的路径参数作为第二个参数到达，既不是请求上的状态，也不通过 thread-local；</li>
+    <li>响应带着状态码、字段和一个 <code>byte[]</code> body，并且拒绝 <code>Content-Length</code> 与
+      <code>Transfer-Encoding</code>，因为分帧属于服务器的事（ADR-0020、ADR-0027）。</li>
+  </ul>
+
+  <p>一个需要知道"是谁在问"的 handler，会在 <code>Handler</code> 旁边再实现 <code>SecuredHandler</code>，
+    安全装饰器于是给它第三个参数。一个裸的三个参数的 lambda 不是 <code>Handler</code>，所以它包不起来 ——
+    这个形状是由检测规则拒绝的，不是靠约定（ADR-0033）。</p>
+
+  <h2>跑示例</h2>
+  <p><code>examples/</code> 模块里有七个程序 —— hello world、routing、request/response、security、database、plugin、
+    OpenAPI —— 每个都有一个 <code>main()</code>，会真的绑定一个 socket 并打印它观察到的结果，
+    每个也都有一份 reactor 会跑的测试。先构建，然后每个程序一条 <code>java -cp</code>：</p>
+  <pre><code>mvn -o -B -ntp clean verify
+java -cp "$CP" com.barezen.examples.hello.HelloWorld</code></pre>
+  <p>完整的 classpath 写法，以及七个程序各自观察到的输出，都在 <code>docs/examples/README.md</code> 里。</p>
+
+  <div class="notes">
+    <p>下一篇：<a href="/zh/docs/routing">路由与 HTTP</a> —— 一个模式允许是什么、六种错误应答长什么样，
+      以及 HEAD 为什么要声明一个它并不发送的长度。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 快速开始 · 同一段代码作为
+    <code>examples/…/contract/ReadmeQuickStartTest.java</code> 在跑。</p></div>
+</footer>
+</body>
+</html>

@@ -19,6 +19,44 @@ cut, the phases below get grouped under its tag with the real release date; unti
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
 
+### Phase 3.7 — The Documentation Site in Two Languages (2026-10-07)
+
+- The site is bilingual by address: English stays at `/` and `/docs/…`, Chinese arrives at `/zh/` and `/zh/docs/…`, one
+  hand-written file per page in a parallel tree under `web/zh`. A reader's language is therefore visible, linkable and
+  fixed at assembly rather than decided per request (ADR-0053).
+- The switcher is two `hreflang` links per page — the nav anchor plus a `<link rel="alternate">` in the head — and nothing
+  else. No cookie, no JavaScript (still ADR-0052's non-goal), no `Accept-Language` negotiation: an `ETag` derived from the
+  bytes of a file (ADR-0029) cannot become a function of a request header without the address meaning two documents.
+- `/zh` answers `301` with `Location: /zh/`, because the exact-segment-count rule makes the two different routes
+  (ADR-0019 §3) and one page keeps one canonical address. The redirect target is a constant, so it is not an open
+  redirect and no client bytes reach it.
+- Code blocks, identifiers, HTTP tokens, file paths and ADR numbers are byte-identical between the trees. A translated
+  `RouteContributor` is a search that returns nothing.
+- **Nothing in the framework learned a locale.** No `Locale` type, no message-bundle mechanism, no i18n module — the
+  translation lives entirely in the `site/` leaf, which is ADR-0052's rule ("no framework capability arrives *for* this
+  site") applied a second time.
+- `SiteTest` goes from 13 to 16 tests. The new pairing test walks every page, resolves its counterpart in the other
+  direction, requires the `hreflang` targets to be exactly that counterpart's address, and refuses a page that
+  advertises its own language as an alternative. `urlFor` now derives `/zh/` from `zh/index.html` by position, so the
+  pre-existing tree-walk and dead-link tests cover both subtrees with no special-casing — and that refactor failed its own
+  first run, when dropping the `.html` guard turned the stylesheet's address into `/assets/sit`.
+- The cost is named as a cost: twelve files are maintained by hand, and no test proves a Chinese paragraph still says what
+  the English one says. What bounds the drift is "both files in one commit", plus a third named reopening trigger — a
+  language that cannot be maintained that way is when the generation question gets answered.
+- **Two 3.6 claims corrected by running what 3.6 told a reader to run.** (i) The classpath recipe printed on
+  `/docs/reference` names `logback-classic` but not `logback-core`, and `Site` died with
+  `NoClassDefFoundError: …JoranException` before binding a port — the recipe that was *run* in 3.6 worked, the one that was
+  *written down* did not. Both reference pages now name all three jars, and a test asserts it. (ii) The claim "no
+  page-level horizontal overflow at 488px" held for the landing page and not for the doc pages: measured at that width,
+  `document.scrollWidth` was 632 against a 473px client, with `/docs/plugins`' table 608px wide (a cell's longest
+  unbreakable token sets a table's minimum width) and the header nav running to 513px — an overrun the new `中文` chip made
+  worse. `th, td { overflow-wrap: anywhere }` plus a `max-width: 720px` nav-wrap rule bring all twelve pages to
+  `scrollWidth == clientWidth == 473`.
+- Verified in a browser, both directions: clicking `EN` on `/zh/docs/plugins` lands on `/docs/plugins` with `lang="en"`
+  and the chip reversing to `中文`, with no JavaScript involved; Chinese glyphs measure full-width (192px for four at
+  48px), so the CJK fallback resolves rather than rendering tofu. Screenshots remain unavailable in this environment, so
+  every number above is a measured rect, not a look.
+
 ### Phase 3.6 — The Project's Own Website (2026-10-06)
 
 - `site/`: the official site, served by the framework it documents — six pages and one stylesheet of hand-written HTML,

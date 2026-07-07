@@ -63,6 +63,21 @@ public final class Site {
       new String[] {"/docs/security-and-data", "docs/security-and-data.html"},
       new String[] {"/docs/reference", "docs/reference.html"});
 
+  /**
+   * The Chinese pages, in the same order and with the same one-file-per-route rule.
+   *
+   * <p>A parallel tree under {@code web/zh} rather than a query parameter or a cookie, because a language is part of
+   * the address a reader shares: {@code /zh/docs/plugins} is linkable, cacheable and server-rendered with nothing
+   * deciding it at request time. The switcher is two {@code hreflang} links (ADR-0053).
+   */
+  private static final List<String[]> ZH_PAGES = List.of(
+      new String[] {"/zh/", "zh/index.html"},
+      new String[] {"/zh/docs/quick-start", "zh/docs/quick-start.html"},
+      new String[] {"/zh/docs/routing", "zh/docs/routing.html"},
+      new String[] {"/zh/docs/plugins", "zh/docs/plugins.html"},
+      new String[] {"/zh/docs/security-and-data", "zh/docs/security-and-data.html"},
+      new String[] {"/zh/docs/reference", "zh/docs/reference.html"});
+
   private Site() {}
 
   /**
@@ -72,7 +87,7 @@ public final class Site {
    * and {@code StaticContent} serves one existing regular file by construction (ADR-0019 §19, ADR-0051), so the asset
    * list is read from disk at assembly rather than inferred at request time from a path a client supplied.</p>
    *
-   * @param web the directory holding {@code index.html}, {@code docs/} and {@code assets/}
+   * @param web the directory holding {@code index.html}, {@code docs/}, {@code zh/} and {@code assets/}
    * @return the frozen table the adapter serves
    * @throws IOException if the asset directory cannot be listed
    * @throws IllegalArgumentException if {@code web} is not a directory, or a mapped page is missing from it
@@ -83,7 +98,7 @@ public final class Site {
           + "src/main/resources/web and reach the classpath with the rest of the module's resources");
     }
     Router.Builder builder = Router.builder();
-    for (String[] page : PAGES) {
+    for (String[] page : concat(PAGES, ZH_PAGES)) {
       Path file = web.resolve(page[1]);
       if (!Files.isRegularFile(file)) {
         throw new IllegalArgumentException("the route " + page[0] + " is mapped to " + page[1]
@@ -98,6 +113,11 @@ public final class Site {
       // test in SiteTest caught on this module's first run (ADR-0052).
       builder.route(HttpMethod.GET, "/assets/" + asset.getFileName(), StaticContent.file(asset));
     }
+    // "/zh/" is the address every switcher links to and every hreflang names; a reader who types "/zh" is one missing
+    // separator from that address, and the segment-count rule means the two are different routes (ADR-0019 §3). A
+    // redirect keeps one canonical address per page instead of serving the same file from two of them.
+    builder.route(HttpMethod.GET, "/zh", (request, params) ->
+        new Response(301, Headers.of("Location", "/zh/"), new byte[0]));
     builder.route(HttpMethod.GET, "/health", (request, params) ->
         new Response(200, Headers.of("Content-Type", "application/json"), HEALTHY));
     builder.route(HttpMethod.GET, "/openapi.json", document().handler());
@@ -179,6 +199,14 @@ public final class Site {
     server.start();
     System.out.println("BareZen site on http://127.0.0.1:" + server.port().getAsInt() + "/ (ctrl-c to stop)");
     Thread.currentThread().join();
+  }
+
+  /** The two page tables in one list, English first so the route printing reads in nav order. */
+  private static List<String[]> concat(List<String[]> first, List<String[]> second) {
+    List<String[]> all = new java.util.ArrayList<>(first.size() + second.size());
+    all.addAll(first);
+    all.addAll(second);
+    return List.copyOf(all);
   }
 
   private static int parsePort(String argument) {
