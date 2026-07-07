@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>应答日志 —— BareZen 控制台</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="answers">
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen 控制台</a>
+    <nav class="pages">
+      <a href="/">概览</a>
+      <a href="/reports">报告</a>
+      <a href="/session">会话</a>
+      <a href="/events">事件审计</a>
+      <a href="/people">他人权限</a>
+      <a href="/answers" aria-current="page">应答日志</a>
+      <a href="/about">关于</a>
+    </nav>
+  </div>
+</header>
+
+<div class="account">
+  <div class="band">
+    <span class="who" id="who">未登录</span>
+    <span class="keys">
+      <button id="quick-ada" class="small" type="button">以 ada 登录</button>
+      <button id="quick-bob" class="small" type="button">以 bob 登录</button>
+      <button id="quick-cy" class="small" type="button">以 cy 登录</button>
+      <button id="signout" class="small" type="button">退出</button>
+    </span>
+  </div>
+</div>
+
+<div class="strip">
+  <p class="band" id="strip">还没有会话 —— 点右上角任一账号登录，口令都是 <code>hunter2</code>。</p>
+</div>
+
+<main>
+  <h1>应答日志</h1>
+  <p class="lede">框架回答什么，这里就显示什么：状态码、几个关键 header、以及 body 原文。
+    这份日志存在 sessionStorage 里，所以换页不会把它丢掉（<span class="nb">ADR-0057</span>）。</p>
+
+  <div class="panel">
+    <h2>请求与应答</h2>
+    <div class="actions">
+      <button id="reload-answers" class="ghost" type="button">重新渲染</button>
+      <button id="clear" class="ghost" type="button">清空</button>
+    </div>
+    <table class="answers">
+      <thead><tr><th>请求</th><th class="st">状态</th><th>关键 header</th><th>body</th></tr></thead>
+      <tbody id="answer-log"><tr><td colspan="4">还没有请求。</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="notes">
+    <p>值得回去比对的三组：<code>/api/reports</code> 在无 token 时是 401、在有 token 但无 <code>report:read</code> 时是
+      403；<code>DELETE /api/reports/2</code> 第一次 204、第二次 404；<code>/api/reports?limit=abc</code> 是 400
+      而不是被猜成 20。</p>
+  </div>
+</main>
+
+<footer>
+  <div class="band">
+    <p>BareZen 控制台 · 源码在仓库的 <code>app/</code> · 文档站在 <code>site/</code>（中英双语，纯静态）<br>
+      这一页由 <code>Console.router()</code> 注册成一条路由，文件本身由 <code>barezen-content</code> 提供。</p>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

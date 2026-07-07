@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>事件审计 —— BareZen 控制台</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="events">
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen 控制台</a>
+    <nav class="pages">
+      <a href="/">概览</a>
+      <a href="/reports">报告</a>
+      <a href="/session">会话</a>
+      <a href="/events" aria-current="page">事件审计</a>
+      <a href="/people">他人权限</a>
+      <a href="/answers">应答日志</a>
+      <a href="/about">关于</a>
+    </nav>
+  </div>
+</header>
+
+<div class="account">
+  <div class="band">
+    <span class="who" id="who">未登录</span>
+    <span class="keys">
+      <button id="quick-ada" class="small" type="button">以 ada 登录</button>
+      <button id="quick-bob" class="small" type="button">以 bob 登录</button>
+      <button id="quick-cy" class="small" type="button">以 cy 登录</button>
+      <button id="signout" class="small" type="button">退出</button>
+    </span>
+  </div>
+</div>
+
+<div class="strip">
+  <p class="band" id="strip">还没有会话 —— 点右上角任一账号登录，口令都是 <code>hunter2</code>。</p>
+</div>
+
+<main>
+  <h1>事件审计</h1>
+  <p class="lede">这些条目是应用发布到框架事件总线上的记录 —— 那条总线自 2.6 起没有消费者，这里是第一个
+    （<span class="nb">ADR-0056</span>）。读取它需要 <code>user:read</code>，所以 <code>ada</code> 会拿到 403。</p>
+
+  <div class="panel">
+    <h2>最近的事件</h2>
+    <div class="actions">
+      <button id="load-events" type="button">刷新事件流</button>
+    </div>
+    <table class="data">
+      <thead><tr><th class="when">时间</th><th class="kind">事件</th><th>对象</th></tr></thead>
+      <tbody id="event-rows"><tr><td colspan="3">还没有读取。</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="notes">
+    <p><strong>这里看不到拒绝。</strong><code>SecurityMiddleware</code> 在 handler 之前就回答了 403，应用根本不知道
+      发生过一次拒绝，所以审计流里没有"权限不足"这种条目。要真有授权审计，需要框架提供一个现在没有的钩子 ——
+      与其编一条没人观察到的事件，不如把限制写出来。</p>
+  </div>
+</main>
+
+<footer>
+  <div class="band">
+    <p>BareZen 控制台 · 源码在仓库的 <code>app/</code> · 文档站在 <code>site/</code>（中英双语，纯静态）<br>
+      这一页由 <code>Console.router()</code> 注册成一条路由，文件本身由 <code>barezen-content</code> 提供。</p>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -10,6 +10,7 @@ import com.barezen.plugins.auth.AuthPlugin;
 import com.barezen.plugins.openapi.ApiDocument;
 import com.barezen.plugins.openapi.ApiResponse;
 import com.barezen.plugins.openapi.Operation;
+import com.barezen.plugins.openapi.Parameter;
 import com.barezen.plugins.openapi.OperationMetadata;
 import com.barezen.plugins.openapi.Schema;
 import com.barezen.plugins.openapi.Security;
@@ -17,9 +18,8 @@ import com.barezen.plugins.routes.RouteContributions;
 import com.barezen.plugins.user.UserPlugin;
 import com.barezen.plugins.user.UserRepository;
 import com.barezen.security.Authorization;
+import com.barezen.security.SecurityMiddleware;
 import com.barezen.security.PasswordHasher;
-import com.barezen.security.Principal;
-import com.barezen.security.Permission;
 import com.barezen.security.SessionStore;
 import com.barezen.web.Headers;
 import com.barezen.web.HttpMethod;
@@ -34,11 +34,10 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 import javax.sql.DataSource;
 
@@ -66,12 +65,38 @@ public final class Console {
 
   private static final byte[] HEALTHY = "{\"status\":\"ok\"}".getBytes(StandardCharsets.UTF_8);
 
+  /**
+   * The console's pages: the address a reader types, and the file behind it.
+   *
+   * <p>Seven files, seven addresses, none of them ending in {@code .html} — the application chooses its own URLs, which
+   * is the one thing a framework-served site may do that a GitHub-Pages folder cannot (ADR-0054 vs ADR-0057).
+   */
+  private static final List<String[]> PAGES = List.of(
+      new String[] {"/", "index.html"},
+      new String[] {"/reports", "reports.html"},
+      new String[] {"/session", "session.html"},
+      new String[] {"/events", "events.html"},
+      new String[] {"/people", "people.html"},
+      new String[] {"/answers", "answers.html"},
+      new String[] {"/about", "about.html"});
+
+  /** The one script and the one stylesheet, addressed the way the pages address them. */
+  private static final List<String[]> ASSETS = List.of(
+      new String[] {"/app.js", "app.js"},
+      new String[] {"/assets/app.css", "assets/app.css"});
+
   private Console() {
   }
 
-  /** The pieces the application assembles and the demo needs to reach: the store, the plugins, and the report plugin. */
-  record Assembly(UserRepository users, SessionStore sessions, AuthPlugin auth, ReportsPlugin reports,
-                  List<Plugin> built) {
+  /**
+   * What the application assembled: the ports the demo routes need, the plugin it owns, the audit trail its events
+   * land in, and the clock the session-detail handler reads.
+   *
+   * <p>The clock is a collaborator rather than a call to {@code Instant.now()} inside a handler, so a test can pin an
+   * expiry to an instant it chose — the same reason {@code StaticContent} takes no clock at all (ADR-0051).
+   */
+  record Assembly(UserRepository users, SessionStore sessions, AuthPlugin auth, ReportsPlugin reports, Audit audit,
+                  Authorization authorization, Clock clock, List<Plugin> built) {
   }
 
   /**
@@ -112,12 +137,16 @@ public final class Console {
     Database database = new Database(dataSource);
     UserRepository users = new UserRepository(database, hashing());
     UserPlugin user = new UserPlugin(users);
-    Authorization grants = Authorization.of(Map.of(
-        new Principal("ada"), Set.of(Permission.of("report:read"), Permission.of("report:write"))));
+    Audit audit = new Audit(Clock.systemUTC());
+    // One source of truth for authorisation: the shipped UserPlugin answers Authorization by reading the grants table
+    // through UserRepository, so the console never keeps a second map that can drift from what the page displays. A
+    // static table here was tried first and disagreed with the UI about what cy was allowed to do — which is the whole
+    // argument for not duplicating a decision (ADR-0042's direction, applied inside one application).
     SessionStore sessions = SessionStore.standard();
-    AuthPlugin auth = new AuthPlugin(sessions, user, "Bearer", Duration.ofMinutes(30));
-    ReportsPlugin reports = new ReportsPlugin(database, auth, grants);
-    return new Assembly(users, sessions, auth, reports, List.of(auth, user, reports));
+    AuthPlugin auth = new AuthPlugin(sessions, user, "Bearer", Sessions.LIFETIME);
+    ReportsPlugin reports = new ReportsPlugin(database, auth, user, audit);
+    return new Assembly(users, sessions, auth, reports, audit, user, Clock.systemUTC(),
+        List.of(auth, user, reports));
   }
 
   /** Every plugin in dependency order: what the application built, plus whatever the classpath announced. */
@@ -142,18 +171,33 @@ public final class Console {
     Router.Builder builder = Router.builder()
         .route(HttpMethod.GET, "/health", (request, parameters) ->
             new Response(200, Headers.of("Content-Type", "application/json"), HEALTHY))
-        .route(HttpMethod.POST, "/api/sessions", Sessions.signIn(wiring.auth()))
-        .route(HttpMethod.DELETE, "/api/sessions", Sessions.signOut(wiring.auth(), wiring.sessions()))
-        .route(HttpMethod.GET, "/api/session", Sessions.whoAmI(wiring.auth(), wiring.users()));
+        .route(HttpMethod.POST, "/api/sessions", Sessions.signIn(wiring.auth(), wiring.audit()))
+        .route(HttpMethod.DELETE, "/api/sessions",
+            Sessions.signOut(wiring.auth(), wiring.sessions(), wiring.audit()))
+        .route(HttpMethod.GET, "/api/session", Sessions.whoAmI(wiring.auth(), wiring.users()))
+        .route(HttpMethod.GET, "/api/session/detail",
+            Sessions.detail(wiring.auth(), wiring.sessions(), wiring.clock()))
+        .route(HttpMethod.POST, "/api/session/rotate",
+            Sessions.rotate(wiring.auth(), wiring.sessions(), wiring.audit()));
 
-    for (String[] page : List.of(new String[] {"/", "index.html"}, new String[] {"/app.js", "app.js"},
-        new String[] {"/assets/app.css", "assets/app.css"})) {
+    // Reading the trail is as privileged as reading another account's grants: it names other people's actions, so it
+    // carries user:read rather than being open to whoever is signed in.
+    builder.route(HttpMethod.GET, "/api/events", SecurityMiddleware.wrap(wiring.auth(), wiring.authorization(),
+        People.USER_READ, (request, parameters) -> new Response(200,
+            Headers.of("Content-Type", "application/json").with("Cache-Control", "no-store"),
+            wiring.audit().toJson().getBytes(StandardCharsets.UTF_8))));
+    People.contribute(builder, wiring.auth(), wiring.authorization(), wiring.users(), wiring.audit());
+
+    for (String[] page : concat(PAGES, ASSETS)) {
       Path file = web.resolve(page[1]);
       if (!Files.isRegularFile(file)) {
         throw new IllegalArgumentException("the console page " + page[1] + " is not in " + web
             + "; this application serves its own frontend, so a missing file is a broken build, not a blank screen");
       }
-      Handler content = StaticContent.file(file);
+      // Both verbs, because a router matches the method the client sent and a page that 405s at a HEAD probe reads as
+      // absent to a crawler and a cache alike (ADR-0028); both wrapped, because every one of these documents may hold
+      // a signed-in reader.
+      Handler content = SecurityHeaders.of(StaticContent.file(file));
       builder.route(HttpMethod.GET, page[0], content);
       builder.route(HttpMethod.HEAD, page[0], content);
     }
@@ -208,6 +252,9 @@ public final class Console {
             .build(),
         Operation.builder(new OperationMetadata(HttpMethod.GET, "/api/reports", "The reports this application keeps",
                 List.of("reports")))
+            .parameters(List.of(Parameter.query("q", Schema.string(), false),
+                Parameter.query("limit", Schema.integer(), false),
+                Parameter.query("offset", Schema.integer(), false)))
             .response(ApiResponse.json("200", "every report row", report))
             .response(ApiResponse.empty("403", "the caller may not read reports"))
             .build(),
@@ -215,7 +262,41 @@ public final class Console {
                 List.of("reports")))
             .response(ApiResponse.json("201", "created", status))
             .response(ApiResponse.empty("405", "the path exists for other methods"))
+            .build(),
+        Operation.builder(new OperationMetadata(HttpMethod.GET, "/api/reports/{id}", "One report by id",
+                List.of("reports")))
+            .parameter(Parameter.path("id", Schema.integer()))
+            .response(ApiResponse.json("200", "the row", report))
+            .response(ApiResponse.empty("404", "no row with that id"))
+            .build(),
+        Operation.builder(new OperationMetadata(HttpMethod.DELETE, "/api/reports/{id}", "Remove one report",
+                List.of("reports")))
+            .parameter(Parameter.path("id", Schema.integer()))
+            .response(ApiResponse.empty("204", "the row is gone"))
+            .response(ApiResponse.empty("404", "no row with that id"))
+            .build(),
+        Operation.builder(new OperationMetadata(HttpMethod.GET, "/api/session/detail", "When this session ends",
+                List.of("console")))
+            .response(ApiResponse.json("200", "the expiry the store holds", identity))
+            .build(),
+        Operation.builder(new OperationMetadata(HttpMethod.POST, "/api/session/rotate",
+                "Trade this token for a new one", List.of("console")))
+            .response(ApiResponse.json("200", "the new token and the superseded one", token))
+            .build(),
+        Operation.builder(new OperationMetadata(HttpMethod.GET, "/api/users/{name}/permissions",
+                "The grants another account holds", List.of("console")))
+            .parameter(Parameter.path("name", Schema.string()))
+            .response(ApiResponse.json("200", "the named account and its grants", identity))
+            .response(ApiResponse.empty("403", "the caller does not carry user:read"))
+            .build(),
+        Operation.builder(new OperationMetadata(HttpMethod.GET, "/api/events", "The audit trail",
+                List.of("console")))
+            .response(ApiResponse.json("200", "the recorded events", status))
+            .response(ApiResponse.empty("403", "the caller does not carry user:read"))
             .build());
+
+    // GET /api/reports grows query parameters, declared rather than discovered: the document is written from what the
+    // handler reads, which is the only reason a reader can trust it to match (ADR-0042).
 
     return ApiDocument.builder()
         .info("BareZen console", "1.0")
@@ -249,8 +330,16 @@ public final class Console {
     wiring.users().create("ada", "hunter2");
     wiring.users().grant("ada", "report:read");
     wiring.users().grant("ada", "report:write");
-    // A second account with no grants, so 403 is a thing the page can show rather than a claim in prose (ADR-0037).
+    // A second account with no grants, so 403 is a thing the page can show rather than a claim in prose (ADR-0037)…
     wiring.users().create("bob", "hunter2");
+    // …and a third that can ask about other people, which is what makes /api/users/{name} and /api/events answerable
+    // at all rather than permanently refused.
+    // Three accounts, three different answers, all of them living in the grants table rather than in a decorator's
+    // private map: ada reads and writes but may not ask about others, bob may do nothing, cy reads reports and may
+    // ask — and People's own permissions come back empty until something grants them.
+    wiring.users().create("cy", "hunter2");
+    wiring.users().grant("cy", "report:read");
+    wiring.users().grant("cy", "user:read");
     wiring.reports().seed("First report", "Contributed by ReportsPlugin.contributeRoutes at assembly time.");
     wiring.reports().seed("Second report", "Listed over GET /api/reports, guarded by report:read.");
   }
@@ -306,6 +395,14 @@ public final class Console {
       server.stop();
       app.stop();
     }
+  }
+
+  /** The page list and the asset list in one, so one loop registers both. */
+  private static List<String[]> concat(List<String[]> pages, List<String[]> assets) {
+    List<String[]> all = new ArrayList<>(pages.size() + assets.size());
+    all.addAll(pages);
+    all.addAll(assets);
+    return List.copyOf(all);
   }
 
   private static int parsePort(String argument) {

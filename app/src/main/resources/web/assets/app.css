@@ -1,11 +1,15 @@
 /*
- * The console's stylesheet. It is the documentation site's design system copied forward rather than reinvented:
- * the same six tokens, the same band header, the same measure, the same table and notes treatment
- * (site/assets/site.css). A second visual language inside one repository would be a cost with no buyer, and the
- * framework refuses a capability until something has asked for it twice.
+ * The console's stylesheet. It is the documentation site's design system copied forward rather than reinvented: the
+ * same six tokens, the same table and notes treatment (site/assets/site.css). A second visual language inside one
+ * repository would be a cost with no buyer.
  *
- * What the docs page did not need and a console does: a form, a control that reads as a control, and an answer log
- * wide enough to show a status and a header name without wrapping one letter per line.
+ * What it changes is the measure. The docs page can afford two widths because it has one kind of block — prose — and
+ * the header's wider band never sits beside a paragraph. A console stacks an account row, a state line, a form and a
+ * table on one screen, and there the two widths showed: measured at a 962px viewport the header's text started 70px
+ * left of the page title's. Every band here is one width, so every left edge on a page is the same x.
+ *
+ * The second change is weight. A page where four buttons are filled and every block carries its own padding reads as a
+ * toolbar; the bands and borders below are sized so the table is the first thing a reader reaches for.
  */
 
 :root {
@@ -15,6 +19,8 @@
   --bg: #ffffff;
   --bg-soft: #f5f6f7;
   --accent: #1f4e5f;
+  --radius: 4px;
+  --band: 52rem;
 }
 
 * { box-sizing: border-box; }
@@ -27,20 +33,38 @@ body {
     "Noto Sans", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 
-header { border-bottom: 1px solid var(--line); padding: 20px 24px; }
-.band { max-width: 68ch; margin: 0 auto; }
-header .band { max-width: 84ch; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+/* --- the bands: one width, so one left edge -------------------------------------------------------- */
 
-.brand { font-weight: 650; font-size: 18px; color: var(--ink); text-decoration: none; letter-spacing: -0.01em; }
-nav { margin-left: auto; white-space: nowrap; }
-nav a { color: var(--ink-soft); text-decoration: none; font-size: 14px; margin-left: 16px; }
-nav a:hover { color: var(--accent); text-decoration: underline; }
+.band { max-width: var(--band); margin: 0 auto; padding: 0 24px; }
 
-main { max-width: 68ch; margin: 0 auto; padding: 40px 24px 72px; }
+header { border-bottom: 1px solid var(--line); }
+header .band { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 15px 24px 12px; }
 
-h1 { font-size: 30px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.02em; }
-h2 { font-size: 20px; margin: 40px 0 10px; letter-spacing: -0.01em; }
-.lede { color: var(--ink-soft); font-size: 18px; margin: 0 0 32px; }
+.brand { font-weight: 650; font-size: 17px; color: var(--ink); text-decoration: none; letter-spacing: -0.01em; }
+
+/* Page links and nothing else; the account controls live in the row below so this line stays one line. */
+nav.pages { margin-left: auto; white-space: nowrap; }
+nav.pages a { color: var(--ink-soft); text-decoration: none; font-size: 14px; margin-left: 15px; }
+nav.pages a:hover, nav.pages a[aria-current="page"] { color: var(--accent); text-decoration: underline; }
+
+.account { background: var(--bg-soft); border-bottom: 1px solid var(--line); }
+.account .band { display: flex; align-items: center; gap: 12px; padding: 7px 24px; }
+.who { font-size: 14px; color: var(--ink-soft); }
+.who b { color: var(--ink); font-weight: 600; }
+.keys { margin-left: auto; display: flex; gap: 8px; }
+
+/* The answer line. One sentence, and it is rewritten on load from what the server actually says about the token this
+   page holds — a static sentence here once read "还没有会话" above a header that said "已登录：bob". */
+.strip { border-bottom: 1px solid var(--line); }
+.strip .band { padding: 9px 24px; margin: 0 auto; font-size: 14.5px; color: var(--ink-soft); }
+.strip p { margin: 0; }
+
+main { max-width: var(--band); margin: 0 auto; padding: 26px 24px 56px; }
+
+h1 { font-size: 28px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -0.02em; }
+h2 { font-size: 17px; margin: 26px 0 8px; letter-spacing: -0.01em; }
+.lede { color: var(--ink-soft); font-size: 16.5px; margin: 0 0 22px; }
+p { margin: 0 0 12px; }
 
 a { color: var(--accent); }
 ul { padding-left: 22px; }
@@ -52,77 +76,157 @@ code, pre {
 
 code { background: var(--bg-soft); padding: 1px 4px; border-radius: 3px; }
 
-table { border-collapse: collapse; width: 100%; margin: 20px 0; font-size: 14.5px; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top;
+/* A hyphen inside `ADR-0047` is a legal break point for a line of Chinese, which is how one reference arrived as
+   "（ADR-" on one line and "0047）" on the next. Inline code never breaks; prose uses .nb for the same token. */
+p code, h2 code, .hint code, .strip code, .notes code, td code, th code { white-space: nowrap; }
+.nb { white-space: nowrap; }
+
+/* --- tables --------------------------------------------------------------------------------------- */
+
+table { border-collapse: collapse; width: 100%; margin: 14px 0 2px; font-size: 14.5px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top;
   overflow-wrap: anywhere; }
-th { font-weight: 600; color: var(--ink-soft); font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+th { font-weight: 600; color: var(--ink-soft); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+td[colspan] { color: var(--ink-soft); }
 
-.notes {
-  border-left: 3px solid var(--accent);
-  background: var(--bg-soft);
-  padding: 12px 16px;
-  margin: 28px 0;
-  font-size: 15px;
+/* A fixed layout is what stops one long body from shoving the action buttons to a different x on every row: give the
+   id and action columns widths and a reader's eye lands in the same place each time. */
+table.data { table-layout: fixed; }
+table.data .id { width: 56px; }
+table.data .ops { width: 128px; text-align: right; white-space: nowrap; }
+/* Two buttons in one cell with no gap read as one word — which is exactly what the row actions looked like
+   measured at 962px: 单读删除. */
+table.data .ops button + button { margin-left: 6px; }
+
+/* A detail table's first column holds a field name, not a column header. The uppercase treatment is what made
+   "sessionsOpen" wrap to three lines inside a 56px column and turn four facts into a 364px-tall block. */
+table.fields { table-layout: fixed; }
+table.fields th:first-child { width: 148px; }
+table.fields tbody th { font-size: 14.5px; font-weight: 600; color: var(--ink); text-transform: none; letter-spacing: 0; }
+
+/* The answer log is the payload. Monospace body, scrolling inside its own cell rather than widening the page, because
+   a long JSON body is the case this table exists for. */
+table.answers { table-layout: fixed; }
+table.answers .st { width: 76px; }
+table.answers td.body {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  max-height: 7em;
+  overflow: auto;
 }
 
-footer { border-top: 1px solid var(--line); padding: 24px; color: var(--ink-soft); font-size: 14px; }
-footer .band { display: block; }
-
-/* --- The parts a documentation page has no reason to carry ------------------------------- */
-
-label { display: block; font-size: 14px; color: var(--ink-soft); margin: 0 0 4px; }
-
-input {
-  display: block;
-  width: 100%;
-  font: inherit;
-  font-size: 15px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--ink);
-}
-
-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-button {
-  font: inherit;
-  font-size: 14.5px;
-  padding: 8px 14px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  background: var(--accent);
-  color: var(--bg);
-  cursor: pointer;
-}
-
-button.secondary { background: var(--bg); color: var(--accent); }
-
-button:disabled { border-color: var(--line); background: var(--bg-soft); color: var(--ink-soft); cursor: default; }
-
-.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin: 12px 0 0; }
-.row > div { flex: 1 1 200px; }
-
-.state { font-size: 14.5px; color: var(--ink-soft); margin: 8px 0 0; }
+/* A timestamp and an event name are known-length facts; the free-text column is the one that should absorb the
+   remaining width. Fixed layout divides the columns equally when nothing says otherwise, which left 对象 250px and
+   wrapped every timestamp onto two lines. The server's instant carries nanoseconds, so the column is monospace at the
+   width that value actually measures — 30 characters, one line. */
+.when { width: 260px; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px; }
+.kind { width: 132px; }
 
 /* A status code is the interesting fact on the page, so it is the one thing allowed a colour of its own — a code in
    prose and a code in this column must read the same way. */
 .status { font-variant-numeric: tabular-nums; font-weight: 600; }
 .status.ok { color: var(--accent); }
 .status.client { color: #8a5a00; }
-.server { color: #a12622; }
+.status.server { color: #a12622; }
 
-/* The answer log is a table of what the server said. The body column is monospace and scrolls inside its own cell
-   rather than widening the page, because a long JSON body is the case this table exists for. */
-.answers td:last-child {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  max-height: 6.5em;
-  overflow: auto;
+/* --- the two blocks of chrome a docs page never needed -------------------------------------------- */
+
+.notes {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-soft);
+  padding: 10px 16px;
+  margin: 22px 0;
+  font-size: 14.5px;
+}
+.notes p:last-child { margin-bottom: 0; }
+
+/* A panel groups controls, so one page can hold "the list" and "add one" without a heading shouting about it. The
+   bottom padding is deliberately small: the last thing in a panel is a table or an action row, and both carry their
+   own margins. */
+.panel { border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px 0; margin: 16px 0; }
+.panel > h2 { margin: 0 0 6px; }
+.panel > .hint { margin: 0 0 12px; font-size: 13.5px; color: var(--ink-soft); }
+
+footer { border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 13.5px; }
+footer .band { padding: 18px 24px 26px; }
+footer p { margin: 0; }
+
+/* --- forms and actions ---------------------------------------------------------------------------- */
+
+label { display: block; font-size: 13px; color: var(--ink-soft); margin: 0 0 4px; }
+
+input {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
 }
 
+input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Columns are named per form rather than left to auto-fit: at this measure auto-fit chose two columns and dropped the
+   submit button onto a row of its own, 71px below the fields it belongs to. */
+.grid { display: grid; gap: 10px 12px; align-items: end; }
+.grid.filters { grid-template-columns: minmax(0, 2fr) minmax(0, 96px) auto; }
+.grid.pair { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
+.grid.single { grid-template-columns: minmax(0, 1fr) auto; }
+
+/* No label above a button: align-items: end already puts its bottom edge on the input's bottom edge, and an empty
+   label was a spacer that also made every field's own label have to be the same height. */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 2px; }
+
+.state { font-size: 14px; color: var(--ink-soft); margin: 10px 0 0; }
+
+/* --- buttons: one filled per block, the rest outlined ---------------------------------------------- */
+
+button {
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+  padding: 7px 13px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--bg);
+  cursor: pointer;
+}
+
+button.ghost { background: var(--bg); color: var(--accent); }
+button:disabled { border-color: var(--line); background: var(--bg-soft); color: var(--ink-soft); cursor: default; }
+
+/* The small size belongs in a table row and in the account strip; a third button style in the header is what made the
+   page read as a toolbar borrowed from another application. */
+button.small { font-size: 13px; padding: 3px 9px; border-color: var(--line); background: var(--bg); color: var(--ink); }
+button.small:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Going somewhere is a link, not a button with a click handler that assigns to location.href. */
+a.button {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1.2;
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--accent);
+  text-decoration: none;
+}
+a.button:hover { border-color: var(--accent); }
+
 @media (max-width: 720px) {
-  nav { white-space: normal; }
+  header .band { align-items: flex-start; }
+  nav.pages { margin-left: 0; flex: 1 1 100%; white-space: normal; }
+  .account .band { flex-wrap: wrap; }
+  .keys { margin-left: 0; }
+  .grid.filters, .grid.pair, .grid.single { grid-template-columns: minmax(0, 1fr); }
+  /* Two fixed columns of 260px and 132px leave the free-text column 40px at this measure; equal shares wrap the
+     timestamp onto a second line instead, which is the cheaper failure. */
+  .when, .kind { width: auto; }
 }

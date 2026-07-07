@@ -80,12 +80,13 @@ server.stop();</code></pre>
     这个形状是由检测规则拒绝的，不是靠约定（ADR-0033）。</p>
 
   <h2>跑示例</h2>
-  <p><code>examples/</code> 模块里有七个程序 —— hello world、routing、request/response、security、database、plugin、
-    OpenAPI —— 每个都有一个 <code>main()</code>，会真的绑定一个 socket 并打印它观察到的结果，
-    每个也都有一份 reactor 会跑的测试。先构建，然后每个程序一条 <code>java -cp</code>：</p>
+  <p><code>examples/</code> 模块里有八个程序 —— hello world、routing、request/response、security、database、plugin、
+    OpenAPI、静态文件 —— 每个都有一个 <code>main()</code>，会真的绑定一个 socket 并打印它观察到的结果，
+    每个也都有一份 reactor 会跑的测试。<code>app/</code> 是第九个能跑的东西，也是唯一一个应用而不是演示：
+    它自己带一个浏览器会话。先构建，然后每个程序一条 <code>java -cp</code>：</p>
   <pre><code>mvn -o -B -ntp clean verify
 java -cp "$CP" com.barezen.examples.hello.HelloWorld</code></pre>
-  <p>完整的 classpath 写法，以及七个程序各自观察到的输出，都在 <code>docs/examples/README.md</code> 里。</p>
+  <p>完整的 classpath 写法，以及八个程序各自观察到的输出，都在 <code>docs/examples/README.md</code> 里。</p>
 
   <div class="notes">
     <p>下一篇：<a href="routing.html">路由与 HTTP</a> —— 一个模式允许是什么、六种错误应答长什么样，

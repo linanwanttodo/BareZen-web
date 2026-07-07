@@ -3,10 +3,11 @@ package com.barezen.console;
 import com.barezen.core.plugin.Plugin;
 import com.barezen.core.plugin.PluginDescriptor;
 import com.barezen.data.Database;
-import com.barezen.security.Authorization;
+import com.barezen.data.RowMapper;
 import com.barezen.security.Authentication;
-import com.barezen.security.Principal;
+import com.barezen.security.Authorization;
 import com.barezen.security.Permission;
+import com.barezen.security.Principal;
 import com.barezen.security.SecuredHandler;
 import com.barezen.security.SecurityContext;
 import com.barezen.security.SecurityMiddleware;
@@ -22,21 +23,22 @@ import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The reports the console lists, contributed as a plugin's routes rather than registered by the application.
  *
  * <p>This is ADR-0047's extension point used by an application that is not an example: the plugin owns
  * {@code /api/reports} and hands it over at assembly through {@link RouteContributor}, so the application that runs it
- * never names the route it will end up serving. Protection is composed where the route is composed — each handler is
+ * never names the route it ends up serving. Protection is composed where the route is composed — each handler is
  * wrapped here, with the ports taken in the constructor, because nothing can attach policy to a contribution after the
- * fact (ADR-0033).
+ * fact (ADR-0033). Reading needs {@code report:read} and writing or deleting needs {@code report:write}, so the two
+ * refusals a reader most often confuses are both reachable from one path family.
  *
  * <p>It is built by hand, not discovered: {@link Database} is a collaborator, and a {@link java.util.ServiceLoader}
- * provider needs a no-argument constructor, which is the limit ADR-0048 states rather than papers over. A plugin whose
- * whole job were announcing routes that need nothing could be listed in {@code META-INF/services} instead — that is the
- * distinction this application keeps visible.
+ * provider needs a no-argument constructor, which is the limit ADR-0048 states rather than papers over.
  */
 public final class ReportsPlugin implements Plugin, RouteContributor {
 
@@ -44,21 +46,36 @@ public final class ReportsPlugin implements Plugin, RouteContributor {
   private static final Permission READ = Permission.of("report:read");
   private static final Permission WRITE = Permission.of("report:write");
 
+  /** The one row shape this plugin reads, named so the filtered and unfiltered queries above read identically. */
+  private static final RowMapper<String> ROW = resultSet -> {
+    Map<String, String> row = new LinkedHashMap<>();
+    try {
+      row.put("id", Integer.toString(resultSet.getInt("id")));
+      row.put("title", resultSet.getString("title"));
+      row.put("body", resultSet.getString("body"));
+    } catch (SQLException unreadable) {
+      throw new IllegalStateException("a report row could not be read: " + unreadable.getMessage(), unreadable);
+    }
+    return Json.object(row);
+  };
+
   private final Database database;
   private final Authentication authentication;
   private final Authorization authorization;
+  private final Audit audit;
 
   /**
-   * @param database the application's database, which this plugin creates its own table in during
+   * @param database the application's database, whose {@code reports} table this plugin creates during
    *     {@link #initialize()}
    * @param authentication the auth plugin's bearer authentication, taken rather than constructed
-   * @param authorization the grant table that decides who may read and write reports
+   * @param authorization the grant table that decides who may read, write and delete
+   * @param audit the trail this plugin publishes its own domain events onto, so the bus sees reports change
    */
-  public ReportsPlugin(Database database, Authentication authentication,
-                       Authorization authorization) {
+  public ReportsPlugin(Database database, Authentication authentication, Authorization authorization, Audit audit) {
     this.database = database;
     this.authentication = authentication;
     this.authorization = authorization;
+    this.audit = audit;
   }
 
   @Override
@@ -81,10 +98,23 @@ public final class ReportsPlugin implements Plugin, RouteContributor {
   public void contributeRoutes(Router.Builder routes) {
     routes.route(HttpMethod.GET, "/api/reports",
         SecurityMiddleware.wrap(authentication, authorization, READ, new ListReports()));
+    routes.route(HttpMethod.GET, "/api/reports/{id}",
+        SecurityMiddleware.wrap(authentication, authorization, READ, new ReadOne()));
     routes.route(HttpMethod.POST, "/api/reports",
         SecurityMiddleware.wrap(authentication, authorization, WRITE, new AddReport()));
+    routes.route(HttpMethod.DELETE, "/api/reports/{id}",
+        SecurityMiddleware.wrap(authentication, authorization, WRITE, new RemoveReport()));
   }
 
+  /**
+   * {@code GET /api/reports} with the filters this application understands.
+   *
+   * <p>Three parameters, each with a stated bound: {@code q} narrows title and body, {@code limit} defaults to twenty
+   * and is capped at one hundred rather than silently exceeded, {@code offset} pages forward. A malformed number is a
+   * 400 naming nothing but the status, because a server that guesses what a broken query meant becomes an undocumented
+   * API — and the query is the application's to interpret, which is exactly what ADR-0018 §4 leaves it (the router
+   * routes on the path and nothing else).
+   */
   private final class ListReports implements Handler, SecuredHandler {
 
     @Override
@@ -94,23 +124,61 @@ public final class ReportsPlugin implements Plugin, RouteContributor {
 
     @Override
     public Response handle(Request request, Map<String, String> parameters, SecurityContext context) {
-      List<String> rows = database.query("SELECT id, title, body FROM reports ORDER BY id", resultSet -> {
-        Map<String, String> row = new LinkedHashMap<>();
-        try {
-          row.put("id", Integer.toString(resultSet.getInt("id")));
-          row.put("title", resultSet.getString("title"));
-          row.put("body", resultSet.getString("body"));
-        } catch (SQLException unreadable) {
-          throw new IllegalStateException("a report row could not be read: " + unreadable.getMessage(), unreadable);
-        }
-        return Json.object(row);
-      });
+      Query query = Query.of(request.query());
+      Query.Number limit = Query.read("limit", query.value("limit"), Query.DEFAULT_LIMIT, Query.MAX_LIMIT);
+      Query.Number offset = Query.read("offset", query.value("offset"), 0, Integer.MAX_VALUE);
+      if (limit.refused() || offset.refused()) {
+        return plain(400, "Bad Request");
+      }
+      String filter = query.value("q").orElse("");
+      String pattern = "%" + filter.toLowerCase(Locale.ROOT) + "%";
+      String where = filter.isEmpty() ? "" : " WHERE lower(title) LIKE ? OR lower(body) LIKE ?";
+
+      List<String> rows = filter.isEmpty()
+          ? database.query("SELECT id, title, body FROM reports ORDER BY id LIMIT ? OFFSET ?",
+              ROW, limit.value(), offset.value())
+          : database.query("SELECT id, title, body FROM reports" + where + " ORDER BY id LIMIT ? OFFSET ?",
+              ROW, pattern, pattern, limit.value(), offset.value());
+      int total = filter.isEmpty()
+          ? database.query("SELECT COUNT(*) FROM reports", ROW_COUNT).get(0)
+          : database.query("SELECT COUNT(*) FROM reports" + where, ROW_COUNT, pattern, pattern).get(0);
+
+      audit.publish(new Audit.ReportListed(rows.size(), filter));
       String name = context.principal().map(Principal::name).orElse("anonymous");
-      return new Response(200, Headers.of("Content-Type", "application/json").with("X-Reader", name),
-          Json.array(rows).getBytes(StandardCharsets.UTF_8));
+      Headers headers = Headers.of("Content-Type", "application/json")
+          .with("X-Reader", name)
+          .with("X-Total-Count", Integer.toString(total))
+          .with("X-Page-Size", Integer.toString(rows.size()));
+      return new Response(200, headers, Json.array(rows).getBytes(StandardCharsets.UTF_8));
     }
   }
 
+  /** {@code GET /api/reports/{id}} — one row, or the contract's plain 404 that names no path. */
+  private final class ReadOne implements Handler, SecuredHandler {
+
+    @Override
+    public Response handle(Request request, Map<String, String> parameters) {
+      throw new AssertionError("registered under SecurityMiddleware, which delivers the secured half");
+    }
+
+    @Override
+    public Response handle(Request request, Map<String, String> parameters, SecurityContext context) {
+      Optional<Integer> id = idOf(parameters.get("id"));
+      if (id.isEmpty()) {
+        // /api/reports/abc is a syntactically fine request the router was right to deliver: only this application
+        // knows its own ids are numbers, so only it can answer 400.
+        return plain(400, "Bad Request");
+      }
+      List<String> rows = database.query("SELECT id, title, body FROM reports WHERE id = ?", ROW, id.get());
+      if (rows.isEmpty()) {
+        return plain(404, "Not Found");
+      }
+      return new Response(200, Headers.of("Content-Type", "application/json"),
+          rows.get(0).getBytes(StandardCharsets.UTF_8));
+    }
+  }
+
+  /** {@code POST /api/reports} — a new row, answered 201 with the id it got. */
   private final class AddReport implements Handler, SecuredHandler {
 
     @Override
@@ -123,25 +191,72 @@ public final class ReportsPlugin implements Plugin, RouteContributor {
       String title = Json.formValue(request.body(), "title");
       String body = Json.formValue(request.body(), "body");
       if (title == null || body == null || title.isBlank()) {
-        // 400 for a body that does not describe a report; the 413 case is the adapter's, above the same route.
-        return new Response(400, Headers.of("Content-Type", "application/json"),
-            Json.field("error", "title and body are both required").getBytes(StandardCharsets.UTF_8));
+        // 400 for a body that does not describe a report; the 413 case is the adapter's, above this same route.
+        return plain(400, "Bad Request");
       }
       database.transaction(tx -> tx.executeUpdate("INSERT INTO reports (title, body) VALUES (?, ?)", title, body));
+      // The database hands back no generated key through Database — its surface is query, executeUpdate and
+      // transaction — so the id is read after the fact. Correct for this single-writer console; an application with
+      // concurrent writers would keep its own DAO over the same DataSource rather than ask the framework to grow one.
+      int id = database.query("SELECT MAX(id) FROM reports", ROW_COUNT).get(0);
+      audit.publish(new Audit.ReportAdded(id, title));
       return new Response(201, Headers.of("Content-Type", "application/json"),
-          Json.field("status", "created").getBytes(StandardCharsets.UTF_8));
+          Json.object(Map.of("id", Integer.toString(id), "status", "created")).getBytes(StandardCharsets.UTF_8));
     }
   }
 
   /**
-   * The seed rows a first visit needs, and the password a first visit can use.
+   * {@code DELETE /api/reports/{id}} — 204 when a row went, 404 when none was there.
    *
-   * <p>A demo that shows an empty table proves nothing about the framing it is here to display, so the application
-   * inserts two reports at start-up. Credentials are a different matter: the seed writes no password, because the
-   * user rows come from {@code UserRepository}, which hashes through the security module (ADR-0035).
+   * <p>The two are told apart by the affected-row count rather than by a SELECT first, so there is no window between
+   * "it exists" and "it is gone" in which the answer could be a lie about.
    */
+  private final class RemoveReport implements Handler, SecuredHandler {
+
+    @Override
+    public Response handle(Request request, Map<String, String> parameters) {
+      throw new AssertionError("registered under SecurityMiddleware, which delivers the secured half");
+    }
+
+    @Override
+    public Response handle(Request request, Map<String, String> parameters, SecurityContext context) {
+      Optional<Integer> id = idOf(parameters.get("id"));
+      if (id.isEmpty()) {
+        return plain(400, "Bad Request");
+      }
+      int removed = database.executeUpdate("DELETE FROM reports WHERE id = ?", id.get());
+      if (removed == 0) {
+        return plain(404, "Not Found");
+      }
+      audit.publish(new Audit.ReportDeleted(id.get()));
+      return new Response(204, Headers.empty(), new byte[0]);
+    }
+  }
+
+  /** Seed a row at start-up: a demo that lists nothing shows a table with no framing in it. */
   void seed(String title, String body) {
     database.executeUpdate("INSERT INTO reports (title, body) VALUES (?, ?)", title, body);
+  }
+
+  private static final RowMapper<Integer> ROW_COUNT = resultSet -> {
+    try {
+      return resultSet.getInt(1);
+    } catch (SQLException unreadable) {
+      throw new IllegalStateException("a count could not be read: " + unreadable.getMessage(), unreadable);
+    }
+  };
+
+  private static Optional<Integer> idOf(String raw) {
+    try {
+      return Optional.of(Integer.parseInt(raw));
+    } catch (NumberFormatException | NullPointerException notAnId) {
+      return Optional.empty();
+    }
+  }
+
+  private static Response plain(int status, String body) {
+    return new Response(status, Headers.of("Content-Type", "text/plain; charset=utf-8"),
+        body.getBytes(StandardCharsets.UTF_8));
   }
 
   @Override

@@ -3,119 +3,89 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BareZen 控制台 —— 框架的一个真实消费者</title>
-<link rel="stylesheet" href="assets/app.css">
+<title>概览 —— BareZen 控制台</title>
+<link rel="stylesheet" href="/assets/app.css">
 </head>
-<body>
+<body data-page="overview">
 <header>
   <div class="band">
-    <a class="brand" href="./">BareZen</a>
-    <nav>
-      <a href="#sign-in">登录</a>
-      <a href="#whoami">会话</a>
-      <a href="#reports">报告</a>
-      <a href="#answers">应答</a>
-      <a href="#notes">这套演示在证明什么</a>
+    <a class="brand" href="/">BareZen 控制台</a>
+    <nav class="pages">
+      <a href="/" aria-current="page">概览</a>
+      <a href="/reports">报告</a>
+      <a href="/session">会话</a>
+      <a href="/events">事件审计</a>
+      <a href="/people">他人权限</a>
+      <a href="/answers">应答日志</a>
+      <a href="/about">关于</a>
     </nav>
   </div>
 </header>
 
+<div class="account">
+  <div class="band">
+    <span class="who" id="who">未登录</span>
+    <span class="keys">
+      <button id="quick-ada" class="small" type="button">以 ada 登录</button>
+      <button id="quick-bob" class="small" type="button">以 bob 登录</button>
+      <button id="quick-cy" class="small" type="button">以 cy 登录</button>
+      <button id="signout" class="small" type="button">退出</button>
+    </span>
+  </div>
+</div>
+
+<div class="strip">
+  <p class="band" id="strip">还没有会话 —— 点右上角任一账号登录，口令都是 <code>hunter2</code>。</p>
+</div>
+
 <main>
-  <h1>一个应用，不是文档。</h1>
-  <p class="lede">这个页面是 BareZen 的消费者标本：一个真实的 Java Web 框架用法 —— 会话、路由、由插件贡献的端点、
-    以及被如实展示的应答。它不调用任何"框架帮忙生成的 UI"，因为框架没有这种东西。</p>
+  <h1>一个应用，不是文档</h1>
+  <p class="lede">这个页面是 BareZen 的消费者标本：会话、由插件贡献的端点、被如实展示的应答。
+    它不调用任何"框架帮忙生成的 UI"，因为框架没有这种东西。</p>
 
-  <h2 id="sign-in">登录</h2>
-  <p><code>POST /api/sessions</code> 用口令换一个 bearer token（<code>SessionStore</code> 发的是不透明随机串，
-    不是 JWT，见 ADR-0036）。口令验证走 <code>PasswordHasher</code> 的 PBKDF2，比对失败不告诉你是哪个环节错。</p>
-  <form id="login" autocomplete="off">
-    <div class="row">
-      <div>
-        <label for="username">用户名</label>
-        <input id="username" name="username" value="ada" spellcheck="false">
-      </div>
-      <div>
-        <label for="password">口令</label>
-        <input id="password" name="password" type="password" value="hunter2">
-      </div>
-      <div>
-        <button type="submit">登录</button>
-      </div>
-    </div>
-  </form>
-  <p class="state" id="session-state">当前没有会话。</p>
-
-  <h2 id="whoami">我是谁，以及权限从哪来</h2>
-  <p><code>GET /api/session</code> 把身份交给 handler 当第三个参数（<code>SecuredHandler</code>，不是 thread-local，
-    见 ADR-0033）。<code>bob</code> 这个账号被故意一个权限都不给，用来看到货框架区分 401 与 403。</p>
-  <div class="row">
-    <div><button id="refresh" class="secondary">查询当前会话</button></div>
-    <div><button id="logout" class="secondary">退出（DELETE /api/sessions）</button></div>
-  </div>
-
-  <h2 id="reports">报告：这些路由是插件贡献的</h2>
-  <p><code>ReportsPlugin</code> 实现 <code>Plugin</code> 与 <code>RouteContributor</code>，在装配期把
-    <code>/api/reports</code> 交出来；本页面所在的 application 从未写过这条路由（ADR-0047）。读取要
-    <code>report:read</code>，写入要 <code>report:write</code>。</p>
-  <div class="row">
-    <div><button id="load" class="secondary">列出报告</button></div>
-    <div><button id="forbidden" class="secondary">用无权限账号触发 403</button></div>
-    <div><button id="oversize" class="secondary">发一个超过 1 MiB 的 body</button></div>
-  </div>
-  <form id="create">
-    <div class="row">
-      <div>
-        <label for="title">标题</label>
-        <input id="title" name="title" placeholder="第三条报告" spellcheck="false">
-      </div>
-      <div>
-        <label for="body">正文</label>
-        <input id="body" name="body" placeholder="POST /api/reports" spellcheck="false">
-      </div>
-      <div>
-        <button type="submit">新增</button>
-      </div>
-    </div>
-  </form>
-
-  <table id="report-table">
-    <thead><tr><th>id</th><th>标题</th><th>正文</th></tr></thead>
-    <tbody><tr><td colspan="3">还没请求。列表需要有效会话与 <code>report:read</code>。</td></tr></tbody>
+  <table>
+    <thead><tr><th class="id">账号</th><th>权限</th><th>它能看到的差别</th></tr></thead>
+    <tbody>
+      <tr><td><code>ada</code></td><td><code>report:read</code>, <code>report:write</code></td>
+        <td>报告可读可写可删；查他人权限与事件流都是 403</td></tr>
+      <tr><td><code>bob</code></td><td>（无）</td>
+        <td>登录成功，但任何报告请求都是 403 —— 有身份不等于有权限</td></tr>
+      <tr><td><code>cy</code></td><td><code>report:read</code>, <code>user:read</code></td>
+        <td>能读他人权限与审计流，但不能写报告</td></tr>
+    </tbody>
   </table>
 
-  <h2 id="answers">每一次请求的原始应答</h2>
-  <p>这一张表是整个演示的重点：框架回答什么，页面就显示什么 —— 状态码、几个关键 header、以及 body 原文。
-    404 不告诉你路径、405 带着 <code>Allow</code>、413 是服务器给的、304 没有 body 也没有长度。</p>
-  <table class="answers">
-    <thead><tr><th>请求</th><th>状态</th><th>关键 header</th><th>body</th></tr></thead>
-    <tbody id="answer-log"><tr><td colspan="4">还没有请求。</td></tr></tbody>
-  </table>
-
-  <h2 id="document">接口文档也是同一份声明</h2>
-  <p><code>GET /api/document</code> 由 <code>OpenApiPlugin</code> 的声明数据生成（ADR-0043）。它只描述返回 JSON 的端点：
-    <code>ApiResponse</code> 能说"有一个 JSON body"或"没有 body"，说不了 HTML 页面，所以这个页面自己不在文档里 ——
-    这是被点名的模型边界，不是遗漏。</p>
-  <div class="row">
-    <div><button id="document" class="secondary">取 /api/document</button></div>
+  <div class="panel">
+    <h2>登录失败的两种样子</h2>
+    <p class="hint"><span class="nb">ADR-0037</span> 规定：不能从应答里读出"用户不存在"还是"口令错"，所以两者必须是同一个答案。
+      点完这两个按钮，去<a href="/answers">应答日志</a>比对状态码与 body 是否完全一致。</p>
+    <div class="actions">
+      <button id="wrong-password" class="ghost" type="button">ada + 错口令</button>
+      <button id="unknown-user" class="ghost" type="button">不存在的用户 dave</button>
+    </div>
   </div>
 
-  <div class="notes" id="notes">
-    <p><strong>这个页面在证明什么。</strong>框架的公开面够用：路由、会话、装饰器式的安全、插件扩展点、静态文件、数据访问，
-      一个应用只用公开 API 就能把它们串起来（编译期就保证了这一点，因为它是一个独立 Maven 模块）。
-      <strong>它没有证明什么。</strong>认证用的是 <code>Authorization: Bearer</code>，不是 cookie —— 因为
-      <code>SecurityMiddleware</code> 只从 <code>Authorization</code> 取凭证，框架没有第二种 credential source；
-      所以刷新页面会掉登录，token 只存在内存里（放进 <code>localStorage</code> 等于把它交给任何能在这页执行的脚本）。
-      需要 cookie 会话时，那条扩展点得先按规矩开一份 ADR，而不是在这里绕过。</p>
+  <div class="panel">
+    <h2>接口文档</h2>
+    <p class="hint"><code>GET /api/document</code> 返回应用自己声明的 OpenAPI 模型 —— 声明是手写的，不是从路由里反射出来的。</p>
+    <div class="actions">
+      <button id="ov-document" class="ghost" type="button">取接口文档</button>
+    </div>
+  </div>
+
+  <div class="notes">
+    <p>口令都是 <code>hunter2</code>，由 <code>PasswordHasher</code> 的 PBKDF2 存成
+      <code>algorithm$iterations$salt$key</code>；页面上没有任何一处能拿到散列（<span class="nb">ADR-0035</span>）。</p>
   </div>
 </main>
 
 <footer>
   <div class="band">
-    <p>BareZen 控制台 · 源码在仓库的 <code>app/</code> 目录 · 文档站在 <code>site/</code>（中英双语，纯静态） ·
-      演示账号 <code>ada/hunter2</code>（有权限）与 <code>bob/hunter2</code>（无权限）。</p>
+    <p>BareZen 控制台 · 源码在仓库的 <code>app/</code> · 文档站在 <code>site/</code>（中英双语，纯静态）<br>
+      这一页由 <code>Console.router()</code> 注册成一条路由，文件本身由 <code>barezen-content</code> 提供。</p>
   </div>
 </footer>
 
-<script src="app.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>

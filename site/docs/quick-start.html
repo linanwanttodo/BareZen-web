@@ -82,9 +82,11 @@ server.stop();</code></pre>
     it cannot be wrapped — that shape is refused by the detection rule rather than by convention.</p>
 
   <h2>Run the examples</h2>
-  <p>The <code>examples/</code> module holds seven programs — hello world, routing, request/response, security,
-    database, plugin, OpenAPI — each with a <code>main()</code> that binds a real socket and prints what it observed, and
-    each with a test the reactor runs. Build first, then one <code>java -cp</code> per program:</p>
+  <p>The <code>examples/</code> module holds eight programs — hello world, routing, request/response, security,
+    database, plugin, OpenAPI, static files — each with a <code>main()</code> that binds a real socket and prints what it
+    observed, and each with a test the reactor runs. <code>app/</code> is the ninth thing that runs, and the only one
+    that is an application rather than a demonstration: a browser console with a session of its own. Build first, then
+    one <code>java -cp</code> per program:</p>
   <pre><code>mvn -o -B -ntp clean verify
 java -cp "$CP" com.barezen.examples.hello.HelloWorld</code></pre>
   <p>The classpath recipe and the observed output of all seven are in <code>docs/examples/README.md</code>.</p>

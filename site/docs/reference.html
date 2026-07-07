@@ -40,6 +40,7 @@
       <tr><td><code>barezen-plugins</code></td><td>core, web, security, data</td><td>the auth, user and OpenAPI plugins, the route narrowing, and the document generator</td></tr>
       <tr><td><code>barezen-testkit</code></td><td>core, web, http-jdk, security, data</td><td>a test tool that binds the real adapter; the framework may not depend on it, by rule</td></tr>
       <tr><td><code>examples</code></td><td>public API only</td><td>the leaf: eight runnable programs, one per shipped capability (ADR-0045)</td></tr>
+      <tr><td><code>app</code></td><td>web, core, http-jdk, content, security, data, plugins, H2 (the app names it)</td><td>the console: seven pages over thirty-one routes, a bearer session, a plugin-contributed endpoint, an audit stream and a Content-Security-Policy — the consumer ADR-0016 asked for, built without changing the framework (ADR-0055, ADR-0056, ADR-0057)</td></tr>
       <tr><td><code>site/</code></td><td><strong>nothing</strong> — not a module</td><td>this documentation: twelve static files in two languages, deployed as they are (ADR-0054)</td></tr>
     </tbody>
   </table>
@@ -55,7 +56,7 @@
     policy, named as open work (ADR-0049 §7).</p>
 
   <h2>The decisions, by number</h2>
-  <p>Fifty-five ADRs sit in <code>docs/adr/</code>, each one decision, each with the alternatives it refused, the tests
+  <p>Fifty-seven ADRs sit in <code>docs/adr/</code>, each one decision, each with the alternatives it refused, the tests
     that prove it, a non-goal list and a reopening trigger. The load-bearing ones for the pages you just read:
     <span class="pill">0003 two-phase startup</span>
     <span class="pill">0006 no service locator</span>
@@ -82,6 +83,8 @@
     <span class="pill">0053 two languages</span>
     <span class="pill">0054 static files</span>
     <span class="pill">0055 a console app</span>
+    <span class="pill">0056 views and the bus</span>
+    <span class="pill">0057 seven pages</span>
   </p>
 
   <h2>Still open, by name</h2>

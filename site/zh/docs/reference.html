@@ -40,6 +40,7 @@
       <tr><td><code>barezen-plugins</code></td><td>core、web、security、data</td><td>auth、user、OpenAPI 三个插件、路由的收窄，以及文档生成器</td></tr>
       <tr><td><code>barezen-testkit</code></td><td>core、web、http-jdk、security、data</td><td>一个会绑定真实适配器的测试工具；按规则，框架不许依赖它</td></tr>
       <tr><td><code>examples</code></td><td>只用公共 API</td><td>那个叶子：八个可运行程序，一个对应一项出货能力（ADR-0045）</td></tr>
+      <tr><td><code>app</code></td><td>web、core、http-jdk、content、security、data、plugins、H2（由应用点名）</td><td>控制台：七个页面、三十一条路由、bearer 会话、由插件贡献的端点、审计流与一条 Content-Security-Policy —— 就是 ADR-0016 要的那个消费者，而且搭建过程没改框架（ADR-0055、ADR-0056、ADR-0057）</td></tr>
       <tr><td><code>site/</code></td><td><strong>谁都不依赖</strong> —— 它不是模块</td><td>就是这份文档：十二个静态文件、两种语言，原样部署（ADR-0054）</td></tr>
     </tbody>
   </table>
@@ -54,7 +55,7 @@
     替换这些页面属于部署策略，作为未完成工作点名（ADR-0049 §7）。</p>
 
   <h2>决策，按编号</h2>
-  <p>五十五份 ADR 在 <code>docs/adr/</code> 里，每份一个决策，都写明它拒绝了哪些替代方案、哪些测试证明它、
+  <p>五十七份 ADR 在 <code>docs/adr/</code> 里，每份一个决策，都写明它拒绝了哪些替代方案、哪些测试证明它、
     一份非目标清单，以及一个重新开启的触发条件。跟你刚读这几页直接相关的：
     <span class="pill">0003 两阶段启动</span>
     <span class="pill">0006 不做 service locator</span>
@@ -81,6 +82,8 @@
     <span class="pill">0053 两种语言</span>
     <span class="pill">0054 静态文件</span>
     <span class="pill">0055 控制台应用</span>
+    <span class="pill">0056 视图与事件总线</span>
+    <span class="pill">0057 七个页面</span>
   </p>
 
   <h2>仍然敞开的，按名字</h2>

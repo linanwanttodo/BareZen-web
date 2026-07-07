@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>会话 —— BareZen 控制台</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="session">
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen 控制台</a>
+    <nav class="pages">
+      <a href="/">概览</a>
+      <a href="/reports">报告</a>
+      <a href="/session" aria-current="page">会话</a>
+      <a href="/events">事件审计</a>
+      <a href="/people">他人权限</a>
+      <a href="/answers">应答日志</a>
+      <a href="/about">关于</a>
+    </nav>
+  </div>
+</header>
+
+<div class="account">
+  <div class="band">
+    <span class="who" id="who">未登录</span>
+    <span class="keys">
+      <button id="quick-ada" class="small" type="button">以 ada 登录</button>
+      <button id="quick-bob" class="small" type="button">以 bob 登录</button>
+      <button id="quick-cy" class="small" type="button">以 cy 登录</button>
+      <button id="signout" class="small" type="button">退出</button>
+    </span>
+  </div>
+</div>
+
+<div class="strip">
+  <p class="band" id="strip">还没有会话 —— 点右上角任一账号登录，口令都是 <code>hunter2</code>。</p>
+</div>
+
+<main>
+  <h1>会话</h1>
+  <p class="lede">token 是不透明随机串，存在服务器侧的 <code>SessionStore</code> 里；轮换会让旧值当场失效
+    （<span class="nb">ADR-0036</span>）。过期时间由服务器说，不是前端自己算的。</p>
+
+  <div class="panel">
+    <h2>当前会话</h2>
+    <table class="data fields">
+      <thead><tr><th>字段</th><th>值</th></tr></thead>
+      <tbody id="session-rows"><tr><td colspan="2">还没有详情 —— 登录后会自动取，也可以点「刷新详情」。</td></tr></tbody>
+    </table>
+    <div class="actions">
+      <button id="detail" type="button">刷新详情</button>
+      <button id="rotate" class="ghost" type="button">轮换 token</button>
+      <button id="retry-old" class="ghost" type="button">故意用旧 token 试一次</button>
+    </div>
+    <p class="state" id="session-note">轮换之后，页面会把被替换掉的那个值留着，就是为了让你能立刻拿它再请求一次。</p>
+  </div>
+</main>
+
+<footer>
+  <div class="band">
+    <p>BareZen 控制台 · 源码在仓库的 <code>app/</code> · 文档站在 <code>site/</code>（中英双语，纯静态）<br>
+      这一页由 <code>Console.router()</code> 注册成一条路由，文件本身由 <code>barezen-content</code> 提供。</p>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

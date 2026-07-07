@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>关于 —— BareZen 控制台</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="about">
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen 控制台</a>
+    <nav class="pages">
+      <a href="/">概览</a>
+      <a href="/reports">报告</a>
+      <a href="/session">会话</a>
+      <a href="/events">事件审计</a>
+      <a href="/people">他人权限</a>
+      <a href="/answers">应答日志</a>
+      <a href="/about" aria-current="page">关于</a>
+    </nav>
+  </div>
+</header>
+
+<div class="account">
+  <div class="band">
+    <span class="who" id="who">未登录</span>
+    <span class="keys">
+      <button id="quick-ada" class="small" type="button">以 ada 登录</button>
+      <button id="quick-bob" class="small" type="button">以 bob 登录</button>
+      <button id="quick-cy" class="small" type="button">以 cy 登录</button>
+      <button id="signout" class="small" type="button">退出</button>
+    </span>
+  </div>
+</div>
+
+<div class="strip">
+  <p class="band" id="strip">还没有会话 —— 点右上角任一账号登录，口令都是 <code>hunter2</code>。</p>
+</div>
+
+<main>
+  <h1>这套演示在证明什么</h1>
+  <p class="lede">七个文件，同一个 <code>app.js</code> 驱动：它按 <code>body[data-page]</code> 决定接哪几个控件 ——
+    因为页面带着 <code>Content-Security-Policy</code>，内联脚本根本不会被执行（<span class="nb">ADR-0057</span>）。</p>
+
+  <h2>证明了什么</h2>
+  <p>一个有会话、有增删改查、有审计流、有分页与查询参数、有接口文档的应用，只用公开 API 就能搭起来；
+    而且它是独立 Maven 模块 —— 框架的包私有类型在这里连编译都过不去，"只用公开面"是编译事实而不是评审意见。</p>
+
+  <h2>没证明什么</h2>
+  <p>cookie 会话（<code>SecurityMiddleware</code> 只从 <code>Authorization</code> 取凭证，没有第二种 credential
+    source）；流式响应（<span class="nb">ADR-0030</span>）；服务端渲染 HTML；跨进程的会话共享（<code>SessionStore</code> 是单进程内存）；
+    servlet 容器里的运行。</p>
+
+  <h2>分页换来的那个取舍</h2>
+  <p>分开成几页之后，每次导航都会重载文档，所以 token 不能只活在一个 JS 变量里 —— 现在它在
+    <code>sessionStorage</code>：按标签页隔离、关标签即消失、浏览器不会自动带上（所以仍然没有 CSRF 面）。
+    代价写清楚：脚本可读的存储意味着一次成功的 XSS 就能读到它，这也是同一份响应把
+    <code>Content-Security-Policy</code> 定成只允许自身来源的脚本与样式的原因。真正的生产答案是 cookie +
+    <code>HttpOnly</code>，那需要框架开一个 credential source 的口子，按规矩得先有一份 ADR。</p>
+
+  <h2>界面的来历</h2>
+  <p>这几页复制了文档站 <code>site/assets/site.css</code> 的设计系统 —— 同一批 token、同一种表格与 notes 处理 ——
+    而不是共享那个文件，因为静态目录和被服务的应用是两种部署形状。量度是这里唯一改掉的东西：文档页给正文 68ch、给页头更宽的
+    band，控制台却要把账号行、状态行、表单和表格排在同一屏，两种宽度会让它们的左边缘错开，所以这里每条 band 同一个宽度。
+    重复的那部分样式在 <span class="nb">ADR-0055</span> 里被写明。</p>
+</main>
+
+<footer>
+  <div class="band">
+    <p>BareZen 控制台 · 源码在仓库的 <code>app/</code> · 文档站在 <code>site/</code>（中英双语，纯静态）<br>
+      这一页由 <code>Console.router()</code> 注册成一条路由，文件本身由 <code>barezen-content</code> 提供。</p>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

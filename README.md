@@ -109,6 +109,18 @@ the page instead of hidden by `localStorage`. The UI copies the documentation si
 its stylesheet, and the page's real deliverable is an answer log that shows each status, header and body as it arrived —
 `bob` is seeded with no permissions so that 403 sits next to 401 instead of being described.
 
+Phase 4.2 grew that console into seven hash-routed views over nineteen routes, and still did not touch the framework or
+add a build step (ADR-0056). It added a single-row read, a delete, an expiry stated by an injected `Clock`, deliberate
+token rotation, another account's grants behind `user:read`, and an audit stream that gives the core event bus its first
+consumer — while refusing to give it an extension point, because the subscriber belongs to the application and ADR-0047's
+trigger is a *plugin* needing to contribute. What made the phase worth recording is what the interface exposed: an
+`Authorization.of(Map…)` table written beside the shipped `UserPlugin` (which already answers authorization from the grants
+table) disagreed about the account `cy`, so the page said "no permissions" while the same token was reading the trail; and
+two routes listed one account's grants in different orders, which reads as a server contradicting itself. Both are fixed
+by deleting the duplication, not by reconciling it. The honest hole is the trail's: `SecurityMiddleware` answers 403
+before any handler runs, so a refusal is unobservable to the application, and the helper written to fake one is gone —
+the limit is printed on the page instead.
+
 | Module | Phase | State |
 | --- | --- | --- |
 | `barezen-parent`, `barezen-bom` | 2.1 | build skeleton, enforcer rules, JDK baseline |
@@ -124,7 +136,7 @@ its stylesheet, and the page's real deliverable is an answer log that shows each
 | `examples` | 2.16, 3.8 | eight runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`, `StaticFileExample`; `PluginExample` also carries the plugin that announces itself in `META-INF/services` (3.2), and `StaticFileExample` is `barezen-content`'s consumer in shipped code (3.8, ADR-0054). Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
 | Route enumeration | 3.x | DEFERRED — reopen trigger: the OpenAPI double-write (a route declared once as a route and once as `OperationMetadata`) costing a real project a wrong document; `ADR-0047` records why the merge step stays refused until then |
 | Second extension point | 3.x | DEFERRED — reopen trigger: a component other than the route table with a plugin that needs to contribute to it (the named candidate is the event bus, consumerless since 2.6 per ADR-0017) |
-| `app` | 4.1 | the console application, the frontend consumer ADR-0016 asked for (ADR-0055): sign in over `POST /api/sessions` for a bearer token, `GET /api/reports` contributed at assembly by an application-owned `ReportsPlugin` (ADR-0047's extension point, used for the first time by something that is neither an example nor a test), the page and its stylesheet served by `barezen-content`, and `/api/document` generated from declared OpenAPI data. A leaf like the examples: public API only, depended on by nothing, absent from the BOM, its own copy of the class-major contract; the application names its own H2 driver at compile scope (ADR-0038's decision made where it belongs) |
+| `app` | 4.1–4.3 | the console application, the frontend consumer ADR-0016 asked for (ADR-0055): seven pages on seven clean addresses over thirty-one routes: sign in over `POST /api/sessions` for a bearer token, `GET /api/reports` (with `q`/`limit`/`offset`) plus one-row read and delete, all contributed at assembly by an application-owned `ReportsPlugin` (ADR-0047's extension point, used for the first time by something that is neither an example nor a test), an expiry stated by an injected `Clock`, deliberate token rotation, another account's grants behind `user:read`, an audit stream that gives the core event bus its first consumer, the token and the answer log in `sessionStorage` so navigation does not sign you out, every page served with a Content-Security-Policy that admits no inline script, and `/api/document` generated from declared OpenAPI data (ADR-0055, ADR-0056, ADR-0057). A leaf like the examples: public API only, depended on by nothing, absent from the BOM, its own copy of the class-major contract; the application names its own H2 driver at compile scope (ADR-0038's decision made where it belongs); authorisation comes from `UserPlugin` rather than a second table the app keeps beside it (ADR-0056), and the trail cannot record refusals because the decorator answers before any handler runs — printed on the page rather than faked |
 | `site/` | 3.6, 3.7, 3.8 | **not a module** (ADR-0054): the project's documentation as twelve static files in two languages — English at `site/index.html` + `site/docs/*.html`, Chinese at `site/zh/…`, one stylesheet, every address relative, deployed as a folder by any static host (GitHub Pages: branch `main`, folder `/site`). It lost a server and with it conditional `GET`, `/health` and a published `/openapi.json`; it gained a shape the deployment target can actually serve. `scripts/check-site.sh` keeps the four guarantees the module's tests used to: links resolve on disk, every page reachable, the two languages paired, no absolute address |
 | A frontend for this project | non-goal | **MET in 4.1 by `app/`** (ADR-0055) — and note what "met" means here: ADR-0016's condition was that a frontend *binding inside the framework* needs a real consumer with named rules. The consumer arrived, and **no binding turned out to be needed**: the console is HTML plus `fetch` against the contract's JSON, with no templating, no framework-side locale and no new module type. The framework still has no frontend capability and now has evidence for keeping it that way. 3.6's claim about `site/` stays retracted (ADR-0054); what survived from it is that publishing pages needs no markdown capability |
 
@@ -415,7 +427,7 @@ examples/                   eight runnable programs (Phases 2.16, 3.8) on the pu
                             static-content — each a
                             router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
                             reactor runs; nothing in the framework depends on this leaf (ADR-0045)
-docs/adr/                   architecture decision records, 0001-0055
+docs/adr/                   architecture decision records, 0001-0057
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
 docs/guide/                  the long-form developer guide (authoring a plugin, and the rest as it is written)
@@ -1409,3 +1421,41 @@ named in the record rather than left to be rediscovered. What the console adds, 
 form, buttons, and an answer log where the status column is the only coloured thing on the page. `bob` is seeded with no
 permissions precisely so that 403 sits next to 401 instead of being prose about them, and 16 tests (12 over a real socket,
 plus this module's copy of the class-major contract) pin the answers the page shows.
+
+## Phase 4.2 in one paragraph
+
+More interface, more function, no framework change (ADR-0056). Seven views switched by the fragment — a router library over
+"one JSON body per request" solves a problem this application does not have, and the answer log has to survive moving
+between panels, because it is the deliverable. Nineteen routes: `GET /api/reports/{id}` and `DELETE /api/reports/{id}`
+(204, then 404, then 403 for a reader without write), `GET /api/session/detail` whose expiry is measured by an injected
+`Clock` so a test asserts exactly 1800 seconds instead of a wall-clock range, `POST /api/session/rotate` which hands back
+the superseded token so the page can prove rotation is a server-side removal rather than a client that stopped sending,
+`GET /api/users/{name}/permissions` gated by `user:read`, and `GET /api/events`. The list endpoint reads `q`, `limit` and
+`offset` itself, because `Request.query()` gives raw text and the router refuses to decode a query into routing
+(ADR-0018 §4); a malformed `limit` answers 400 rather than guessing 20. The bus's first consumer arrived without the
+second extension point: `Audit` constructs a bus, subscribes per concrete event class (the bus routes on the exact runtime
+type — an interface subscription would receive nothing), and caps its trail at fifty because an unbounded list fed by
+every request is a leak with a nice API. Two inconsistencies were found by looking at the page rather than at the
+endpoints — a duplicated `Authorization` table that disagreed with the grants repository about `cy`, and the same grants
+list ordered two different ways by two routes — and both were fixed by removing the copy. `ConsoleTest` went from 12 tests
+to 22, all over a real socket but one, which pins the injected clock directly.
+
+## Phase 4.3 in one paragraph
+
+The console became seven files instead of one document with a tab list, and the interesting part is what that forces
+(ADR-0057): loading a new document destroys every JavaScript variable, and ADR-0055's token lived in exactly one of those.
+The options were re-login per page, an iframe pretending to be a shell, a script-readable store, or a cookie credential
+source the framework does not offer — so the token and the answer log moved to `sessionStorage` (tab-scoped, never sent
+automatically, gone when the tab closes), the cookie answer was refused again on the same ground and named as the right one
+for any deployment past `127.0.0.1`, and the residual risk — one injected script reads a live credential — was met with a
+`Content-Security-Policy` decorator: `script-src 'self'`, no `unsafe-inline`, `frame-ancestors 'none'`, `base-uri 'none'`,
+plus `nosniff` and `no-referrer`, applied to **every** page and asset by a handler wrapper in the leaf. The framework gained
+no hook for that, which is the same composition argument as ADR-0033's decorator for the third time. The policy is also why
+there is exactly one script: per-page inline `<script>` blocks are unservable, so `app.js` branches on
+`body[data-page]`. And the addresses are clean (`/reports`, with `/reports.html` a deliberate 404) — the exact inverse of
+ADR-0054's static folder, because an application picks its own URLs and a host cannot. 31 routes, 25 console tests, zero
+framework changes. What the pages then had to be shown was their own layout: the stylesheet had copied the docs site's two
+measures, and on a console — account row, state line, form, table stacked — that put the header's text 70px left of the
+title's, so every band is now one width and every left edge on a page is one x. The state line stopped being a sentence the
+page assumed and became the answer to `GET /api/session`, asked on load: a stored token is not a valid token, and a header
+that prints 已登录 from the presence of a value in storage is showing a fact it does not know.

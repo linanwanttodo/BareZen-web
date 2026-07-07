@@ -19,6 +19,112 @@ cut, the phases below get grouped under its tag with the real release date; unti
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
 
+### Phase 4.3 — Seven Pages, and the Credential Problem They Bring (2026-10-07)
+
+- The console is now **seven files on seven clean addresses** — `/`, `/reports`, `/session`, `/events`, `/people`,
+  `/answers`, `/about` — registered one-file-per-route by `Console.PAGES` for `GET` **and** `HEAD`, and 31 routes in
+  total. `/reports.html` answers 404 on purpose: an application chooses its own URLs, which is the exact inverse of the
+  static folder's constraint in ADR-0054 (ADR-0057).
+- **Splitting pages destroys variables**, and ADR-0055's token lived in one. It moved to `sessionStorage` along with the
+  answer log: per tab, gone when the tab closes, never attached to a request automatically — so still no CSRF surface,
+  and the rotation demonstration still works. Rejected instead: re-login on every navigation, an iframe standing in as a
+  shell (which is the one-document design wearing a hat), and a cookie credential source.
+- **The cookie source is refused again, on the same ground, and named as the production answer.**
+  `SecurityMiddleware.credentialFrom` reads `Authorization` and is private by design; the moment this console is
+  deployed past `127.0.0.1`, an `HttpOnly` cookie plus a `CredentialSource` seam plus CSRF protection is the right
+  decision, and it belongs in its own record rather than being smuggled in for a demo.
+- **What makes the trade survivable is a response policy, not a promise.** `SecurityHeaders.of(...)` is a handler
+  decorator in the leaf that adds `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self';
+  img-src 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+  plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, to **every** page and asset. The framework
+  gained no hook for it — the third instance of ADR-0033's argument that an application states its policy by wrapping
+  what it registers.
+- **The header dictates the shape of the script**: one `app.js`, wiring the controls of whichever page it loaded on via
+  `body[data-page]`, because an inline `<script>` per page is now unservable and seven copies of the fetch wrapper would
+  be a lie about there being one policy.
+- The answer log is capped at fifty entries with bodies truncated to 400 characters in storage, mirroring `Audit.LIMIT`
+  server-side: a log that survives navigation is also a log that survives until the browser complains.
+- **One band width, so one left edge.** The stylesheet had copied the docs site's two measures — a wide header band and a
+  68ch reading column — and on a console those two are stacked neighbours: measured at 962px the account row's text
+  started 70px left of the page title's, which reads as a page that cannot decide where it begins. Every band is now
+  `52rem`, and the header, the account row, the state line, the title and the footer share one x.
+- **The state line states what the server said.** A static sentence in the page once read 还没有会话 above a header that
+  said 已登录：bob, because the script only rewrote it when something was clicked. `checkSession()` now runs on every
+  load: it asks `GET /api/session`, prints the answer, drops a token the server no longer honours (so a tab left open past
+  an expiry says so instead of lying), and hands the page its own loader — visiting `/reports` signed-in shows the table
+  rather than an empty placeholder waiting for a click.
+- **Three things that made the pages look wrong without looking like bugs:** a placeholder row whose first cell was an
+  empty `<td>`, so "还没有列表。" began under the 标题 column instead of at the table's edge (now one spanning cell, built
+  by `emptyRow`); `（ADR-0047）` breaking across lines as `（ADR-` / `0047）`, because a hyphen is a legal break point in a
+  line of Chinese (`.nb`, plus `nowrap` for code in prose); and a detail table whose field names were styled as column
+  headers — uppercase, 12.5px, in a 56px column — which turned four facts into a 364px block, now 191px.
+- **Form grids name their columns.** `auto-fit` at this measure chose two and dropped the submit button onto a row of its
+  own 71px below the fields it belongs to; `.filters`, `.pair` and `.single` state the widths. The empty
+  `<label>&nbsp;</label>` that used to sit above every button is gone — `align-items: end` already puts the button's
+  bottom on the input's, and the spacer only existed to make mismatched label heights look intentional. Two labels
+  wrapped and one didn't, which is what made the row read as crooked.
+- **One filled button per panel, and links for navigation.** The pagination row had a filled 重新取本页 beside three
+  outlined ones and the form's own submit, so nothing on the panel was primary; the overview's "去其余几页" was four
+  buttons whose handlers assigned to `location.href`, which is a link with extra steps — now `<a class="button">`, and
+  three click handlers deleted with it.
+- Dead code left with the old shell: the side-tab CSS (`.shell`, `.tabs`, `.content`) is deleted rather than parked, and
+  `Console` now builds its route table from two lists so a page without a route, or a route without a page, fails at
+  assembly instead of as a blank window.
+- `ConsoleTest` 22 → 25: every page served with a policy naming `script-src 'self'` and not containing `unsafe-inline`
+  (asserted per page — a policy that covers `/` and forgets `/reports` is a hole shaped like the session), no inline
+  script or handler attribute in the files, and `/reports.html` a deliberate 404.
+- In a browser: sign in on `/`, land on `/reports` — the header still reads 已登录：ada, the list answers 200 with
+  `X-Reader: ada`, and `/answers` still holds the login recorded in the previous document. After the layout pass, at a
+  962px viewport: `.brand`, `.who`, `h1` and `.panel` all start at x=89, the filter's two inputs and its submit share a
+  bottom edge at 452, `ADR-0047` measures 77x19 (one line), the nav is one line, and no page scrolls sideways —
+  `scrollWidth` equals `clientWidth` on all seven. Pointer events are still unavailable in this environment, so the
+  navigation was driven through the page.
+
+### Phase 4.2 — The Console Grows Views, and the Event Bus Grows a Consumer (2026-10-07)
+
+- `app/` went from one long page to **seven hash-routed views** (`#overview`, `#reports`, `#session`, `#events`,
+  `#people`, `#answers`, `#about`) and from thirteen to **nineteen routes**, with no framework change and still no build
+  step: one HTML file, one script, one stylesheet, no bundler, nothing that needs Node (ADR-0056).
+- New endpoints, each one a contract behaviour the page can show rather than describe: `GET /api/reports/{id}` (200, or
+  the plain 404 that names no path, or 400 for a non-numeric id — only the application knows its ids are numbers, so
+  only it can refuse that), `DELETE /api/reports/{id}` (204 with no body, then 404, then 403 for a reader without
+  `report:write`), `GET /api/session/detail`, `POST /api/session/rotate`, `GET /api/users/{name}/permissions` and
+  `GET /api/events`.
+- `GET /api/reports` gained `q`, `limit` and `offset`, parsed by the application because `Request.query()` hands over raw
+  text and the router refuses to decode a query into routing (ADR-0018 §4). A malformed `limit` is a 400 rather than a
+  silently defaulted 20; `X-Total-Count`, `X-Page-Size` and `X-Reader` are the server's own words about the page it sent.
+  An empty `?q=` and no `q` at all are collapsed into "no filter" deliberately, and a test says so.
+- **The expiry is stated by the server through an injected `Clock`.** `ConsoleTest`'s clock assertion pins both the store
+  and the handler to one fixed instant and asserts exactly `1800` seconds, rather than asserting a range against a wall
+  clock — the same reason `StaticContent` takes no clock at all (ADR-0051).
+- **Rotation is shown instead of asserted.** `POST /api/session/rotate` returns the new token and names the superseded
+  one, and the page keeps a button that sends the dead credential on purpose: it answers 401 because the store removed
+  it, not because the client stopped sending it (ADR-0036).
+- **The event bus has a consumer now** — ADR-0017's "consumerless since 2.6" is superseded — **and still no extension
+  point.** `Audit` creates an `EventBus`, subscribes its own reader per concrete event class (the bus routes on the exact
+  runtime type, so a subscription to an interface would receive nothing) and caps the trail at fifty. Option A of the
+  record — an `EventContributor` — is refused because ADR-0047's trigger is a *plugin* needing to contribute, and this
+  consumer is the application.
+- **Two bugs the interface exposed, recorded rather than smoothed.** (i) `wiring()` kept an `Authorization.of(Map…)`
+  beside the shipped `UserPlugin`, which already answers `Authorization` by reading the grants table — and they
+  disagreed about `cy`: the panel said "no permissions" while the same token was successfully reading the audit stream.
+  The duplicate table is deleted, the plugin is the authorization source, and ADR-0042's direction now applies inside one
+  application as well as between modules. (ii) `/api/session` and `/api/users/{name}/permissions` returned one account's
+  grants in different orders, which a reader compares as the server contradicting itself; the ordering lives in
+  `People.grantsOf` now.
+- **A limit that no application code can close:** the audit trail cannot record refusals, because `SecurityMiddleware`
+  answers 403 before any handler runs, so the application never learns one happened. A `recordRefusal(...)` helper was
+  written for it and deleted — it could not be called, and the event it published would have described something nobody
+  observed. The page prints the hole instead, and the framework hook that would close it is a named reopening trigger.
+- Three seeded accounts, one per answer: `ada` reads and writes reports, `bob` holds nothing (403 beside 401), `cy` reads
+  reports plus `user:read`, which is what makes the account and audit routes answerable at all. The header signs in as
+  any of them in one click.
+- `ConsoleTest` 12 → 22 tests (new `Queries` and `Lifecycle` groups, all over a real socket except the clock test, which
+  calls the wrapped handler directly to pin the clock). In a browser: views switch, paging moves `2,3` → `4,5` and back,
+  ada's `/api/events` renders the 403 explanation and cy's renders the trail, no horizontal overflow at 977px. Pointer
+  events still do not reach this environment's hidden panel, so the flows were driven through DOM events and the click
+  path remains unverified.
+
 ### Phase 4.1 — The Console Application, and the Frontend Condition Finally Met (2026-10-07)
 
 - `app/`: a small application that signs in, holds a session, and lists reports — the "real consumer with named rules"
