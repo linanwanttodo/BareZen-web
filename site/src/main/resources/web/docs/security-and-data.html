@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security &amp; data — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen</a>
+    <nav>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/routing">Routing</a>
+      <a href="/docs/plugins">Plugins</a>
+      <a href="/docs/security-and-data" aria-current="page">Security &amp; data</a>
+      <a href="/docs/reference">Reference</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Security &amp; data</h1>
+  <p class="lede">Two capability modules that depend on the contract and on nothing else, so an application can take one
+    and leave the other.</p>
+
+  <h2>Security is a decorator, not a chain</h2>
+  <p><code>SecurityMiddleware.wrap(...)</code> takes a handler and returns a handler. It authenticates, then authorizes,
+    then calls what it wrapped — and on every refusal the wrapped handler is never invoked, which is asserted with a
+    counter rather than assumed (ADR-0033, ADR-0037).</p>
+  <ul>
+    <li><strong>Three states, not two.</strong> Authenticated, failed, and offered-nothing are different answers: the
+      first 401-prompt is a challenge, the second 401 carries a reason that stays on the server. A sealed type holds
+      that; an <code>Optional</code> collapses it into one wrong answer (ADR-0034).</li>
+    <li><strong>Identity arrives as an argument.</strong> A handler that needs it implements
+      <code>SecuredHandler</code> and receives a <code>SecurityContext</code> as a third parameter. There is no
+      thread-local, because a container reuses threads and one request's principal becomes the next request's
+      (ADR-0033).</li>
+    <li><strong>Sessions are opaque and revocable.</strong> A 256-bit server-side record, not a JWT: revocation is one
+      map removal, rotation kills the old token, expiry is an injected <code>Clock</code> checked on lookup. JWTs were
+      refused on four grounds, the first being that revocation would need server state anyway (ADR-0036).</li>
+    <li><strong>Passwords hash with PBKDF2-HMAC-SHA256</strong> — 600,000 iterations, 16-byte salt, 32-byte key, encoded
+      as <code>algorithm$iterations$salt$key</code> so the count can rise without invalidating stored hashes. bcrypt was
+      refused as a new third-party dependency, Argon2 because the JDK has none. A malformed stored hash verifies false
+      rather than throwing, and the module cannot name a logger, so no raw password or hash can reach one
+      (ADR-0035).</li>
+    <li><strong>401 or 403, never a guess.</strong> No or failed identity is 401; a denied identity is 403; a throwing
+      collaborator is 500; the default is deny (ADR-0037).</li>
+  </ul>
+
+  <h2>Data is one boundary and one decision the callback cannot make</h2>
+  <pre><code>Database database = new Database(pool);                       // your DataSource; the framework names no driver
+List&lt;String&gt; names = database.query("select name from users where active = ?",
+    (rs, row) -&gt; rs.getString(1), true);
+int updated = database.transaction(tx -&gt; tx.executeUpdate("update users set name = ? where id = ?", name, id));
+List&lt;AppliedMigration&gt; applied = Migrator.of(database).migrate(List.of(new AddUsersTable(1L, "users", ddl)));</code></pre>
+  <ul>
+    <li><strong>Zero compile dependencies.</strong> <code>barezen-data</code> speaks <code>javax.sql</code> and receives a
+      <code>DataSource</code> the application supplies; H2 is a test dependency, and a driver is never named in shipped
+      code (ADR-0038).</li>
+    <li><strong>A transaction is handed to you and cannot be decided by you.</strong> <code>commit</code> and
+      <code>rollback</code> are package-private, so a repository bypass is a compile error — and a reflection probe
+      guards the visibility itself, because a rule about behaviour that a future refactor can delete is worth less than a
+      test that fails when it changes (ADR-0039).</li>
+    <li><strong>Nesting has an answer.</strong> A second <code>transaction(...)</code> opens an independent transaction
+      on a second connection, pinned by test rather than left implicit.</li>
+    <li><strong>Every <code>SQLException</code> becomes one unchecked <code>DataAccessException</code></strong>, while a
+      runtime exception thrown by your own callback stays itself — the translation point is single and visible
+      (ADR-0038).</li>
+    <li><strong>Migrations promise one sentence.</strong> A version is recorded if and only if its <code>apply</code>
+      completed, the row sharing the change's transaction. Schema integrity after a failure is the product's answer,
+      because H2 was measured committing DDL implicitly — the first draft promised atomicity, a standalone probe
+      falsified it, and the sentence was rewritten (ADR-0040).</li>
+  </ul>
+
+  <div class="notes">
+    <p>Both modules are one arrow deep: <code>barezen-security</code> depends on <code>barezen-web</code> alone,
+      <code>barezen-data</code> on nothing. Neither knows a server exists, which is why the same handler chain runs under
+      the JDK adapter and inside Tomcat.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · security &amp; data · <code>PasswordHasherTest</code>, <code>SessionStoreTest</code>,
+    <code>TransactionTest</code>, <code>MigratorTest</code> and 6 socket-level security tests.</p></div>
+</footer>
+</body>
+</html>

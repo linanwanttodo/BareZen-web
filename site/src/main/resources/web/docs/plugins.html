@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugins — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen</a>
+    <nav>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/routing">Routing</a>
+      <a href="/docs/plugins" aria-current="page">Plugins</a>
+      <a href="/docs/security-and-data">Security &amp; data</a>
+      <a href="/docs/reference">Reference</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Plugins</h1>
+  <p class="lede">A plugin is a lifecycle participant that can name itself, plus whatever extension point the component
+    it contributes to declares. The narrowness is the feature.</p>
+
+  <h2>The SPI</h2>
+  <pre><code>public interface Plugin extends LifecycleParticipant {
+  PluginDescriptor descriptor();                 // record PluginDescriptor(String id, List&lt;String&gt; dependencies)
+}</code></pre>
+  <p>Four phases come from <code>LifecycleParticipant</code> — <code>initialize</code>, <code>start</code>,
+    <code>stop</code>, <code>abort</code> — all with empty defaults, driven by the one lifecycle engine in the build:
+    every participant initialises before any starts, and <code>stop()</code> runs in reverse and reports what failed
+    instead of throwing (ADR-0003, ADR-0005). There is no <code>install()</code>, because that is
+    <code>initialize()</code> with a second name and a second order.</p>
+
+  <h2>Contributing: routes today</h2>
+  <p>An extension point in BareZen is one interface, declared by the component that owns the thing being contributed.
+    Routing owns the first:</p>
+  <pre><code>public final class ReportsPlugin implements Plugin, RouteContributor {
+
+  @Override public PluginDescriptor descriptor() {
+    return new PluginDescriptor("reports", List.of("user"));    // my collaborator is initialised before me
+  }
+
+  @Override public void contributeRoutes(Router.Builder routes) {
+    routes.route(HttpMethod.GET, "/reports/status", this::status);
+  }
+}</code></pre>
+  <p>A contributed route <em>is</em> a registered route: the duplicate refusal applies, so a plugin cannot win a path by
+    running later, and no precedence or weight field exists to reason about. Contributions run at assembly time, before
+    <code>build()</code> and before any phase, which is why a contributor may start no thread and open no socket.</p>
+  <p>There is no <code>PluginContext</code>, no <code>ExtensionPoint&lt;T&gt;</code> token and no
+    <code>contribute(point, item)</code>. A token could not work anyway: <code>barezen-web</code> ships a jar with no
+    compile dependency at all, so routing could not declare or receive one — which is the fact that makes
+    "owner declares an interface" the shape rather than a preference (ADR-0018 §12, ADR-0047).</p>
+
+  <h2>Being found</h2>
+  <pre><code>META-INF/services/com.barezen.core.plugin.Plugin
+  com.example.ReportsPlugin</code></pre>
+  <pre><code>List&lt;Plugin&gt; everything = new ArrayList&lt;&gt;(List.of(auth, user, openapi));  // need collaborators: built by hand
+everything.addAll(PluginDiscovery.discover());                            // needs nothing: announced
+List&lt;Plugin&gt; ordered = PluginRegistration.validate(everything);            // refuses duplicate id,
+                                                                          // missing dependency, cycle
+Router routes = Router.builder()
+    .route(HttpMethod.GET, "/health", health)
+    .contributing(RouteContributions.of(ordered))                          // the only instanceof in the mechanism
+    .build();</code></pre>
+  <p>Discovery keeps nothing: each call re-reads the provider configuration and returns fresh instances in a new
+    immutable list, so it cannot answer "give me the auth plugin" and cannot hold a component past the call that made it.
+    A provider that cannot be loaded aborts the call with the JDK's own message naming it — booting an application that
+    quietly lacks an integration is the failure nobody can debug (ADR-0048).</p>
+
+  <div class="notes">
+    <p><strong>The limit, stated.</strong> A <code>ServiceLoader</code> provider is a public class with a public
+      no-argument constructor, so a plugin that needs a <code>DataSource</code>, a <code>SessionStore</code> or another
+      plugin cannot be discovered. The application constructs those, which is the arrangement the SPI started with — and
+      the only mechanism that would let a discovered plugin fetch a collaborator is a lookup, which ADR-0006 refuses.
+      None of the three shipped plugins is discoverable; <code>ReportsPlugin</code> in <code>examples/</code> is, and it
+      owns a route.</p>
+  </div>
+
+  <h2>What a plugin may not do</h2>
+  <table>
+    <thead><tr><th>Forbidden</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>look anything up by type or name</td><td>ADR-0006; <code>nobody_exposes_a_type_lookup</code></td></tr>
+      <tr><td>read configuration at request time</td><td>ADR-0013; <code>plugins_do_not_reach_the_layers_the_application_assembles</code></td></tr>
+      <tr><td>hold static mutable state</td><td><code>no_static_mutable_state</code></td></tr>
+      <tr><td>park identity on a thread</td><td><code>no_thread_local</code>, ADR-0033</td></tr>
+      <tr><td>name a server implementation</td><td><code>no_adapter_dependency</code>, ADR-0018 §12</td></tr>
+      <tr><td>name another plugin's concrete class</td><td><code>plugins_do_not_name_each_others_concrete_types</code> — talk through a port</td></tr>
+      <tr><td>be depended on by the framework</td><td><code>the_framework_does_not_know_plugins_exist</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Security: your routes are not protected because they came from a plugin</h2>
+  <p>The security module decorates a handler, so a plugin that contributes a bare handler contributes a public endpoint.
+    Protect your own by taking the ports in your constructor and wrapping what you register:</p>
+  <pre><code>@Override public void contributeRoutes(Router.Builder routes) {
+  routes.route(HttpMethod.GET, "/reports/status",
+      SecurityMiddleware.wrap(authentication, authorization, Permission.of("report:read"), new StatusHandler()));
+}</code></pre>
+  <p>Nothing can attach policy to a contribution afterwards, and that is a decision: a route's protection is part of
+    what it is, so it is composed where the route is composed.</p>
+
+  <h2>Testing one</h2>
+  <p>A plugin should be unit-testable with no database and no server, which is what constructor injection buys:
+    <code>AuthPlugin</code> is tested against a lambda verifier. For the integration half, TestKit binds the real JDK
+    adapter on an ephemeral port and asserts status, header, body, handler invocation count and delivered identity.
+    Worth pinning for any plugin: the phase order it observed, that a collaborator's failure surfaces as a startup
+    failure rather than a swallowed log line, and that <code>stop()</code> releases what <code>start()</code>
+    opened.</p>
+
+  <p>The long form, including packaging and the deferred list, is
+    <a href="/docs/reference">in the reference</a> beside the ADRs it comes from (ADR-0016, ADR-0041, ADR-0042,
+    ADR-0047, ADR-0048).</p>
+</main>
+<footer>
+  <div class="band"><p>BareZen · plugins · see <code>docs/guide/authoring-a-plugin.md</code> in the repository for the
+    full guide.</p></div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Routing &amp; HTTP — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen</a>
+    <nav>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/routing" aria-current="page">Routing</a>
+      <a href="/docs/plugins">Plugins</a>
+      <a href="/docs/security-and-data">Security &amp; data</a>
+      <a href="/docs/reference">Reference</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Routing &amp; HTTP</h1>
+  <p class="lede">The router answers one question. The server decides what goes on the wire. Keeping those apart is why
+    a second server was a module and not a rewrite.</p>
+
+  <h2>What a pattern may be</h2>
+  <p>A route is a method, a raw path pattern and a handler. A pattern is a literal path or a segment that is exactly
+    <code>{name}</code>, capturing one non-empty raw segment. There is no wildcard, no regex, no optional segment, no
+    repeated segment and no prefix match, and each is refused by name in the build
+    (<code>no_preemptive_routing_or_middleware_types</code>, ADR-0019 §19) rather than left unimplemented by
+    accident.</p>
+  <p>The reason is one sentence: a matcher that accepts a prefix makes <code>GET /a/b</code> match two routes, and
+    something then has to decide which one wins. That something is a precedence rule, and precedence is an ordering
+    question the router exists not to ask.</p>
+  <pre><code>Optional&lt;RouteMatch&gt; match  = routes.match(request);      // the question
+Set&lt;HttpMethod&gt;   allowed = routes.methodsFor("/users/7"); // empty means 404, non-empty means 405
+Router frozen    = routes.build();                        // List.copyOf: no view of a growing builder</code></pre>
+
+  <p>A duplicate — same method, same shape — is refused at registration, never resolved by "last one wins". That single
+    decision is what lets a plugin contribute routes without an application having to reason about plugin order.</p>
+
+  <h2>The six answers, and who writes each</h2>
+  <table>
+    <thead><tr><th>Status</th><th>When</th><th>Body</th></tr></thead>
+    <tbody>
+      <tr><td>200…599</td><td>a handler returned it</td><td>whatever the handler returned</td></tr>
+      <tr><td>404</td><td>nothing lives at this path</td><td><code>Not Found</code>, naming no path — a 404 that echoes the target teaches a probe which paths the server distinguishes</td></tr>
+      <tr><td>405</td><td>something lives here, this method is not how</td><td><code>Method Not Allowed</code> plus a stable <code>Allow</code> in HTTP's own order, not in hash order</td></tr>
+      <tr><td>500</td><td>the handler threw</td><td><code>Internal Server Error</code> and nothing else: no message, no class name, no stack. The exception goes to the log</td></tr>
+      <tr><td>400</td><td>no request could be built — a target the contract refuses, or a body that never arrived</td><td><code>Bad Request</code></td></tr>
+      <tr><td>413</td><td>content over the limit, on the claim or in the count</td><td><code>Content Too Large</code></td></tr>
+    </tbody>
+  </table>
+  <p>Commitment matters as much as the status: once bytes are on the wire there is no second answer to send, so a
+    write-side failure is logged and abandoned rather than turned into a 500 that could not be delivered
+    (ADR-0023 §6).</p>
+
+  <h2>Framing, HEAD and 304</h2>
+  <ul>
+    <li>A <code>Response</code> refuses <code>Content-Length</code> and <code>Transfer-Encoding</code>, and a duplicated
+      framing header is refused even when its two values agree (ADR-0027 §5, ADR-0029).</li>
+    <li>Which handler runs follows the folded method; which bytes go on the wire follows the raw token the server
+      compares exactly. So <code>HEAD /doc</code> states the length of the body it does not send, and a
+      <code>head /doc</code> token gets the body its representation has — measured on both JDKs before it was
+      decided, because the earlier rule produced a false <code>Content-Length: 0</code> (ADR-0028).</li>
+    <li>A <code>304</code> carries no <code>Content-Length</code>. The decision was deferred until something could
+      know the stored representation's size; when <code>StaticContent</code> arrived and did know it, the decision was
+      re-measured over a socket and kept (ADR-0029 D1, ADR-0051).</li>
+    <li>Statuses HTTP gives no body to are refused one at construction, rather than being silently dropped at the
+      socket.</li>
+  </ul>
+
+  <h2>Bodies are bytes</h2>
+  <p>A request body is read fully and bounded; a response body is a <code>byte[]</code>. Streaming was measured against
+    three named conditions and not built, because a live writer would break the framing table above — including the HEAD
+    row a static file now relies on (ADR-0030, ADR-0051). The default bound is one mebibyte in both servers, so a client
+    cannot send more content by choosing a deployment model.</p>
+
+  <div class="notes">
+    <p>Two servers, one table: <a href="/docs/reference">the reference page</a> lists what is identical across them and
+      the three things a servlet container refuses before BareZen can see them.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · routing &amp; HTTP · assertions live in <code>RouterTest</code>,
+    <code>JdkErrorSemanticsTest</code>, <code>JdkResponseBodySemanticsTest</code> and
+    <code>ServletContractSemanticsTest</code>.</p></div>
+</footer>
+</body>
+</html>

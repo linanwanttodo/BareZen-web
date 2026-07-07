@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick start — BareZen</title>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="/">BareZen</a>
+    <nav>
+      <a href="/docs/quick-start" aria-current="page">Quick start</a>
+      <a href="/docs/routing">Routing</a>
+      <a href="/docs/plugins">Plugins</a>
+      <a href="/docs/security-and-data">Security &amp; data</a>
+      <a href="/docs/reference">Reference</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Quick start</h1>
+  <p class="lede">One handler, one route table, one server. Everything else is a module you add on purpose.</p>
+
+  <h2>Coordinates</h2>
+  <p>Import the BOM once, then depend on what you use. Nothing in the framework depends on
+    <code>barezen-security</code>, <code>barezen-data</code>, <code>barezen-content</code>,
+    <code>barezen-plugins</code>, <code>barezen-http-servlet</code> or <code>barezen-testkit</code> — the direction is
+    one way, which is what lets a second application run a different set.</p>
+
+  <pre><code>&lt;dependencyManagement&gt;&lt;dependencies&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.barezen&lt;/groupId&gt;&lt;artifactId&gt;barezen-bom&lt;/artifactId&gt;
+    &lt;version&gt;0.1.0-SNAPSHOT&lt;/version&gt;&lt;type&gt;pom&lt;/type&gt;&lt;scope&gt;import&lt;/scope&gt;
+  &lt;/dependency&gt;
+&lt;/dependencies&gt;&lt;/dependencyManagement&gt;
+
+&lt;dependencies&gt;
+  &lt;dependency&gt;&lt;groupId&gt;com.barezen&lt;/groupId&gt;&lt;artifactId&gt;barezen-web&lt;/artifactId&gt;&lt;/dependency&gt;
+  &lt;dependency&gt;&lt;groupId&gt;com.barezen&lt;/groupId&gt;&lt;artifactId&gt;barezen-http-jdk&lt;/artifactId&gt;&lt;/dependency&gt;
+&lt;/dependencies&gt;</code></pre>
+
+  <p>The repository publishes nothing yet — no remote, no artifact, no license file — so a sibling project consumes it
+    today with <code>mvn install</code>. The absence is recorded in ADR-0046 rather than filled in with a plausible URL.</p>
+
+  <h2>The first route</h2>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", (request, params) -&gt;
+        new Response(200, Headers.of("Content-Type", "text/plain"), OK))
+    .route(HttpMethod.GET, "/users/{id}", (request, params) -&gt;
+        new Response(200, Headers.of("Content-Type", "application/json"),
+            ("{\"id\":\"" + params.get("id") + "\"}").getBytes(StandardCharsets.UTF_8)))
+    .build();
+
+JdkHttpServerAdapter server = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", 0), router);
+server.start();
+int port = server.port().getAsInt();
+server.stop();</code></pre>
+
+  <p>Port <code>0</code> asks the operating system; name the port your deployment owns. <code>start()</code> may be
+    called once per instance and <code>stop()</code> is idempotent and never throws — one instance is one server
+    lifecycle, and restarting the same object would mean the caller's reference names a server that no longer exists
+    (ADR-0024, ADR-0012, ADR-0005).</p>
+
+  <h2>What a handler can ask for</h2>
+  <p>A handler is <code>Response handle(Request request, Map&lt;String,String&gt; parameters)</code>. That is the whole
+    extension surface of the web layer, and it is short on purpose:</p>
+  <ul>
+    <li>the request carries what the client sent — method, raw path, raw query (absent is distinct from empty), header
+      fields one per value, and body bytes;</li>
+    <li>captured path parameters arrive as the second argument, not as request state and not through a thread-local;</li>
+    <li>the response carries a status, fields and a <code>byte[]</code> body, and it refuses
+      <code>Content-Length</code> and <code>Transfer-Encoding</code> because framing belongs to the server
+      (ADR-0020, ADR-0027).</li>
+  </ul>
+
+  <p>A handler that needs to know who is asking implements <code>SecuredHandler</code> beside <code>Handler</code> and
+    is given a third argument by the security decorator. A bare three-argument lambda is not a <code>Handler</code>, so
+    it cannot be wrapped — that shape is refused by the detection rule rather than by convention.</p>
+
+  <h2>Run the examples</h2>
+  <p>The <code>examples/</code> module holds seven programs — hello world, routing, request/response, security,
+    database, plugin, OpenAPI — each with a <code>main()</code> that binds a real socket and prints what it observed, and
+    each with a test the reactor runs. Build first, then one <code>java -cp</code> per program:</p>
+  <pre><code>mvn -o -B -ntp clean verify
+java -cp "$CP" com.barezen.examples.hello.HelloWorld</code></pre>
+  <p>The classpath recipe and the observed output of all seven are in <code>docs/examples/README.md</code>.</p>
+
+  <div class="notes">
+    <p>Next: <a href="/docs/routing">routing and HTTP</a> — what a pattern may be, what the six error answers look like,
+      and why HEAD states a length it does not send.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · quick start · the same code runs as
+    <code>examples/…/contract/ReadmeQuickStartTest.java</code>.</p></div>
+</footer>
+</body>
+</html>
