@@ -121,6 +121,205 @@ declared-release script and emits major 65 anyway (ADR-0032).
 (ADR-0049). What *is* verified on every `mvn verify` is the emitted class-file major, by `ClassMajorContractTest` in each
 emitting module and by `scripts/check-class-major.sh` across the tree.
 
+## Guide
+
+Nine short sections, each one the shape a test in this repository already runs. The long-form versions are in
+`docs/guide/` (writing a plugin), `docs/testkit/` (testing) and `docs/examples/` (running the seven programs).
+
+### Installation
+
+The BOM carries every framework version, so an application pins one number. Nothing here is published yet: the
+repository has no remote and `mvn install` into the local repo is how a sibling project consumes it today (ADR-0046).
+
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>com.barezen</groupId><artifactId>barezen-bom</artifactId>
+      <version>0.1.0-SNAPSHOT</version><type>pom</type><scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+<dependencies>
+  <dependency><groupId>com.barezen</groupId><artifactId>barezen-web</artifactId></dependency>
+  <dependency><groupId>com.barezen</groupId><artifactId>barezen-http-jdk</artifactId></dependency>
+</dependencies>
+```
+
+`barezen-web` is the contract and ships with **zero** compile dependencies; `barezen-http-jdk` is the JDK server behind
+it. Add `barezen-security`, `barezen-data`, `barezen-content`, `barezen-plugins`, `barezen-http-servlet` or
+`barezen-testkit` only for what you use — nothing in the framework depends on any of them (ADR-0042, ADR-0044, ADR-0049,
+ADR-0051).
+
+### Quick start
+
+```java
+byte[] OK = "ok".getBytes(StandardCharsets.UTF_8);
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", (request, params) ->
+        new Response(200, Headers.of("Content-Type", "text/plain"), OK))
+    .route(HttpMethod.GET, "/users/{id}", (request, params) ->
+        new Response(200, Headers.of("Content-Type", "application/json"),
+            ("{\"id\":\"" + params.get("id") + "\"}").getBytes(StandardCharsets.UTF_8)))
+    .build();
+
+// Port 0 asks the operating system for a free one; name the port a deployment owns instead.
+JdkHttpServerAdapter server = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", 0), router);
+server.start();
+try {
+  int port = server.port().getAsInt();
+  HttpResponse<String> response = HttpClient.newHttpClient().send(
+      HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/users/7")).GET().build(),
+      HttpResponse.BodyHandlers.ofString());
+  // response.statusCode() == 200, response.body() == {"id":"7"}
+} finally {
+  server.stop();   // idempotent, never throws, releases only what this adapter created (ADR-0024, ADR-0005)
+}
+```
+
+There is no `BarezenApplication.run(...)`, no annotation and no classpath scan. Three objects — a `Handler`, a `Router`,
+a server — are the whole startup, and ADR-0015 is the record of why the framework does not own the wiring.
+
+### Routing
+
+A route is a method, a raw path pattern and a `Handler`. Patterns are a literal or one `{name}` segment: no wildcard,
+no regex, no optional or repeated segment, no prefix match — each is refused by name in ADR-0019 §19 because a matcher
+that accepts a prefix turns routing into an ordering question. A duplicate (method + shape) is refused at registration,
+never resolved by precedence, so no plugin wins a route by being registered later. A handler receives the request and
+the captured parameters as arguments; there is no request-scoped bag, no `getAttribute`, no thread-local.
+
+```java
+Router routes = Router.builder()
+    .route(HttpMethod.DELETE, "/things/{id}", handler)      // 204: a Response with no body
+    .route(HttpMethod.GET, "/files/{path}", other)         // {path} captures ONE segment, encoded as sent
+    .build();
+Optional<RouteMatch> match = routes.match(request);        // the only question the table answers
+Set<HttpMethod> allowed = routes.methodsFor("/things/7");  // empty means 404; non-empty means 405 + Allow
+```
+
+Proven by `RouterTest` (232+ tests) and `RoutingExample`.
+
+### HTTP
+
+`Request` carries what the client sent — method, raw path, raw query (absent is distinct from empty), header fields one
+per value, body bytes. `Response` carries a status, fields and a `byte[]` body; it refuses `Content-Length` and
+`Transfer-Encoding` because framing belongs to the server (ADR-0027 §5), and refuses a body on a status that gets none.
+Errors are responses the adapter writes: 404 names no path, 405 carries a stable `Allow`, a handler exception is logged
+and answered with the status text alone (ADR-0023), a body over the limit is a 413 (ADR-0031), and the HEAD answer
+states the length of the body it does not send (ADR-0028, ADR-0029).
+
+Proven by `JdkResponseBodySemanticsTest`, `JdkErrorSemanticsTest`, `ServletRequestBodyLimitTest` and the framing table in
+`RequestResponseExample`.
+
+### Configuration
+
+`Configuration.standard(Path)` layers a properties file, then the environment, then the process's own properties, with a
+key's declared default beneath all of them. A value is resolved once, at assembly, and travels as a typed constructor
+argument; no component reads `System.getProperty` at request time (ADR-0013). The framework currently defines three keys:
+`barezen.runtime.threads`, `barezen.http.jdk.maxRequestBodyBytes`, and the two TLS keys (`...tls.keystorePath` plus
+`...Password`, where the presence of the path is the decision and there is no `enableTls` flag — ADR-0050).
+
+```java
+Configuration config = Configuration.standard(Path.of("config/application.properties"));
+JdkHttpServerAdapter server = new JdkHttpServerAdapter(address, router, config);  // bad values fail HERE, not later
+```
+
+Proven by `ConfigurationTest`, `RuntimeConfigTest`, `JdkRequestBodyLimitTest` and `JdkTlsSemanticsTest`.
+
+### Security
+
+`SecurityMiddleware` is a `Handler` decorator, not a filter chain: it authenticates, then authorizes, then calls what it
+wrapped, and on every refusal the wrapped handler is never invoked. Authentication answers three states — authenticated,
+failed, offered-nothing — because "sent no credential" and "sent a wrong one" are different answers (ADR-0034). Identity
+arrives as an argument of the optional `SecuredHandler`, never on a thread (ADR-0033). Sessions are opaque 256-bit
+server-side records rather than JWTs, so revocation is one map removal (ADR-0036), passwords hash with PBKDF2-HMAC-SHA256
+and the encoded form carries its own iteration count (ADR-0035), and no or failed identity is 401 while a denied identity
+is 403 (ADR-0037).
+
+```java
+// A handler that needs to know who asked implements SecuredHandler *beside* Handler: the middleware detects it and
+// passes the context as a third argument. A bare three-argument lambda is not a Handler, so it cannot be wrapped.
+final class ReportHandler implements Handler, SecuredHandler {
+  @Override public Response handle(Request r, Map<String, String> p) { throw new IllegalStateException("unreachable"); }
+  @Override public Response handle(Request r, Map<String, String> p, SecurityContext ctx) { /* ctx.principal() */ }
+}
+Handler route = SecurityMiddleware.wrap(authentication, authorization, Permission.of("report:read"), new ReportHandler());
+```
+
+Proven by `SecurityMiddlewareTest`, `PasswordHasherTest`, `SessionStoreTest` and the raw-socket
+`SecuritySocketSemanticsTest`; see `SecurityExample`.
+
+### Database
+
+`Database` takes a `DataSource` the application supplies — the framework names no driver and no pool (ADR-0038). A
+`Transaction` is handed to a callback whose `commit` and `rollback` are package-private, so a repository cannot decide
+(ADR-0039); a second `transaction(...)` opens an independent transaction on a second connection, which is the documented
+answer to nesting rather than an implicit one. `Migrator` keeps a history table it owns and promises exactly one
+sentence: a version is recorded if and only if its `apply` completed — schema integrity after a failure is the product's
+answer, because H2 (and others) commit DDL implicitly (ADR-0040).
+
+```java
+Database database = new Database(pool);
+List<String> names = database.query("select name from users where active = ?", (rs, row) -> rs.getString(1), true);
+int updated = database.transaction(tx -> tx.executeUpdate("update users set name = ? where id = ?", name, id));
+List<AppliedMigration> applied = Migrator.of(database).migrate(List.of(new AddUsersTable(1L, "users", ddl)));
+```
+
+Proven by `DatabaseTest`, `TransactionTest`, `MigratorTest` and `DataArchitectureTest`; see `DatabaseExample`.
+
+### Plugins
+
+A plugin is a `LifecycleParticipant` that can name itself, plus — since 3.1 — an extension point it may implement to
+contribute something. `PluginRegistration.validate` orders a set by declared dependencies and refuses a duplicate id or a
+cycle; `PluginDiscovery` finds the plugins that announced themselves in `META-INF/services`;
+`RouteContributions.of` narrows a plugin list to the ones that contribute routes. A plugin that needs a collaborator
+cannot be discovered, because a `ServiceLoader` provider is a no-argument constructor — and the way around that limit is
+the service locator ADR-0006 refuses, so the limit stays. `docs/guide/authoring-a-plugin.md` is the long form.
+
+```java
+List<Plugin> everything = new ArrayList<>(builtByHand);        // auth, user: each needs a collaborator
+everything.addAll(PluginDiscovery.discover());             // reports: announced in META-INF/services
+List<Plugin> plugins = PluginRegistration.validate(everything);   // user before auth, whichever order they arrived
+Router routes = Router.builder()
+    .route(HttpMethod.GET, "/health", health)
+    .contributing(RouteContributions.of(plugins))            // the contributors register their own routes
+    .build();                                                // frozen here, before anything starts
+LifecycleOrchestrator app = LifecycleOrchestrator.builder()
+    .register("user", userPlugin).register("auth", authPlugin).build();
+app.start();   // initialize all, then start all (ADR-0003); app.stop() reverses it and reports what failed
+```
+
+Proven by `PluginRegistrationTest`, `PluginDiscoveryTest`, `RouteContributionsTest`, `RouterPluginIntegrationTest` and
+`PluginExample`.
+
+### OpenAPI
+
+Schemas and operations are **declared data the application writes**, not classes the framework reflects: that is what
+makes cycle-safety, stable property order and "no scanning" structural properties rather than engineered ones
+(ADR-0043). The generator lives inside `barezen-plugins` because a framework module naming plugin types is the edge
+ADR-0042 rule ① refuses. OpenAPI 3.0.3 JSON only, no YAML, deterministic to the byte, with six malformed-document
+categories refused at `build()`.
+
+```java
+ApiDocument document = ApiDocument.builder()
+    .info("Users", "1.0").server("https://api.example.com").schema("User", user)
+    .operation(Operation.builder(new OperationMetadata(HttpMethod.GET, "/users/{id}", "Fetch one user", List.of("users")))
+        .parameter(Parameter.path("id", Schema.integer()))
+        .response(ApiResponse.json("200", "the user", Schema.ref("User"))).build())
+    .build();
+Handler openapi = document.handler();   // the application mounts it: routes.route(GET, "/openapi.json", openapi)
+```
+
+Proven by `ApiDocumentTest`, `OpenApiJsonTest` (golden bytes) and `OpenApiExample`. The known gap: a route is declared
+once as a route and once as an `OperationMetadata`, because `Router` exposes no route enumeration — ADR-0047 records that
+as the unfinished half with its trigger, rather than widening the table to hide it.
+
+### TestKit
+
+`TestServer` binds the real JDK adapter on `127.0.0.1:0`, `TestHttpClient` speaks the seven verbs over
+`java.net.http` with `followRedirects(NEVER)`, and nothing in the framework may depend on any of it (ADR-0044). See
+`docs/testkit/quick-start.md` and the four worked guides beside it.
+
 ## Layout
 
 ```
@@ -166,6 +365,7 @@ examples/                   seven runnable programs (Phase 2.16) on the public A
 docs/adr/                   architecture decision records, 0001-0051
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
+docs/guide/                  the long-form developer guide (authoring a plugin, and the rest as it is written)
 docs/txt/                   the public API reference (`BAREZEN-WEB-PUBLIC-API-REFERENCE.md`) plus the archived
                             phase prompts and audit specs the phases were executed against
 scripts/                    build guards

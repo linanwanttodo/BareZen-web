@@ -19,6 +19,27 @@ cut, the phases below get grouped under its tag with the real release date; unti
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
 
+### Phase 3.5 — The Guides Phase 2.16 Owed (2026-10-06)
+
+- README gains a **Guide** section covering the twelve topics Stage 2.16-C of the execution spec listed and phase 2.16
+  never wrote: installation (BOM coordinates and which modules an application actually needs), quick start, routing,
+  HTTP, configuration, security, database, plugins, OpenAPI, TestKit, examples and architecture. Each section cites the
+  tests that run the shape it shows.
+- Every snippet was checked against the real API rather than written from memory, and three were wrong on the first pass —
+  `Response.text(...)` does not exist, `Migrator` is obtained with `Migrator.of`, and `ApiDocument.builder()` takes its
+  `info(...)`/`schema(...)`/`operation(...)` calls rather than constructor arguments. The security snippet now shows the
+  `Handler`-plus-`SecuredHandler` pair that `wrap`'s detection actually requires, because a bare three-argument lambda
+  would not compile at a call site.
+- `examples/.../contract/ReadmeQuickStartTest.java` executes the Quick start snippet verbatim against a real socket and
+  asserts the 200 body, the captured path parameter, the 404's exact bytes, and that `stop()` leaves the adapter not
+  running with no port held — the convention `ReadmeTestKitExampleTest` and `ReadmeDocumentExampleTest` already
+  establish, extended to the guide.
+- `docs/guide/authoring-a-plugin.md` is the piece that did not exist anywhere: what a plugin may reach, the two ways onto
+  the classpath and the no-argument-constructor limit that decides between them, the forbidden-behaviour table naming the
+  rule behind each row, why a plugin's routes are unprotected until the plugin wraps them, and what is deferred with its
+  record.
+- 1 new test (examples 28 -> 29).
+
 ### Phase 3.4 — HTTPS and Static Content (2026-10-06)
 
 - TLS on the framework's own server, turned on by naming a keystore and never by a flag:
