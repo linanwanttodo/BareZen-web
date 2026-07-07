@@ -32,12 +32,6 @@
       made structural. Their tests are the build's "the documented examples actually run and pass" signal.
     -->
     <module>examples</module>
-    <!--
-      The website is the reactor's last module (Phase 3.6): a leaf that consumes public API only, depended on by
-      nothing, and absent from the BOM so no application takes it by accident (ADR-0052, and ADR-0045's rule for the
-      examples it sits beside).
-    -->
-    <module>site</module>
   </modules>
 
   <properties>

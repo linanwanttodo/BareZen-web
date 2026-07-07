@@ -4,20 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reference — BareZen</title>
-<link rel="stylesheet" href="/assets/site.css">
-<link rel="alternate" hreflang="zh" href="/zh/docs/reference">
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="alternate" hreflang="zh" href="../zh/docs/reference.html">
 </head>
 <body>
 <header>
   <div class="band">
-    <a class="brand" href="/">BareZen</a>
+    <a class="brand" href="../index.html">BareZen</a>
     <nav>
-      <a href="/docs/quick-start">Quick start</a>
-      <a href="/docs/routing">Routing</a>
-      <a href="/docs/plugins">Plugins</a>
-      <a href="/docs/security-and-data">Security &amp; data</a>
-      <a href="/docs/reference" aria-current="page">Reference</a>
-      <a class="lang" hreflang="zh" href="/zh/docs/reference">中文</a>
+      <a href="quick-start.html">Quick start</a>
+      <a href="routing.html">Routing</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security-and-data.html">Security &amp; data</a>
+      <a href="reference.html" aria-current="page">Reference</a>
+      <a class="lang" hreflang="zh" href="../zh/docs/reference.html">中文</a>
     </nav>
   </div>
 </header>
@@ -39,7 +39,8 @@
       <tr><td><code>barezen-content</code></td><td>web</td><td>static files: one handler per route, an ETag from the bytes, a body-free 304</td></tr>
       <tr><td><code>barezen-plugins</code></td><td>core, web, security, data</td><td>the auth, user and OpenAPI plugins, the route narrowing, and the document generator</td></tr>
       <tr><td><code>barezen-testkit</code></td><td>core, web, http-jdk, security, data</td><td>a test tool that binds the real adapter; the framework may not depend on it, by rule</td></tr>
-      <tr><td><code>examples</code>, <code>site</code></td><td>public API only</td><td>leaves: seven runnable programs, and this website</td></tr>
+      <tr><td><code>examples</code></td><td>public API only</td><td>the leaf: eight runnable programs, one per shipped capability (ADR-0045)</td></tr>
+      <tr><td><code>site/</code></td><td><strong>nothing</strong> — not a module</td><td>this documentation: twelve static files in two languages, deployed as they are (ADR-0054)</td></tr>
     </tbody>
   </table>
 
@@ -54,7 +55,7 @@
     policy, named as open work (ADR-0049 §7).</p>
 
   <h2>The decisions, by number</h2>
-  <p>Fifty-three ADRs sit in <code>docs/adr/</code>, each one decision, each with the alternatives it refused, the tests
+  <p>Fifty-four ADRs sit in <code>docs/adr/</code>, each one decision, each with the alternatives it refused, the tests
     that prove it, a non-goal list and a reopening trigger. The load-bearing ones for the pages you just read:
     <span class="pill">0003 two-phase startup</span>
     <span class="pill">0006 no service locator</span>
@@ -79,6 +80,7 @@
     <span class="pill">0051 static content</span>
     <span class="pill">0052 the site</span>
     <span class="pill">0053 two languages</span>
+    <span class="pill">0054 static files</span>
   </p>
 
   <h2>Still open, by name</h2>
@@ -99,31 +101,27 @@
       by a machine (ADR-0053).</li>
   </ul>
 
-  <h2>Run this site locally</h2>
-  <pre><code>mvn -o -B -ntp -pl site -am verify
-java -cp "site/target/classes:framework/barezen-web/target/classes:\
-framework/barezen-core/target/classes:framework/barezen-http-jdk/target/classes:\
-framework/barezen-content/target/classes:framework/barezen-plugins/target/classes:\
-framework/barezen-security/target/classes:framework/barezen-data/target/classes:\
-$HOME/.m2/repository/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar:\
-$HOME/.m2/repository/ch/qos/logback/logback-classic/1.5.6/logback-classic-1.5.6.jar:\
-$HOME/.m2/repository/ch/qos/logback/logback-core/1.5.6/logback-core-1.5.6.jar" \
-  com.barezen.site.Site 8080</code></pre>
-  <p>Then <code>http://127.0.0.1:8080/</code>, and the Chinese documentation at
-    <code>http://127.0.0.1:8080/zh/</code>. The port is an argument, not a system property or an environment
-  variable — the framework's own rule about hidden configuration applies to itself. Pages are served with an
-  <code>ETag</code> derived from their bytes, so a reload after an edit is a 200 and a reload before one is a 304.</p>
+  <h2>Preview and deploy this documentation</h2>
+  <pre><code>./scripts/check-site.sh                    # every link resolves on disk, both languages pair up
+python3 -m http.server 8000                # preview at http://127.0.0.1:8000/site/</code></pre>
+  <p>The tree is a folder of files with relative addresses, so it deploys unchanged to any static host: on GitHub Pages
+    that is <em>Settings → Pages → Deploy from a branch</em>, <code>main</code>, the <code>/site</code> folder. The
+    reason nothing here needs a server of ours is the reason the links are relative: a project page lives under
+    <code>/<em>repo</em>/site/</code>, where an address starting <code>/assets/…</code> resolves above the site and
+    404s. What the static host does not give you is named too: no conditional <code>GET</code>, no generated
+    <code>/openapi.json</code>, and a URL keeps the <code>.html</code> its file has (ADR-0054).</p>
 
   <h2>Build and verify</h2>
   <pre><code>mvn -o -B -ntp clean verify          # unit, integration, architecture, coverage gate
 ./scripts/check-jdk-baseline.sh      # the declared release is still 17
-./scripts/check-class-major.sh       # every emitted class file is major 61</code></pre>
+./scripts/check-class-major.sh       # every emitted class file is major 61
+./scripts/check-site.sh              # the documentation tree is self-consistent</code></pre>
   <p>JDK 17 is the compatibility baseline and JDK 21 or later is the recommended runtime; virtual threads are a runtime
     capability probed at startup, never a build variant (ADR-0002, ADR-0010).</p>
 </main>
 <footer>
-  <div class="band"><p>BareZen · reference · this page is served by the modules it describes:
-    <code>site/</code>, a leaf compiled against public API only (ADR-0052).</p></div>
+  <div class="band"><p>BareZen · reference · this documentation is a folder of static files, checked by
+    <code>scripts/check-site.sh</code> rather than by a server (ADR-0052, ADR-0054).</p></div>
 </footer>
 </body>
 </html>

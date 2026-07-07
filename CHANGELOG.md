@@ -19,6 +19,46 @@ cut, the phases below get grouped under its tag with the real release date; unti
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
 
+### Phase 3.8 — Documentation Becomes a Folder (2026-10-07)
+
+- `site/` is no longer a Maven module. `Site.java`, `SiteTest.java` and `site/pom.xml` are deleted, `<module>site</module>`
+  is gone from the parent, and the reactor is eleven modules again. The pages moved from `site/src/main/resources/web/` up
+  to `site/`, so a static host's folder root does not put `web` in every published address (ADR-0054).
+- The reason is a deployment target, not a preference: the documentation is going to GitHub Pages, which serves a branch
+  and a folder and runs none of our code. A module whose job was to answer `GET` for its own files could not be deployed
+  where the files are published, and keeping it as a *local preview* was refused too, because the preview had URLs the
+  deployed site cannot have (`/docs/plugins`, a conditional reload) — a preview that disagrees with production is the drift
+  this project refuses (options A and B recorded and refused by name).
+- Every address in the twelve pages is now relative and keeps its `.html`. A project page lives under `/<repo>/site/`, where
+  `href="/assets/site.css"` resolves above the site and 404s; the extensionless clean URL is gone, and the Pages trick that
+  would restore it (a `404.html` that rewrites with JavaScript) is refused for ADR-0052's standing reason. `.nojekyll` keeps
+  the host from processing the files.
+- `SiteTest`'s four structural guarantees became `scripts/check-site.sh`: every `href`/`src` resolves **on disk**, every
+  page is reachable from one of the two landing pages, every page has its counterpart in the other language with reciprocal
+  `hreflang` links, and no absolute address exists. It reports one `FAIL:` line per problem and exits non-zero; the site now
+  checks out at 12 pages.
+- **What readers lose is named**: conditional `GET` (the host's caching replaces our `ETag`/304), `/health`, and a published
+  `/openapi.json`. The OpenAPI capability is unaffected; only this particular way of publishing it is gone.
+- `barezen-content` keeps a real consumer by moving it. `examples/` gains an eighth program,
+  `staticcontent/StaticFileExample`, which lists a directory at assembly, registers one handler per file for **both** `GET`
+  and `HEAD`, and prints what it measured: `GET /notes.txt -> 200, 44 bytes, ETag "ec185bc08f4786af"`, a reload with that
+  tag `-> 304, 0 bytes, Content-Length (absent)`, `HEAD -> 200` stating `Content-Length 44` and receiving 0 bytes, and an
+  unregistered path `-> 404, body "Not Found"`. `StaticFileExampleTest` asserts those over a real socket (5 tests), which is
+  where three of ADR-0029's four framing statements now live.
+- **A hidden contract fact surfaced while writing it**: `HEAD` is not a folded `GET`. `Router` matches the method the client
+  sent (ADR-0028), so a file registered for `GET` only answers 405 to a `HEAD` — which the pages this module used to serve
+  would have done as well, and nobody knew, because nothing sent one. A test pins the 405 now.
+- The frontend claim is corrected rather than carried. ADR-0052 recorded ADR-0016's condition ("a real consumer with named
+  rules") as met by `site/`; a documentation folder is not an application UI, so README's frontend row returns to NON-GOAL,
+  and the project's actual frontend remains unbuilt. What 3.6 proved still stands: publishing these pages needed no
+  templating and no markdown capability.
+- Full reactor after the phase, measured on this build: `mvn -o -B -ntp clean verify` — **BUILD SUCCESS in 10:44,
+  1209 tests, 0 failures, 1 skipped, 9 "All coverage checks have been met"**, with `check-jdk-baseline.sh`,
+  `check-class-major.sh` and the new `check-site.sh` each exiting 0. Deployability was checked the way the host will do it:
+  the folder served under a subpath by a plain static server, all 12 pages fetched and all **124 link targets answering
+  200**, `/site/zh/` resolving through the directory index, and `/site/docs/plugins` (no extension) correctly 404ing — the
+  cost ADR-0054 names rather than hides.
+
 ### Phase 3.7 — The Documentation Site in Two Languages (2026-10-07)
 
 - The site is bilingual by address: English stays at `/` and `/docs/…`, Chinese arrives at `/zh/` and `/zh/docs/…`, one

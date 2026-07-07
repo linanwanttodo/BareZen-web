@@ -4,20 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>参考 — BareZen</title>
-<link rel="stylesheet" href="/assets/site.css">
-<link rel="alternate" hreflang="en" href="/docs/reference">
+<link rel="stylesheet" href="../../assets/site.css">
+<link rel="alternate" hreflang="en" href="../../docs/reference.html">
 </head>
 <body>
 <header>
   <div class="band">
-    <a class="brand" href="/zh/">BareZen</a>
+    <a class="brand" href="../index.html">BareZen</a>
     <nav>
-      <a href="/zh/docs/quick-start">快速开始</a>
-      <a href="/zh/docs/routing">路由</a>
-      <a href="/zh/docs/plugins">插件</a>
-      <a href="/zh/docs/security-and-data">安全与数据</a>
-      <a href="/zh/docs/reference" aria-current="page">参考</a>
-      <a class="lang" hreflang="en" href="/docs/reference">EN</a>
+      <a href="quick-start.html">快速开始</a>
+      <a href="routing.html">路由</a>
+      <a href="plugins.html">插件</a>
+      <a href="security-and-data.html">安全与数据</a>
+      <a href="reference.html" aria-current="page">参考</a>
+      <a class="lang" hreflang="en" href="../../docs/reference.html">EN</a>
     </nav>
   </div>
 </header>
@@ -39,7 +39,8 @@
       <tr><td><code>barezen-content</code></td><td>web</td><td>静态文件：一个文件一条路由、由字节算出的 ETag、不带 body 的 304</td></tr>
       <tr><td><code>barezen-plugins</code></td><td>core、web、security、data</td><td>auth、user、OpenAPI 三个插件、路由的收窄，以及文档生成器</td></tr>
       <tr><td><code>barezen-testkit</code></td><td>core、web、http-jdk、security、data</td><td>一个会绑定真实适配器的测试工具；按规则，框架不许依赖它</td></tr>
-      <tr><td><code>examples</code>、<code>site</code></td><td>只用公共 API</td><td>叶子：七个可运行的程序，以及这个网站</td></tr>
+      <tr><td><code>examples</code></td><td>只用公共 API</td><td>那个叶子：八个可运行程序，一个对应一项出货能力（ADR-0045）</td></tr>
+      <tr><td><code>site/</code></td><td><strong>谁都不依赖</strong> —— 它不是模块</td><td>就是这份文档：十二个静态文件、两种语言，原样部署（ADR-0054）</td></tr>
     </tbody>
   </table>
 
@@ -53,7 +54,7 @@
     替换这些页面属于部署策略，作为未完成工作点名（ADR-0049 §7）。</p>
 
   <h2>决策，按编号</h2>
-  <p>五十三份 ADR 在 <code>docs/adr/</code> 里，每份一个决策，都写明它拒绝了哪些替代方案、哪些测试证明它、
+  <p>五十四份 ADR 在 <code>docs/adr/</code> 里，每份一个决策，都写明它拒绝了哪些替代方案、哪些测试证明它、
     一份非目标清单，以及一个重新开启的触发条件。跟你刚读这几页直接相关的：
     <span class="pill">0003 两阶段启动</span>
     <span class="pill">0006 不做 service locator</span>
@@ -78,6 +79,7 @@
     <span class="pill">0051 静态内容</span>
     <span class="pill">0052 这个站点</span>
     <span class="pill">0053 两种语言</span>
+    <span class="pill">0054 静态文件</span>
   </p>
 
   <h2>仍然敞开的，按名字</h2>
@@ -95,30 +97,27 @@
       测试只钉住"每个文件都有对应页、每对链接都双向可达"（ADR-0053）。</li>
   </ul>
 
-  <h2>在本地跑起这个站点</h2>
-  <pre><code>mvn -o -B -ntp -pl site -am verify
-java -cp "site/target/classes:framework/barezen-web/target/classes:\
-framework/barezen-core/target/classes:framework/barezen-http-jdk/target/classes:\
-framework/barezen-content/target/classes:framework/barezen-plugins/target/classes:\
-framework/barezen-security/target/classes:framework/barezen-data/target/classes:\
-$HOME/.m2/repository/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar:\
-$HOME/.m2/repository/ch/qos/logback/logback-classic/1.5.6/logback-classic-1.5.6.jar:\
-$HOME/.m2/repository/ch/qos/logback/logback-core/1.5.6/logback-core-1.5.6.jar" \
-  com.barezen.site.Site 8080</code></pre>
-  <p>然后访问 <code>http://127.0.0.1:8080/</code>，中文在 <code>http://127.0.0.1:8080/zh/</code>。
-    端口是命令行参数，不是系统属性、也不是环境变量 —— 框架那条关于"不许有隐藏配置"的规则同样适用于它自己。
-    页面带着一个由字节算出的 <code>ETag</code> 被提供，所以改完之后刷新是 200，改之前刷新是 304。</p>
+  <h2>预览与部署这份文档</h2>
+  <pre><code>./scripts/check-site.sh                    # 每个链接在磁盘上都能解析，两种语言逐页配对
+python3 -m http.server 8000                # 预览 http://127.0.0.1:8000/site/</code></pre>
+  <p>这棵树就是一堆相对地址的文件，所以任何静态托管都能原样部署：GitHub Pages 就是
+    <em>Settings → Pages → Deploy from a branch</em>，选 <code>main</code> 分支和 <code>/site</code> 目录。
+    这里之所以不需要我们自己的服务器，理由就藏在"链接全是相对路径"这件事里：项目站的地址在
+    <code>/<em>仓库名</em>/site/</code> 之下，以 <code>/assets/…</code> 开头的地址会解析到站点之上，直接 404。
+    静态托管不给的东西也一并写清楚：没有条件 <code>GET</code>，没有由插件生成的 <code>/openapi.json</code>，
+    URL 保留文件自己的 <code>.html</code> 后缀（ADR-0054）。</p>
 
   <h2>构建与验证</h2>
   <pre><code>mvn -o -B -ntp clean verify          # 单元、集成、架构、覆盖率门槛
 ./scripts/check-jdk-baseline.sh      # 声明的 release 仍然是 17
-./scripts/check-class-major.sh       # 每个产出的 class 文件都是 major 61</code></pre>
+./scripts/check-class-major.sh       # 每个产出的 class 文件都是 major 61
+./scripts/check-site.sh              # 文档树自身一致</code></pre>
   <p>JDK 17 是兼容基线，JDK 21 及以上是建议的运行环境；虚拟线程是启动时探测到的运行时能力，
     从来不是一个构建变体（ADR-0002、ADR-0010）。</p>
 </main>
 <footer>
-  <div class="band"><p>BareZen · 参考 · 这一页由它所描述的那些模块提供：<code>site/</code>，
-    一个只针对公共 API 编译的叶子（ADR-0052）。</p></div>
+  <div class="band"><p>BareZen · 参考 · 这份文档就是一个装静态文件的目录，由
+    <code>scripts/check-site.sh</code> 把关，而不是由某个服务器（ADR-0052、ADR-0054）。</p></div>
 </footer>
 </body>
 </html>

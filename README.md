@@ -28,7 +28,7 @@ module naming plugin types is the exact edge ADR-0042 rule 1 refuses (ADR-0043).
 second top module: `framework/barezen-testkit`, a consumer-facing test tool that binds the real JDK adapter to
 `127.0.0.1:0`, ships the seven-verb client, the fixtures and the assertions an integration test needs, and depends
 downward and never sideways — the isolation ADR-0044 turns into a build fact by rule. 2.16 closed the 2.x line with a
-leaf `examples` module: seven runnable programs that use only the public developer API, each proving itself twice —
+leaf `examples` module: eight runnable programs that use only the public developer API, each proving itself twice —
 once by a `main()` that binds a real socket and once by a TestKit-driven test the reactor runs (ADR-0045).
 
 Phase 3.1 opened the extension point ADR-0016 §6 deferred: `com.barezen.web.RouteContributor` is the framework's first
@@ -64,24 +64,34 @@ HEAD states a length it does not send, and a 304 still states nothing — the de
 knowable in-process and kept, because stating it would need a handler→adapter channel for a field no client here can act
 on, and ADR-0027 §5 keeps framing out of handlers' hands.
 
-Phase 3.6 gave the project a website that is itself a BareZen application (`site/`, ADR-0052): six hand-written pages and
-one stylesheet, routed one-file-per-route through `StaticContent`, with `/openapi.json` from the OpenAPI plugin and
-`/health` a lambda. No generator and no template engine — instead two tests that walk the tree and follow every internal
+Phase 3.6 gave the project documentation worth reading (`site/`, ADR-0052): six hand-written pages and one stylesheet,
+served at the time by the framework itself through `StaticContent`, with `/openapi.json` from the OpenAPI plugin and
+`/health` a lambda. No generator and no template engine — instead two checks that walk the tree and follow every internal
 link, which is what caught the first real bug of the phase (`/assets/assets/site.css`). ADR-0016's frontend NON-GOAL asked
-for "a real consumer with named rules" before this project would talk about a frontend; that consumer now exists, and what
-it proved is that no frontend capability was needed — and, stated plainly in the record, that the site uses no plugin, so
-3.1 and 3.2 are still consumed only by `examples/` and the tests.
+for "a real consumer with named rules" before this project would talk about a frontend; what this consumer proved was that
+no *templating* capability was needed — and, stated plainly in the record then and corrected in 3.8, that a documentation
+folder is not a frontend either.
 
 Phase 3.7 made that site bilingual, in Chinese as well as English (ADR-0053). The language lives in the address — `/` and
 `/docs/…` in English, `/zh/` and `/zh/docs/…` in Chinese, one hand-written file per page — so a page is linkable,
 cacheable, and decided at assembly rather than at request time. The switcher is two `hreflang` links per page plus a
 `<link rel="alternate">` pair in each head; no cookie, no JavaScript, no `Accept-Language` negotiation, because an `ETag`
 derived from bytes (ADR-0029) would otherwise become a function of a header. Code blocks, identifiers and ADR numbers stay
-byte-identical between the trees, since a translated token is a search that returns nothing. `/zh` answers `301` to `/zh/`
-so a page keeps one canonical address under the segment-count rule (ADR-0019 §3). Nothing in the framework learned a
-locale: no `Locale` type, no bundle mechanism — ADR-0052's rule that no capability arrives *for* this site held again, and
-the cost is named honestly: twelve files are maintained by hand, and the build proves the pairing and the links, not that
-the two languages still say the same thing.
+byte-identical between the trees, since a translated token is a search that returns nothing. Nothing in the framework
+learned a locale: no `Locale` type, no bundle mechanism — ADR-0052's rule that no capability arrives *for* this site held
+again, and the cost is named honestly: twelve files are maintained by hand, and the build proves the pairing and the links,
+not that the two languages still say the same thing.
+
+Phase 3.8 made those twelve files what they always should have been for a documentation site: **just files** (ADR-0054).
+`site/` left the reactor — `Site.java`, `SiteTest.java` and `site/pom.xml` are gone, eleven modules remain — because the
+deployment target is GitHub Pages, which serves a folder and runs none of our code, so a module that existed to answer
+`GET` for its own resources could not be used where the documentation was going to live. Every address is now relative (a
+project page sits under `/<repo>/site/`, where `href="/assets/…"` resolves above the site and 404s) and keeps its `.html`,
+which is the one reader-visible cost: no extensionless URLs without JavaScript rewriting, refused for ADR-0052's reason.
+The four guarantees `SiteTest` gave moved to `scripts/check-site.sh` — links resolve on disk, every page is reachable, the
+two languages pair up, no absolute address. What moved with them: `barezen-content`'s consumer became the eighth example
+program (`staticcontent/StaticFileExample`, which also discovered and now pins that `HEAD` is a route you register, not a
+`GET` the framework folds in), and three of the four ADR-0029 framing statements are asserted over a socket there instead.
 
 What is left open is left open by name: every deferred item carries a reopening trigger
 and a named phase in the ADR that defers it, and nothing beyond what a build measured is claimed as working.
@@ -93,16 +103,16 @@ and a named phase in the ADR that defers it, and nothing beyond what a build mea
 | `framework/barezen-web` | 2.7–2.9.6, 2.10, 3.1 | HTTP contract (`Handler`, `Request`, `Response`, `Headers`, `HttpMethod`), an immutable route table (`Router`, `RouteMatch`) and the server boundary (`HttpServerAdapter`, `HttpServerAdapterProvider`) — still no server, no middleware, no context; 2.10 tightened `Response`'s constructor rules and asserted the framing matrix; 3.1 added the contract's first extension point, `RouteContributor`, and the `Router.Builder.contributing` runner, so the shipped jar now names ten contracted types and still zero compile dependencies |
 | `framework/barezen-http-jdk` | 2.9–2.10, 3.4 | the first adapter: `com.sun.net.httpserver` behind the contract, with its `ServiceLoader` provider; 2.10 added the HEAD framing boundary and the configured request-body limit; 3.4 added HTTPS, turned on by naming a keystore rather than by a flag, with no change to the adapter's public surface (ADR-0050) |
 | `framework/barezen-http-servlet` | 3.3 | the second server, as an integration: one `BarezenServlet` routes the same `Router` inside an existing Tomcat, Jetty or Wildfly deployment, with `jakarta.servlet-api` `provided` and the container at test scope only; it is deliberately **not** an `HttpServerAdapter` (ADR-0024 — a servlet owns no port), it states `Content-Length` so ADR-0029's framing matrix holds across both servers, it enforces the same 1 MiB body limit through the container's own init-parameter, and it depends on `barezen-web` and the log facade alone — never on the kernel, security, data, plugins or the other adapter (ADR-0049) |
-| `framework/barezen-content` | 3.4 | static content on the contract: `StaticContent.file(path)` is one `Handler` per route — an `ETag` derived from the bytes (no clock, no mtime), `If-None-Match` answered with a body-free 304, a fixed extension table instead of the host's MIME database, and a plain 404 that names no path. One compile dependency (`barezen-web`), no adapter, no wildcard route and no directory listing (ADR-0051) |
+| `framework/barezen-content` | 3.4 | static content on the contract: `StaticContent.file(path)` is one `Handler` per route — an `ETag` derived from the bytes (no clock, no mtime), `If-None-Match` answered with a body-free 304, a fixed extension table instead of the host's MIME database, and a plain 404 that names no path. One compile dependency (`barezen-web`), no adapter, no wildcard route and no directory listing (ADR-0051); its consumer in shipped code is `examples/staticcontent` since 3.8, and before that it was this repository's own documentation site (ADR-0054) |
 | `framework/barezen-security` | 2.11 | security on the contract: a `Handler` decorator (`SecurityMiddleware`), the three-state `AuthenticationResult`, `PasswordHasher` (PBKDF2-HMAC-SHA256), `SessionStore` (opaque, revocable); one compile dependency (`barezen-web`), no server, no JDBC, no logging facade, no thread-local |
 | `framework/barezen-data` | 2.12 | persistence through one `javax.sql` boundary: `Database(DataSource)` with zero compile dependencies, `Transaction` whose `commit`/`rollback` are package-private (a repository cannot decide), `DataAccessException` as the single translation point, and a history-table `Migrator`; the framework names no driver, and H2 is test-scope only |
 | `framework/barezen-plugins` | 2.13–2.14, 3.1 | the first plugins on the SPI: `AuthPlugin` (fills security's existing `Authentication` port), `UserPlugin` (fills `Authorization` and the plugin-local `PasswordVerifier` port), `OpenApiPlugin` (declared `OperationMetadata` only); 2.14 adds the OpenAPI *generator* beside the collector it projects — schemas as declared data, deterministic JSON, build-time validation, no reflection and no new module (ADR-0043); 3.1 adds `routes.RouteContributions.of`, the pure narrowing from `Plugin`s to `RouteContributor`s, which is the one `instanceof` in the mechanism and the only namespace where `Plugin` and a web type may meet (ADR-0047); `PluginRegistration.validate` orders and refuses; the framework never names a plugin back (ADR-0042), H2 stays test-scope only |
 | `framework/barezen-testkit` | 2.15 | a consumer-facing test tool, not a framework service: `TestServer` binds the real JDK adapter to `127.0.0.1:0`, `TestHttpClient` speaks the seven verbs over `java.net.http` with `followRedirects(NEVER)`, `TestFixtures` provides the counting and principal-capturing handlers, `TestDatabase` wraps an application-supplied `DataSource` and owns only the reset, `Assertions` gives the response/count/identity checks (ADR-0044). Five downward compile dependencies (core, web, http-jdk, security, data), no sideways edge to `com.barezen.plugins`, H2 test-scope only, and no class in the shipped reactor may name it — the isolation rule |
-| `examples` | 2.16 | seven runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`; `PluginExample` also carries the plugin that announces itself in `META-INF/services` (3.2). Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
+| `examples` | 2.16, 3.8 | eight runnable examples on the public API only, one leaf module wired last in the reactor: `HelloWorld`, `RoutingExample`, `RequestResponseExample`, `SecurityExample`, `DatabaseExample`, `PluginExample`, `OpenApiExample`, `StaticFileExample`; `PluginExample` also carries the plugin that announces itself in `META-INF/services` (3.2), and `StaticFileExample` is `barezen-content`'s consumer in shipped code (3.8, ADR-0054). Each has a `main()` that binds a real socket and a TestKit-driven test the build runs; the framework never depends on this leaf, so it cannot drift into the shipped product (ADR-0045) |
 | Route enumeration | 3.x | DEFERRED — reopen trigger: the OpenAPI double-write (a route declared once as a route and once as `OperationMetadata`) costing a real project a wrong document; `ADR-0047` records why the merge step stays refused until then |
 | Second extension point | 3.x | DEFERRED — reopen trigger: a component other than the route table with a plugin that needs to contribute to it (the named candidate is the event bus, consumerless since 2.6 per ADR-0017) |
-| `site` | 3.6, 3.7 | the project's own website, served by the framework: six pages in two languages (English at `/` and `/docs/…`, Chinese at `/zh/` and `/zh/docs/…`) and one stylesheet, routed one-file-per-route through `Router`, files served by `StaticContent` with content-derived ETags, `/openapi.json` generated by the OpenAPI plugin, `/health` a plain lambda — a leaf depended on by nothing and absent from the BOM, with tests that walk the tree, follow every internal link, and require every page to have its counterpart in the other language instead of a generator (ADR-0052, ADR-0053) |
-| Frontend binding inside the framework | non-goal | NON-GOAL, unchanged — ADR-0016's condition ("a real consumer with named rules") was met by `site/` in 3.6, and what that consumer proved is that no frontend capability is needed: the site is HTML files and the framework's own content module. A template engine or a markdown pipeline would still arrive with a dependency and a build step (ADR-0052's refused options) |
+| `site/` | 3.6, 3.7, 3.8 | **not a module** (ADR-0054): the project's documentation as twelve static files in two languages — English at `site/index.html` + `site/docs/*.html`, Chinese at `site/zh/…`, one stylesheet, every address relative, deployed as a folder by any static host (GitHub Pages: branch `main`, folder `/site`). It lost a server and with it conditional `GET`, `/health` and a published `/openapi.json`; it gained a shape the deployment target can actually serve. `scripts/check-site.sh` keeps the four guarantees the module's tests used to: links resolve on disk, every page reachable, the two languages paired, no absolute address |
+| A frontend for this project | non-goal | NON-GOAL, **re-opened rather than met** — 3.6 recorded ADR-0016's condition as satisfied by `site/`; 3.8 corrects that (ADR-0054): a documentation folder is not an application UI, and the "real consumer with named rules" ADR-0016 asks for still has to arrive before the framework grows a frontend binding. What 3.6 did prove stands: publishing these pages needed no templating and no markdown capability |
 
 A module directory appears in the tree only when the phase that fills it in runs (ADR-0008).
 
@@ -144,7 +154,7 @@ emitting module and by `scripts/check-class-major.sh` across the tree.
 ## Guide
 
 Nine short sections, each one the shape a test in this repository already runs. The long-form versions are in
-`docs/guide/` (writing a plugin), `docs/testkit/` (testing) and `docs/examples/` (running the seven programs).
+`docs/guide/` (writing a plugin), `docs/testkit/` (testing) and `docs/examples/` (running the eight programs).
 
 ### Installation
 
@@ -378,15 +388,16 @@ framework/barezen-testkit/  a consumer-facing test tool (Phase 2.15): TestServer
                             response/count/identity checks; five downward compile dependencies, no sideways edge
                             to com.barezen.plugins, H2 test-scope only, and the reactor names nothing here
                             (ADR-0044)
-site/                     the project's own website (Phases 3.6, 3.7): web/*.html, web/zh/**.html and
-                            web/assets/site.css served by Site.router() through barezen-content, on the JDK
-                            adapter — bilingual by address, switched by two hreflang links per page; a leaf,
-                            public API only, not in the BOM (ADR-0052, ADR-0053)
-examples/                   seven runnable programs (Phase 2.16) on the public API only, one leaf module wired last:
-                            hello-world, routing, request/response, security, database, plugin, openapi — each a
+site/                     the project's documentation (Phases 3.6, 3.7, 3.8): index.html, docs/*.html,
+                            zh/index.html, zh/docs/*.html and assets/site.css — twelve static files, every
+                            address relative, deployed as a folder; not a module, served by no code of ours,
+                            checked by scripts/check-site.sh (ADR-0052, ADR-0053, ADR-0054)
+examples/                   eight runnable programs (Phases 2.16, 3.8) on the public API only, one leaf module wired last:
+                            hello-world, routing, request/response, security, database, plugin, openapi,
+                            static-content — each a
                             router()/wiring() factory, a self-verifying main() on 127.0.0.1:0, and a TestKit test the
                             reactor runs; nothing in the framework depends on this leaf (ADR-0045)
-docs/adr/                   architecture decision records, 0001-0053
+docs/adr/                   architecture decision records, 0001-0054
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
 docs/guide/                  the long-form developer guide (authoring a plugin, and the rest as it is written)
@@ -1330,3 +1341,23 @@ covers only the two JSON endpoints, because `ApiResponse` can express a JSON bod
 as bodiless would be a claim about bytes that never arrive. And the honest negative: the site registers no plugin,
 contributes no routes and discovers nothing, so ADR-0047 and ADR-0048 still have their only real consumers in
 `examples/` and in the tests — a website is proof about serving, not about extension.
+
+**Corrected by 3.8.** Two of the claims above were wrong in ways that only a deployment exposed. Serving the pages from
+`target/classes` through our own adapter was not a capability worth having — it was a server that cannot be deployed where
+the documentation goes (ADR-0054) — and calling this consumer the thing that met ADR-0016's frontend condition overstated
+it: a folder of prose is not an application UI. Both are retracted there rather than smoothed over here.
+
+## Phase 3.8 in one paragraph
+
+`site/` stopped being a module. The reason is a deployment target: GitHub Pages serves a folder and runs none of our code,
+so a `Site.main()` that binds a port and routes twelve files was a server standing between the documentation and the place
+it is published — and the local preview it enabled (`/docs/plugins`, an `ETag` reload) was a shape the deployed site could
+never have, which is the preview/deploy divergence this project keeps refusing (ADR-0054 option B). The files moved up to
+`site/`, every address became relative (a project page lives under `/<repo>/site/`, so `/assets/site.css` would resolve
+above the site and 404), and page URLs keep the `.html` their files have. `SiteTest`'s four structural guarantees became
+`scripts/check-site.sh`, which checks them against a filesystem instead of a route table; its five socket-level assertions
+were not all simply dropped — `barezen-content` gained an eighth example program, `staticcontent/StaticFileExample`, that
+registers one route per file and asserts over a real socket the 200-with-a-length, the body-free 304 and the HEAD that
+states a length it does not send. Writing that program against the contract also surfaced a fact the site had been hiding:
+`HEAD` is not a folded `GET` (ADR-0028), so a GET-only file answers 405 to a HEAD probe — which the pages that used to be
+served here would have done too, and nobody sent one, because nothing tested it.

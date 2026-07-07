@@ -5,20 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BareZen —— 可插拔、能放进现有项目的 Java Web 框架</title>
 <meta name="description" content="轻量、模块化的 Java Web 框架：不可变路由表、带真实扩展点的插件 SPI，以及能跑在你已有容器里的 servlet 集成。">
-<link rel="stylesheet" href="/assets/site.css">
-<link rel="alternate" hreflang="en" href="/">
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="alternate" hreflang="en" href="../index.html">
 </head>
 <body>
 <header>
   <div class="band">
-    <a class="brand" href="/zh/">BareZen</a>
+    <a class="brand" href="index.html">BareZen</a>
     <nav>
-      <a href="/zh/docs/quick-start">快速开始</a>
-      <a href="/zh/docs/routing">路由</a>
-      <a href="/zh/docs/plugins">插件</a>
-      <a href="/zh/docs/security-and-data">安全与数据</a>
-      <a href="/zh/docs/reference">参考</a>
-      <a class="lang" hreflang="en" href="/">EN</a>
+      <a href="docs/quick-start.html">快速开始</a>
+      <a href="docs/routing.html">路由</a>
+      <a href="docs/plugins.html">插件</a>
+      <a href="docs/security-and-data.html">安全与数据</a>
+      <a href="docs/reference.html">参考</a>
+      <a class="lang" hreflang="en" href="../index.html">EN</a>
     </nav>
   </div>
 </header>
@@ -84,19 +84,20 @@ server.start();</code></pre>
     会把路由变成一个排序问题。静态文件因此是一个文件一条路由。</p>
 
   <div class="notes">
-    <p>这个站点就是由它所文档化的框架提供的：手写的 HTML、一个样式表、通过 <code>Router</code> 注册的路由、由
-      <code>StaticContent</code> 提供的文件（ETag 由内容算出），以及由 OpenAPI 插件生成的
-      <code>/openapi.json</code>。它的源码就在仓库的 <code>site/</code> 目录里，而页面由"必须覆盖到每一个文件"的测试来把关。</p>
+    <p>这些页面就是普通文件：手写的 HTML、一个样式表、所有地址都是相对路径，原样部署。这正是静态托管方不运行我们的任何
+      代码就能提供的形状，代价也一并写清楚 —— 这里没有 <code>ETag</code> 条件请求，没有由插件生成的
+      <code>/openapi.json</code>，一个页面就等于它那个文件写的内容（ADR-0054）。部署前由
+      <code>scripts/check-site.sh</code> 检查这棵树：它会在磁盘上跟随每一个链接，并要求每个页面都有另一种语言的对应页。</p>
   </div>
 
   <h2>接下来读什么</h2>
 
   <ul>
-    <li><a href="/zh/docs/quick-start">快速开始</a> —— 三个对象、Maven 坐标，以及 handler 能要什么、不能要什么。</li>
-    <li><a href="/zh/docs/plugins">插件</a> —— 怎么写一个、怎么贡献路由、怎么被发现，以及那些防止插件变成容器的规则。</li>
-    <li><a href="/zh/docs/routing">路由与 HTTP</a> —— 模式、framing、六种错误应答、HEAD 与 304。</li>
-    <li><a href="/zh/docs/security-and-data">安全与数据</a> —— 装饰器、三态认证、不透明会话、PBKDF2，以及仓储无法提交的事务。</li>
-    <li><a href="/zh/docs/reference">参考</a> —— 模块清单、背后的决策，以及如何在本地跑起这个站点。</li>
+    <li><a href="docs/quick-start.html">快速开始</a> —— 三个对象、Maven 坐标，以及 handler 能要什么、不能要什么。</li>
+    <li><a href="docs/plugins.html">插件</a> —— 怎么写一个、怎么贡献路由、怎么被发现，以及那些防止插件变成容器的规则。</li>
+    <li><a href="docs/routing.html">路由与 HTTP</a> —— 模式、framing、六种错误应答、HEAD 与 304。</li>
+    <li><a href="docs/security-and-data.html">安全与数据</a> —— 装饰器、三态认证、不透明会话、PBKDF2，以及仓储无法提交的事务。</li>
+    <li><a href="docs/reference.html">参考</a> —— 模块清单、背后的决策，以及如何在本地跑起这个站点。</li>
   </ul>
 </main>
 

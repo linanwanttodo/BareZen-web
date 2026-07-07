@@ -1,6 +1,6 @@
 # BareZen examples
 
-Seven runnable programs in `examples/`, one public class per topic. Every example uses **only the public developer
+Eight runnable programs in `examples/`, one public class per topic. Every example uses **only the public developer
 API** — a fact enforced by the compiler, because package-private and private types in a framework module are
 unreachable from a different Maven module. Every example proves itself twice: a `main()` that binds a real socket and
 a TestKit-driven test the reactor runs. ADR-0045 is where the shape of this module and its two bounded decisions
@@ -15,8 +15,9 @@ Both are part of the reactor, so the ordinary build runs them:
 mvn -o -B -ntp -pl examples -am test
 ```
 
-That compiles every framework module the examples depend on and runs the 28 example tests (24 behavioural across the
-seven topics plus a per-module `ClassMajorContractTest` of 4). They are also in the
+That compiles every framework module the examples depend on and runs the 34 example tests — measured on the full
+reactor: 29 behavioural across the eight topics, a per-module `ClassMajorContractTest` of 4, and
+`ReadmeQuickStartTest`'s 1. They are also in the
 full-reactor `mvn -o -B -ntp clean verify`, so no separate command is needed once the whole project is green.
 
 ## Run a `main()`
@@ -31,14 +32,14 @@ H2):
 M2=$HOME/.m2/repository
 FRAMEWORK=framework
 CP="examples/target/classes"
-for m in core web http-jdk security data plugins; do CP="$CP:$FRAMEWORK/barezen-$m/target/classes"; done
+for m in core web http-jdk content security data plugins; do CP="$CP:$FRAMEWORK/barezen-$m/target/classes"; done
 CP="$CP:$M2/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar:$M2/com/h2database/h2/2.2.224/h2-2.2.224.jar"
 
 java -cp "$CP" com.barezen.examples.hello.HelloWorld
 ```
 
 Each `main()` prints one line per observation and exits; the port is `127.0.0.1:0` (OS-assigned), never a fixed
-endpoint. The recorded output of the seven runs on JDK 17:
+endpoint. The recorded output of the eight runs:
 
 | Example | Observable output |
 | --- | --- |
@@ -49,6 +50,7 @@ endpoint. The recorded output of the seven runs on JDK 17:
 | `database.DatabaseExample` | one migration applied, two rows after a committed transaction, a rolled-back insert leaves the count at 2 |
 | `plugins.PluginExample` | announced on the classpath `[reports]`, assembled order `[user, openapi, auth, reports]`, startup order `[user, openapi, auth, reports]`, the table `Router[GET /health, GET /reports/status]` with the second route contributed by the discovered plugin, a login authenticates as `ada`, a bad password issues no session |
 | `openapi.OpenApiExample` | a 1201-byte document, served `200 application/json` at `/openapi.json` |
+| `staticcontent.StaticFileExample` | `GET /notes.txt -> 200, 44 bytes, ETag "ec185bc08f4786af"`, reload with that tag `-> 304, 0 bytes, Content-Length (absent)`, `HEAD -> 200` stating `Content-Length 44` and receiving 0 bytes, an unregistered path `-> 404, body "Not Found"` |
 
 ## What each example demonstrates
 
@@ -76,6 +78,11 @@ endpoint. The recorded output of the seven runs on JDK 17:
   socket, asserts a `POST` to it is a 405, and asserts a second claim on the id `reports` aborts the assembly.
 - **`OpenApiExample`** — `ApiDocument.build()` refuses a malformed document up front, and `document.handler()` serves
   the deterministic JSON from its own route on the application's router.
+- **`StaticFileExample`** — `StaticContent.file()` as the handler it is: a directory listed at assembly, one route per
+  file, an `ETag` computed from the bytes, and the three framing answers measured over a socket (200 with a length, 304
+  with neither body nor length, HEAD stating a length it does not send). It also demonstrates the trap ADR-0054 records:
+  `HEAD` is a route an application registers, not a `GET` the framework folds in, so a GET-only file answers 405.
+  This program is `barezen-content`'s consumer in shipped code (ADR-0051, ADR-0054).
 
 ## Reading order
 

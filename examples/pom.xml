@@ -39,6 +39,10 @@
     </dependency>
     <dependency>
       <groupId>com.barezen</groupId>
+      <artifactId>barezen-content</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.barezen</groupId>
       <artifactId>barezen-security</artifactId>
     </dependency>
     <dependency>

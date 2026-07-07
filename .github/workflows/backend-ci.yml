@@ -52,6 +52,12 @@ jobs:
         # (ADR-0032).
         run: ./scripts/check-class-major.sh
 
+      - name: Assert the documentation site is self-consistent
+        # site/ left the reactor in 3.8, so nothing in `mvn verify` looks at it any more (ADR-0054). This is the step
+        # that keeps its links, its language pairing and its all-relative addressing honest — the guarantees the deleted
+        # barezen-site module's tests used to give.
+        run: ./scripts/check-site.sh
+
       - name: Upload coverage report
         if: matrix.java == 21
         uses: actions/upload-artifact@v4
