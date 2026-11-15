@@ -431,8 +431,6 @@ docs/adr/                   architecture decision records, 0001-0057
 docs/testkit/              quick start and the four worked guides (integration, security, database, openapi)
 docs/examples/             the run-a-main() classpath and what each example demonstrates
 docs/guide/                  the long-form developer guide (authoring a plugin, and the rest as it is written)
-docs/txt/                   the public API reference (`BAREZEN-WEB-PUBLIC-API-REFERENCE.md`) plus the archived
-                            phase prompts and audit specs the phases were executed against
 scripts/                    build guards
 ```
 
