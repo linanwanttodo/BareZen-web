@@ -35,7 +35,7 @@ BareZen-web 是一个轻量、模块化、插件化的 Java Web 框架，包名 
 
 ## 快速开始
 
-环境要求：JDK 17 及以上，Maven 3.9 及以上。
+环境要求：JDK 17 及以上，Maven 3.9 及以上（当前构建在 Maven 3.9.12 上验证）。
 
 ```bash
 mvn verify
