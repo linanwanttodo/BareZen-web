@@ -16,7 +16,7 @@ HTTP 框架迟早会遇到“验证用户名与密码”的需求，但框架不
 
 ## 动手
 
-先固定生产参数，再提供测试入口。`PasswordHasher.java:34` 定义算法 `PBKDF2WithHmacSHA256`，默认六十万次迭代，盐十六字节，派生密钥三十二字节。`standard()` 创建新的 `SecureRandom`；`of(int, SecureRandom)` 允许测试使用一千次迭代和固定随机源，但拒绝非正次数。不要把测试计数做成默认值，也不要让调用者传一个普通 `Random` 充当安全随机源。
+先固定生产参数，再提供测试入口。[PasswordHasher.java:34](../../framework/barezen-security/src/main/java/com/barezen/security/PasswordHasher.java#L34) 定义算法 `PBKDF2WithHmacSHA256`，默认六十万次迭代，盐十六字节，派生密钥三十二字节。`standard()` 创建新的 `SecureRandom`；`of(int, SecureRandom)` 允许测试使用一千次迭代和固定随机源，但拒绝非正次数。不要把测试计数做成默认值，也不要让调用者传一个普通 `Random` 充当安全随机源。
 
 ```java
 public static PasswordHasher standard() {
@@ -32,7 +32,7 @@ public static PasswordHasher of(int iterations, SecureRandom random) {
 }
 ```
 
-接着实现 `hash(String)`：每次生成新盐，调用 JDK 的 `SecretKeyFactory` 派生三十二字节，然后保存四段文本。源码在 `PasswordHasher.java:85`，格式是 `算法$次数$Base64盐$Base64密钥`。Base64 使用标准编码器，因为这是数据库编码而不是 URL；空密码也会被哈希，强度策略不应偷偷塞进这个类。
+接着实现 `hash(String)`：每次生成新盐，调用 JDK 的 `SecretKeyFactory` 派生三十二字节，然后保存四段文本。源码在 [PasswordHasher.java:85](../../framework/barezen-security/src/main/java/com/barezen/security/PasswordHasher.java#L85)，格式是 `算法$次数$Base64盐$Base64密钥`。Base64 使用标准编码器，因为这是数据库编码而不是 URL；空密码也会被哈希，强度策略不应偷偷塞进这个类。
 
 ```java
 byte[] salt = new byte[SALT_LENGTH];
@@ -43,7 +43,7 @@ return ALGORITHM + "$" + iterations + "$"
     + Base64.getEncoder().encodeToString(derived);
 ```
 
-最后实现 `verify(String, String)`。先按四个字段拆分，核对算法、解析次数、解码盐与期望密钥，再检查长度。只有这些结构检查通过，才使用哈希内记录的次数重新派生；比较使用 `MessageDigest.isEqual`，不要用字符串 `equals` 暴露前缀比较的时序差异。解析失败返回 `false`，而不是把损坏记录的内容拼进异常。真正的派生调用位于 `PasswordHasher.java:134`，使用 `PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH * 8)`。
+最后实现 `verify(String, String)`。先按四个字段拆分，核对算法、解析次数、解码盐与期望密钥，再检查长度。只有这些结构检查通过，才使用哈希内记录的次数重新派生；比较使用 `MessageDigest.isEqual`，不要用字符串 `equals` 暴露前缀比较的时序差异。解析失败返回 `false`，而不是把损坏记录的内容拼进异常。真正的派生调用位于 [PasswordHasher.java:134](../../framework/barezen-security/src/main/java/com/barezen/security/PasswordHasher.java#L134)，使用 `PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH * 8)`。
 
 ```java
 if (parts.length != 4 || !ALGORITHM.equals(parts[0])) {

@@ -14,18 +14,18 @@ BareZen 的定位是理解 HTTP 框架内部原理的学习项目，加上可以
 
 | 章 | 目录 | 要解决的问题 |
 |:---|:---|:---|
-| 1 | `01-what-this-project-is` | 项目是什么，手写哪些规则才真正产生学习价值 |
-| 2 | `02-principles` | 字节码基线、运行期能力、模块方向和架构门禁 |
-| 3 | `03-lifecycle` | 应用状态机、两阶段启动、失败回滚和最佳努力停机 |
-| 4 | `04-http-contract` | 不绑定服务器的 Request、Response、Headers 与无体状态 |
-| 5 | `05-router` | 原始路径段、参数提取、字面量优先和不可变路由表 |
-| 6 | `06-jdk-http-adapter` | 契约到真实套接字的桥接、请求体上限和线程归属 |
-| 7 | `07-configuration-and-assembly` | 配置快照、显式工厂装配和对象所有权 |
-| 8 | `08-static-content` | 一文件一 Handler、ETag、条件请求与 304 分帧 |
-| 9 | `09-security` | PBKDF2、可撤销会话、认证三态和拒绝路径 |
-| 10 | `10-data` | DataSource 边界、显式事务和迁移历史 |
-| 11 | `11-plugin-spi` | 插件描述符、ServiceLoader 发现、路由贡献和注册校验 |
-| 12 | `12-openapi-testkit` | 声明式 OpenAPI、确定性 JSON 与真实端口集成测试 |
+| 1 | [01-what-this-project-is](01-what-this-project-is/README.md) | 项目是什么，手写哪些规则才真正产生学习价值 |
+| 2 | [02-principles](02-principles/README.md) | 字节码基线、运行期能力、模块方向和架构门禁 |
+| 3 | [03-lifecycle](03-lifecycle/README.md) | 应用状态机、两阶段启动、失败回滚和最佳努力停机 |
+| 4 | [04-http-contract](04-http-contract/README.md) | 不绑定服务器的 Request、Response、Headers 与无体状态 |
+| 5 | [05-router](05-router/README.md) | 原始路径段、参数提取、字面量优先和不可变路由表 |
+| 6 | [06-jdk-http-adapter](06-jdk-http-adapter/README.md) | 契约到真实套接字的桥接、请求体上限和线程归属 |
+| 7 | [07-configuration-and-assembly](07-configuration-and-assembly/README.md) | 配置快照、显式工厂装配和对象所有权 |
+| 8 | [08-static-content](08-static-content/README.md) | 一文件一 Handler、ETag、条件请求与 304 分帧 |
+| 9 | [09-security](09-security/README.md) | PBKDF2、可撤销会话、认证三态和拒绝路径 |
+| 10 | [10-data](10-data/README.md) | DataSource 边界、显式事务和迁移历史 |
+| 11 | [11-plugin-spi](11-plugin-spi/README.md) | 插件描述符、ServiceLoader 发现、路由贡献和注册校验 |
+| 12 | [12-openapi-testkit](12-openapi-testkit/README.md) | 声明式 OpenAPI、确定性 JSON 与真实端口集成测试 |
 
 建议按顺序阅读。第四章的契约是第五章路由器的输入，第六章适配器又同时消费路由器和契约；跳着读不会得到编译错误，却会错过“为什么边界画在这里”的因果。每章末尾都是检查点，它把该章的口头承诺变成命令、输出和失败条件。
 
