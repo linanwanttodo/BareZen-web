@@ -8,7 +8,7 @@ HTTP 契约、路由器和 adapter 已经能够处理普通响应，但“从磁
 
 本步采用“一文件一 Handler”，不是“一个目录一个 Handler”。Router 只接受字面路径段或单个 `{name}` 参数段，没有通配符、前缀匹配或多段捕获。静态服务器常见的 `/assets/*` 若引入，一个请求就可能同时命中静态规则和业务规则，路由器必须增加优先级。框架选择枚举应用已知的文件，把匹配保持为唯一答案。
 
-真实变化位于 `24a0240`（主分支对应快照为 `326c25a`）：新增模块 POM、StaticContent、StaticContentTest、RawHttp、架构测试和 ClassMajorContractTest，并把模块加入根 reactor 与 BOM。提交同时包含 TLS，说明一次提交可以覆盖几个主题；阅读时仍应按文件切片理解，不应把 TLS 也算成静态内容 API。
+真实变化位于 `326c25a`：新增模块 POM、StaticContent、StaticContentTest、RawHttp、架构测试和 ClassMajorContractTest，并把模块加入根 reactor 与 BOM。提交同时包含 TLS，说明一次提交可以覆盖几个主题；阅读时仍应按文件切片理解，不应把 TLS 也算成静态内容 API。
 
 ## 先想清楚再写
 
@@ -56,7 +56,7 @@ Router router = Router.builder()
     .build();
 ```
 
-HEAD 为什么必须写两次路由，下一步会用 `c2ca0f8` 的真实失败说明。Handler 本身不读取 method，只按调用者注册的入口执行；是否抑制正文由 adapter 决定。
+HEAD 为什么必须写两次路由，下一步会用 `9aeb03e` 的真实失败说明。Handler 本身不读取 method，只按调用者注册的入口执行；是否抑制正文由 adapter 决定。
 
 请求期核心只是“读当前字节，失败返回固定 404”：
 

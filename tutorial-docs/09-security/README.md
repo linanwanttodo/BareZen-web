@@ -4,7 +4,7 @@
 
 前八章已经能把字节变成请求、把请求送进正确的 Handler，也能把配置与显式对象装配起来。现在缺的不是一个“登录接口”，而是一组能在请求进入业务代码前回答的问题：客户端提供了什么证明，这份证明是否成立，成立之后的主体被允许做什么，以及每一种拒绝怎样保证业务 Handler 从未运行。安全模块把这些答案固定在普通 Web 契约之上，不修改 `Request`，不向适配器泄露策略，也不给每个 Handler 增加一个隐式上下文参数。
 
-本章的建造顺序来自三个可以逐个检出的提交。`7d913bf` 一次加入十二个生产类，已经包含密码摘要、不透明会话、三态认证、权限决策与 Handler 装饰器；它不是先做一个登录页再补安全，而是先确定边界和拒绝语义。`f315e21` 增加十四个测试与架构文件，把“允许、匿名、失败、拒绝、组件损坏”变成可执行矩阵。`390f57c` 才把五条决定写进 ADR，并记录 99 项测试、98.96% 覆盖率与十四次变异探针。这个顺序提醒读者：文档不是替代测试的事后说明，测试也不是注释的另一种排版。
+本章的建造顺序来自三个可以逐个检出的提交。`7d913bf` 一次加入十二个生产类，已经包含密码摘要、不透明会话、三态认证、权限决策与 Handler 装饰器；它不是先做一个登录页再补安全，而是先确定边界和拒绝语义。`f315e21` 增加十四个测试与架构文件，把“允许、匿名、失败、拒绝、组件损坏”变成可执行矩阵。`86bb626` 才把五条决定写进 ADR，并记录 99 项测试、98.96% 覆盖率与十四次变异探针。这个顺序提醒读者：文档不是替代测试的事后说明，测试也不是注释的另一种排版。
 
 最终形态可以概括为 `Credential → AuthenticationResult → SecurityContext → Authorization.Decision → delegate`。密码和会话是两条可以独立使用的领域能力，并不会自动接入中间件；应用需要编写 `Authentication` 把它们接到 `Authorization` 头。模块只依赖 `barezen-web`，适配器仅以 test scope 进入，所以同一装饰器理论上可以换一个适配器继续工作。它不是完整身份平台：没有用户表、注册、找回密码、CSRF、OAuth2/OIDC、分布式会话、自动锁定或注解安全。
 
@@ -25,12 +25,12 @@
 | --- | --- | --- |
 | `7d913bf6efd67f78d07665e50dd44fd1a6d24fa4` | 新增 12 个生产类，15 文件、1204 行新增、1 行删除 | 安全能力在第一次提交就是完整的契约与领域对象，不是散落的工具方法 |
 | `f315e2132e33bd64afcb714cbc843c86db40e195` | 新增 14 个测试、架构与字节码文件，1505 行新增 | 状态矩阵、凭证解析、会话撤销、keep-alive 隔离与七条架构规则 |
-| `390f57cefd7718b5bc874ea31bcee29e2a654e5c` | 新增 ADR-0033—0037，更新 README 与 ADR 索引 | 决定在实现与测试之后被集中陈述，包含非目标和重新开启条件 |
+| `86bb6261967f610c6be9f9d7258b7b6c242f4fbf` | 新增 ADR-0033—0037，更新 README 与 ADR 索引 | 决定在实现与测试之后被集中陈述，包含非目标和重新开启条件 |
 
 ```bash
 git show --stat 7d913bf
 git show f315e21 -- framework/barezen-security/src/test/java/com/barezen/security/SecurityMiddlewareTest.java
-git show 390f57c -- docs/adr/0034-authentication-has-three-states.md
+git show 86bb626 -- docs/adr/0034-authentication-has-three-states.md
 git log --oneline --all -- framework/barezen-security
 ```
 

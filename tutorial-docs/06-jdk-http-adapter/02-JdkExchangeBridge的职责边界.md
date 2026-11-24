@@ -8,7 +8,21 @@
 
 进入方向最重要的约束是原始 target。URI 的 raw path 与 raw query 保留百分号编码和 `+`，Router 第五章已经按这些原始段工作；如果 bridge 先解码再构造 Request，之前所有关于 `%2F`、尾斜杠和字面量大小写的测试都会在真实服务器上失真。离开方向最重要的约束是 framing：body 长度、状态是否允许 body、请求方法是否抑制 body，是三个需要分别判断的事实。
 
-## 涉及的核心文件与变更
+## 先想清楚再写
+
+进入方向先取 `exchange.getRequestMethod()`，再用 `HttpMethod.of(...)` 折叠九个标准方法；URI 则分别取 `getRawPath()` 与 `getRawQuery()`。path 不允许 null，因为 Request 的 path 必须以 `/` 开头或等于 `*`；query 可以 null，因为 Optional 要区分“没有 `?`”与“有 `?` 但为空”。直接把 query 变成空字符串会抹掉这个区别，也会让 Handler 对原始请求目标作出错误判断。
+
+Headers 转换必须承认 JDK 的事实：请求字段名可能被 canonicalize，到达顺序不保留，但同名多个值及其顺序仍可读取。BareZen Headers 提供大小写不敏感匹配和逐值保存，因此 bridge 不需要伪造原始拼写。它也不能把重复值用逗号拼起来，尤其 `Set-Cookie` 在响应方向必须逐行 add；否则应用看到的 cookie 数量会改变。
+
+请求体读取前先看可信的 declared Content-Length。若单个值能解析且已经超过 limit，bridge 在触碰输入流之前抛 `BodyLimit.Exceeded`。这能阻止“声明 10 GiB，实际只发送 1 KiB”迫使服务器等待或分配巨大 buffer。重复、无法解析的值返回 -1，表示没有可信长度，随后由有界读取和 JDK parser 处理；bridge 不自己实现完整 HTTP parser。
+
+离开方向不能把 `body.length` 原样传给 JDK。JDK 的 `sendResponseHeaders` 对 length 0 使用 chunked 语义，而 BareZen 的空 200 应明确是 `Content-Length: 0`；所以空 body 通常传 -1，让 JDK 写零长度，不启用 Transfer-Encoding。正长度 body 传实际字节数。1xx、204、304 不允许 body，因此不声明长度。
+
+HEAD 更不能简单“少写 body”。Handler 返回的 `byte[]` 表示 GET 会发送的 representation，bridge 需要把它的长度写进响应字段，再用 -1 告诉 JDK 不发送 body。是否抑制不能看折叠后的 `HttpMethod.HEAD`，因为 JDK 自己比较原始 token；这一步由 dispatcher 的 `writesBody(exchange)` 传入准确布尔值，本章第 5 步会展开。
+
+错误响应也走同一个 `send`。404 的 `Not Found`、405 的 `Method Not Allowed`、500 的 `Internal Server Error` 都是普通 byte[]，因此 HEAD 请求同样得到 representation length 而不发送字节。bridge 不把异常 message、请求 path 或 body limit 拼进错误正文，避免把内部细节反射给客户端。
+
+## 动手
 
 - [JdkExchangeBridge.java:81](../../framework/barezen-http-jdk/src/main/java/com/barezen/http/jdk/JdkExchangeBridge.java#L81)：`toRequest(HttpExchange, BodyLimit)` 构造 Request。
 - [JdkExchangeBridge.java:122](../../framework/barezen-http-jdk/src/main/java/com/barezen/http/jdk/JdkExchangeBridge.java#L122)：解析单个 Content-Length，异常或重复值不作为可信声明。
@@ -25,21 +39,17 @@
 
 `a2e05fa` 的 bridge 已有原始 target、Headers 转换和基本 framing；后续 BodyLimit 给 `toRequest` 增加参数，HEAD 修复改变 `send`，TLS 则不改变 bridge。阅读提交差异时，应把“桥的基本形状很早稳定”和“边界规则后来被测试修正”分开。
 
-## 为什么这样设计
+## 常见的第一次写错
 
-进入方向先取 `exchange.getRequestMethod()`，再用 `HttpMethod.of(...)` 折叠九个标准方法；URI 则分别取 `getRawPath()` 与 `getRawQuery()`。path 不允许 null，因为 Request 的 path 必须以 `/` 开头或等于 `*`；query 可以 null，因为 Optional 要区分“没有 `?`”与“有 `?` 但为空”。直接把 query 变成空字符串会抹掉这个区别，也会让 Handler 对原始请求目标作出错误判断。
+把 URI 的 decoded path 交给 Router 是最隐蔽的错误：普通 URL 看似正常，只有编码斜杠或点段请求会选错资源。若应用据此读文件，还可能形成路径边界误判。正确做法不是“解码后再 normalize”，而是保留 raw target，把解码留给确实需要语义值的消费者，并明确它在哪一层发生。
 
-Headers 转换必须承认 JDK 的事实：请求字段名可能被 canonicalize，到达顺序不保留，但同名多个值及其顺序仍可读取。BareZen Headers 提供大小写不敏感匹配和逐值保存，因此 bridge 不需要伪造原始拼写。它也不能把重复值用逗号拼起来，尤其 `Set-Cookie` 在响应方向必须逐行 add；否则应用看到的 cookie 数量会改变。
+把请求 Headers 当作 Map<String, String> 会静默丢重复值；把响应 Headers 全部合成逗号分隔的一行又会破坏 Set-Cookie。只按大小写不敏感查找、不保存每个值，无法表达 HTTP 的多字段模型。Name canonicalize 本身不是 bug，但若文档声称保留客户端拼写，就会与真实行为冲突。
 
-请求体读取前先看可信的 declared Content-Length。若单个值能解析且已经超过 limit，bridge 在触碰输入流之前抛 `BodyLimit.Exceeded`。这能阻止“声明 10 GiB，实际只发送 1 KiB”迫使服务器等待或分配巨大 buffer。重复、无法解析的值返回 -1，表示没有可信长度，随后由有界读取和 JDK parser 处理；bridge 不自己实现完整 HTTP parser。
+错误归属也常被混淆。畸形请求行可能在 exchange 前就被 JDK 拒绝，adapter 无法改写它的 HTML 400；进入 bridge 后契约拒绝 target 或读取失败，才是 adapter 的纯文本 400；Handler 抛 RuntimeException 才是 500。若 catch 所有 Throwable，连 Error 也翻译成 500，会掩盖 JVM 级问题；若响应已经提交后再 catch IOException 并尝试写第二个状态，HTTP 连接会出现无法定义的第二回复。
 
-离开方向不能把 `body.length` 原样传给 JDK。JDK 的 `sendResponseHeaders` 对 length 0 使用 chunked 语义，而 BareZen 的空 200 应明确是 `Content-Length: 0`；所以空 body 通常传 -1，让 JDK 写零长度，不启用 Transfer-Encoding。正长度 body 传实际字节数。1xx、204、304 不允许 body，因此不声明长度。
+最后，不要为了错误页“更友好”而返回 JSON envelope 或堆栈。当前政策是短文本、无敏感细节、状态长度可由字节推导。模板、国际化或统一错误 DTO 都可以是未来应用层能力，但不应先塞进 bridge。桥的可测试性来自规则少而明确，不来自错误页复杂。
 
-HEAD 更不能简单“少写 body”。Handler 返回的 `byte[]` 表示 GET 会发送的 representation，bridge 需要把它的长度写进响应字段，再用 -1 告诉 JDK 不发送 body。是否抑制不能看折叠后的 `HttpMethod.HEAD`，因为 JDK 自己比较原始 token；这一步由 dispatcher 的 `writesBody(exchange)` 传入准确布尔值，第五章会展开。
-
-错误响应也走同一个 `send`。404 的 `Not Found`、405 的 `Method Not Allowed`、500 的 `Internal Server Error` 都是普通 byte[]，因此 HEAD 请求同样得到 representation length 而不发送字节。bridge 不把异常 message、请求 path 或 body limit 拼进错误正文，避免把内部细节反射给客户端。
-
-## 怎么验证
+## 怎么确认这一步没造错
 
 Header/Body 与端到端测试分别覆盖桥的两侧：
 
@@ -59,17 +69,7 @@ mvn -o -B -ntp -pl framework/barezen-http-jdk -am test \
 
 反向验证可分别污染入口与出口：把 `getRawPath()` 改成 `getPath()`，编码路径测试应失败；把响应重复字段改成覆盖，Set-Cookie 测试应失败；把空 body 的 declared 从 -1 改成 0，测试应看到 chunked；在 404 正文加入 path，错误语义测试应失败。桥没有独立单元测试并不妨碍这些真实 socket 测试，因为 `HttpExchange` 不能轻易伪造，而最终契约本来就发生在 wire 上。
 
-## 常见错误与失败后果
-
-把 URI 的 decoded path 交给 Router 是最隐蔽的错误：普通 URL 看似正常，只有编码斜杠或点段请求会选错资源。若应用据此读文件，还可能形成路径边界误判。正确做法不是“解码后再 normalize”，而是保留 raw target，把解码留给确实需要语义值的消费者，并明确它在哪一层发生。
-
-把请求 Headers 当作 Map<String, String> 会静默丢重复值；把响应 Headers 全部合成逗号分隔的一行又会破坏 Set-Cookie。只按大小写不敏感查找、不保存每个值，无法表达 HTTP 的多字段模型。Name canonicalize 本身不是 bug，但若文档声称保留客户端拼写，就会与真实行为冲突。
-
-错误归属也常被混淆。畸形请求行可能在 exchange 前就被 JDK 拒绝，adapter 无法改写它的 HTML 400；进入 bridge 后契约拒绝 target 或读取失败，才是 adapter 的纯文本 400；Handler 抛 RuntimeException 才是 500。若 catch 所有 Throwable，连 Error 也翻译成 500，会掩盖 JVM 级问题；若响应已经提交后再 catch IOException 并尝试写第二个状态，HTTP 连接会出现无法定义的第二回复。
-
-最后，不要为了错误页“更友好”而返回 JSON envelope 或堆栈。当前政策是短文本、无敏感细节、状态长度可由字节推导。模板、国际化或统一错误 DTO 都可以是未来应用层能力，但不应先塞进 bridge。桥的可测试性来自规则少而明确，不来自错误页复杂。
-
-## 本步交付物
+## 此刻的代码长什么样
 
 本步交付包内 final 的 `JdkExchangeBridge`：Request 转换保留 raw path/query、Headers 多值和 body 字节；Response 转换逐值写字段、按状态和 HEAD 推导 framing；五个最小错误响应复用同一写出路径。dispatcher 负责选择，bridge 负责翻译，exchange 最终由 dispatcher 关闭。
 

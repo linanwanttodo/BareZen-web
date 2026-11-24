@@ -6,7 +6,7 @@
 
 这条边界让框架保持轻，但不意味着可以随便转发 JDBC。`Database` 若拿到 URL 自己 `Class.forName`，测试里的 H2 就会被带进生产假设；若让每个 repository 自己开关事务，多个写操作就可能分别提交；若把连接放进 `ThreadLocal`，同一线程的下一个请求会继承一个隐式工作单元。本章的每个 API 都是在关闭这些容易发生的错误，而不是提供一层“更方便的 SQL 别名”。
 
-当前主线建造过程由四个提交串起来。`5c2cd05` 加入数据模块、九个生产类型、根 POM 与 BOM 坐标，此时事务与迁移契约已经存在；`25337a1` 加入真实 H2、JDK 动态代理记录器、六类测试与架构门禁；`b143aa4` 写下 ADR-0038—0040，把驱动无关、事务归属和迁移历史写成可复审的决定；`bde3469` 加入七个示例，其中数据库示例把公共 API 串成可运行路径。测试先证明行为，ADR 再解释取舍，示例最后证明陌生人只靠公开类型也能开始。
+当前主线建造过程由四个提交串起来。`5c2cd05` 加入数据模块、九个生产类型、根 POM 与 BOM 坐标，此时事务与迁移契约已经存在；`25337a1` 加入真实 H2、JDK 动态代理记录器、六类测试与架构门禁；`b143aa4` 写下 ADR-0038—0040，把驱动无关、事务归属和迁移历史写成可复审的决定；`0971abc` 加入七个示例，其中数据库示例把公共 API 串成可运行路径。测试先证明行为，ADR 再解释取舍，示例最后证明陌生人只靠公开类型也能开始。
 
 最终 API 可以压缩成三句话：`query` 与 `executeUpdate` 每次借一条连接，调用结束就关闭；`transaction` 把同一条 `Transaction` 显式传给回调，由框架且只由框架决定提交；`Migrator.migrate` 跳过已记录版本、拒绝倒序补号、逐版本提交，并以历史表而不是“schema 看起来怎样”作为权威。它不是 Spring Boot 替代品，没有自动配置数据源、ORM、实体变更追踪、连接池、仓库基类或注解事务。
 
@@ -24,19 +24,19 @@
 
 | 提交 | 当前主线上的真实变化 | 阅读重点 |
 | --- | --- | --- |
-| `5c2cd0572cd524880e75fb52b5deb9e0391ae901` | 新增 `barezen-data` 模块与十个生产类型，12 文件、1172 行新增 | 第一次提交就包含 DataSource、事务、迁移，不是先 CRUD 后补边界 |
+| `5c2cd0572cd524880e75fb52b5deb9e0391ae901` | 新增 `barezen-data` 模块与九个生产类型，12 文件、1172 行新增 | 第一次提交就包含 DataSource、事务、迁移，不是先 CRUD 后补边界 |
 | `25337a1f3c62ae09ad4d402142031e244857ad90` | 新增 H2 fixture、RecordingDataSource、行为/生命周期/迁移/架构/字节码测试，9 文件、2023 行新增 | 用真实驱动和 JDK 代理证明调用顺序，而不是用自写 fake 证明想象 |
 | `b143aa4bba4c40eb453bf81d066d9f5fef3d8c7c` | 新增 ADR-0038—0040，更新 README 与 ADR 索引 | 记录被否决的 ORM、环境配置、ambient transaction 与 DDL 回滚承诺 |
-| `bde346943c2bd0f2a41bedafc2552160b875e6a5` | 新增 examples 模块及 DatabaseExample 与其测试 | 应用选 H2，框架只接收 DataSource；提交、查询、回滚串成一条公共 API 路径 |
+| `0971abc64b56f72430f572ffa9536cd0815997c5` | 新增 examples 叶子模块与七个可运行示例，16 文件、1089 行新增 | 应用选 H2，框架只接收 DataSource；DatabaseExample 把事务、查询和回滚串成公共 API 路径 |
 
 ```bash
 git show --stat 5c2cd05
 git show 25337a1 -- framework/barezen-data/src/test/java/com/barezen/data/RecordingDataSource.java
 git show b143aa4 -- docs/adr/0040-migration-history-authority-and-measured-ddl-rollback.md
-git show bde3469 -- examples/src/main/java/com/barezen/examples/database/DatabaseExample.java
+git show 0971abc -- examples/src/main/java/com/barezen/examples/database/DatabaseExample.java
 ```
 
-仓库还保留 `a45eb6a`、`040b4df` 等平行分支坐标，其对应实现/测试快照与主线提交内容相同，但不是当前 `HEAD` 的祖先。本教程统一使用 `git log HEAD` 能追溯的短哈希；`git log --all` 会把不同分支的相同阶段一起显示，不能据此误判执行顺序。可用 `git merge-base --is-ancestor 5c2cd05 HEAD` 验证本章采用的主线坐标。
+本教程统一使用 `git log HEAD` 能追溯的主线短哈希；`git log --all` 会把不同分支的相同阶段一起显示，不能据此误判执行顺序。可用 `git merge-base --is-ancestor 5c2cd05 HEAD`、`git merge-base --is-ancestor 25337a1 HEAD` 与 `git merge-base --is-ancestor 0971abc HEAD` 验证本章采用的主线坐标。
 
 ## 步骤导航
 

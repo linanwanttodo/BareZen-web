@@ -6,20 +6,7 @@
 
 本章只携带五类事实：method、path、query、Headers 和 body。path/query 保持请求目标中的原始文本，body 是完整的内存字节副本。Request 不负责路由、解码、参数解析或流关闭，它只是应用能够信任的一份不可变输入。
 
-## 涉及的核心文件与变更
-
-- [Request.java:72](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L72)：唯一构造器，校验 method/path/headers，复制 body。
-- [Request.java:99](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L99)：path 原始读取。
-- [Request.java:112](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L112)：query 返回 Optional。
-- [Request.java:136](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L136)：body 每次返回副本。
-- [HttpMethod.java:86](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L86)：标准方法忽略大小写归一，其他方法保持原始 token。
-- [RequestTest.java:21](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21)：表面、路径、查询、字节体、拒绝和日志脱敏测试。
-- [HttpMethodTest.java](../../framework/barezen-web/src/test/java/com/barezen/web/HttpMethodTest.java)：标准方法、未知方法与拒绝输入。
-- [ADR-0018 §6–§8](../../docs/adr/0018-http-is-a-contract-not-a-server.md#L238)：同步 Handler、原始值、字节体与防御性复制。
-
-`32ebc41` 建立 Request 时已经写入“无 uri、无 param、无 decoded twin”。`74ea0fb` 增加 OPTIONS * 的真实适配器测试后，Router 对星号目标做了小改；Request 本身接受 `*` 的规则来自请求目标语义，不是给某个服务器打补丁。
-
-## 为什么这样设计
+## 先想清楚再写
 
 构造器只有五个参数，读取器也只有五个事实加 toString。没有 scheme、remote address、protocol version、cookie 或 attribute，因为这些值或者属于 socket，或者需要字段级解析规则。以后真实消费者需要远端地址时，应由适配器以明确类型提供，而不是提前塞进所有 Request。
 
@@ -41,7 +28,26 @@ body 采用 byte[]，构造和读取都复制。适配器可以复用读缓冲�
 
 内存 body 的代价必须写清：大上传会被完整缓冲，无限缓冲会造成拒绝服务。上限属于适配器，因为它知道读取成本和部署策略；Request 作为通用值对象不能替所有应用拍一个数字。流式 body 需要额外定义关闭、取消和跨线程生命周期，不能作为当前 byte[] 的一个 boolean 开关。
 
-## 怎么验证
+## 动手
+
+- [Request.java:72](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L72)：唯一构造器，校验 method/path/headers，复制 body。
+- [Request.java:99](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L99)：path 原始读取。
+- [Request.java:112](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L112)：query 返回 Optional。
+- [Request.java:136](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L136)：body 每次返回副本。
+- [HttpMethod.java:86](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L86)：标准方法忽略大小写归一，其他方法保持原始 token。
+- [RequestTest.java:21](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21)：表面、路径、查询、字节体、拒绝和日志脱敏测试。
+- [HttpMethodTest.java](../../framework/barezen-web/src/test/java/com/barezen/web/HttpMethodTest.java)：标准方法、未知方法与拒绝输入。
+- [ADR-0018 §6–§8](../../docs/adr/0018-http-is-a-contract-not-a-server.md#L238)：同步 Handler、原始值、字节体与防御性复制。
+
+`32ebc41` 建立 Request 时已经写入“无 uri、无 param、无 decoded twin”。`74ea0fb` 增加 OPTIONS * 的真实适配器测试后，Router 对星号目标做了小改；Request 本身接受 `*` 的规则来自请求目标语义，不是给某个服务器打补丁。
+
+## 常见的第一次写错
+
+把 path 存成 URI 再调用 getPath，会让 `%2F` 提前变成段分隔符，Router 可能把客户端没有请求的资源匹配出来。把 query 空串当缺失，会让“重置过滤”误走默认分支。把未知方法折叠成 GET 或 UNKNOWN，要么执行错误操作，要么丢失诊断所需的原始 token。
+
+让 body() 返回内部数组，会让一个 Handler 修改另一个 Handler 正在读的请求；只复制构造、不复制读取同样不够。直接把 InputStream 放进 Request，又会引出谁关闭、未读完怎么办、装饰器调用两次怎么办等服务器相关问题。当前边界用完整副本避开这些问题，同时用适配器上限约束内存成本。
+
+## 怎么确认这一步没造错
 
 [RequestTest.Surface](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21) 用反射断言只有 method/path/query/headers/body/toString，没有 setter、put、remove。这个测试保护的不是代码风格，而是 Handler 能否信任输入不被后一个组件改写。
 
@@ -55,12 +61,6 @@ mvn -o -B -ntp -pl framework/barezen-web -am test \
 
 当前 RequestTest 有 19 项、HttpMethodTest 有 11 项。完整 web 模块检查点会再次运行它们，并同时验证 Router 与架构规则。
 
-## 常见错误与失败后果
-
-把 path 存成 URI 再调用 getPath，会让 `%2F` 提前变成段分隔符，Router 可能把客户端没有请求的资源匹配出来。把 query 空串当缺失，会让“重置过滤”误走默认分支。把未知方法折叠成 GET 或 UNKNOWN，要么执行错误操作，要么丢失诊断所需的原始 token。
-
-让 body() 返回内部数组，会让一个 Handler 修改另一个 Handler 正在读的请求；只复制构造、不复制读取同样不够。直接把 InputStream 放进 Request，又会引出谁关闭、未读完怎么办、装饰器调用两次怎么办等服务器相关问题。当前边界用完整副本避开这些问题，同时用适配器上限约束内存成本。
-
-## 本步交付物
+## 此刻的代码长什么样
 
 Request 现在是一份可信、不可变、保持原始编码的输入快照。应用知道请求方法和目标，却不会被框架强行解释资源语义。下一步定义另一半：Handler 如何返回状态、字段和字节，以及为什么“返回答案”比“直接写 socket”更利于组合。

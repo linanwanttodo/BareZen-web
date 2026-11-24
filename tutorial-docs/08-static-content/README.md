@@ -6,7 +6,7 @@
 
 最终形状很窄：应用在装配时选择文件，调用 `StaticContent.file(path)` 得到 Handler，再为 GET 和 HEAD 注册路由。每次请求读取当前字节、计算 ETag；`If-None-Match` 匹配就返回只有 ETag 的 304，否则返回 200、类型、ETag 与完整字节。Content-Length 不由 Handler 声明，adapter 从实际要写的字节派生；304 没有长度，HEAD 有表示长度但不发送正文。
 
-时间线上有两个不能混淆的消费者。`326c25a` 引入静态内容模块，最初服务于当时的文档站；`c2ca0f8` 又把文档站改为 GitHub Pages 直接托管的纯文件目录，并把消费者移到 `examples/staticcontent/StaticFileExample`。所以当前源码中，site 不是 Maven 模块，StaticContent 也不会替 Pages 生成 ETag。教程讲实现，也讲这个决定为什么改变了部署方式。
+时间线上有两个不能混淆的消费者。`326c25a` 引入静态内容模块，最初服务于当时的文档站；`9aeb03e` 又把文档站改为 GitHub Pages 直接托管的纯文件目录，并把消费者移到 `examples/staticcontent/StaticFileExample`。所以当前源码中，site 不是 Maven 模块，StaticContent 也不会替 Pages 生成 ETag。教程讲实现，也讲这个决定为什么改变了部署方式。
 
 完成本章后，你应能解释为什么不增加 `/assets/*`，为什么路径不能来自请求，为什么 ETag 取内容哈希而不是修改时间；你应能从真实套接字区分 200、304 与 HEAD 的正文和长度；还应能指出全量缓冲、平铺目录枚举和缺少 Cache-Control 的代价，而不是把这些边界说成已经支持的功能。
 
@@ -22,30 +22,29 @@
 
 1. [一文件一 Handler 的取舍](01-一文件一Handler的取舍.md)：建立独立 capability 模块，验证路径、类型与失败时机，理解为什么不把请求路径拼到目录。
 2. [条件请求与 304 的长度规则](02-条件请求与304的长度规则.md)：从字节生成强 ETag，处理弱比较、列表与通配符，并在套接字上守住 304 无长度。
-3. [消费者迁移与 HEAD 显式注册](03-消费者迁移与HEAD显式注册.md)：沿 `c2ca0f8` 删除文档站服务器，把示例变成消费者，同时记录 Pages 的相对 URL、`.html` 与目录枚举边界。
+3. [消费者迁移与 HEAD 显式注册](03-消费者迁移与HEAD显式注册.md)：沿 `9aeb03e` 删除文档站服务器，把示例变成消费者，同时记录 Pages 的相对 URL、`.html` 与目录枚举边界。
 4. [检查点：静态资源可用](04-检查点-静态资源可用.md)：组合运行 Handler、架构、字节码和示例测试，再直接运行 main 与站点检查脚本，核对实际输出。
 
 ## 本章提交地图
 
 | 提交 | 真实变化 | 阅读重点 |
 | --- | --- | --- |
-| `39f0ce1` | 记录 ADR-0028 与 ADR-0029 | 在静态消费者出现前，304 无长度与 HEAD 精确 token 规则已经写下 |
-| `24a0240` | 新增 content 模块、StaticContent、22 个行为测试、6 条架构规则和字节码测试 | 同一提交也含 TLS，但本章只追静态文件切片 |
-| `326c25a` | 主分支上的“增加 HTTPS 与静态文件服务”快照 | 与 `24a0240` 是同一内容在分支历史中的提交坐标 |
-| `c2ca0f8` | 删除 site/pom、Site 与 SiteTest，新增 StaticFileExample 及 5 个测试 | 部署目标改变了，消费者也必须改变；HEAD 405 在真实使用中暴露 |
+| `de55b51` | 记录 ADR-0028 与 ADR-0029 | 在静态消费者出现前，304 无长度与 HEAD 精确 token 规则已经写下 |
+| `326c25a` | 新增 content 模块、StaticContent、22 个行为测试、6 条架构规则和字节码测试 | 同一提交也含 TLS，但本章只追静态文件切片 |
+| `9aeb03e` | 删除 site/pom、Site 与 SiteTest，新增 StaticFileExample 及 5 个测试 | 部署目标改变了，消费者也必须改变；HEAD 405 在真实使用中暴露 |
 
 用提交切片阅读，避免只从最终文件猜测功能为何存在：
 
 ```bash
-git show --stat 39f0ce1
-git show --stat 24a0240
-git show 24a0240 -- framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java
-git show 24a0240 -- framework/barezen-content/src/test/java/com/barezen/content/StaticContentTest.java
-git show --stat c2ca0f8
-git show c2ca0f8 -- examples/src/main/java/com/barezen/examples/staticcontent/StaticFileExample.java
+git show --stat de55b51
+git show --stat 326c25a
+git show 326c25a -- framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java
+git show 326c25a -- framework/barezen-content/src/test/java/com/barezen/content/StaticContentTest.java
+git show --stat 9aeb03e
+git show 9aeb03e -- examples/src/main/java/com/barezen/examples/staticcontent/StaticFileExample.java
 ```
 
-`24a0240` 的提交说明还记录了一个诚实的建造过程：第一次 verify 有两条架构规则失败，修复方式是按真实依赖扩充 JDK allow-list，并用不可继承的基类替换匿名 HTTPS 配置器，而不是关闭门禁。这个细节与静态内容无直接行为关系，却说明本章所有“边界”最终都要由构建证明。
+`326c25a` 的提交说明还记录了一个诚实的建造过程：第一次 verify 有两条架构规则失败，修复方式是按真实依赖扩充 JDK allow-list，并用不可继承的基类替换匿名 HTTPS 配置器，而不是关闭门禁。这个细节与静态内容无直接行为关系，却说明本章所有“边界”最终都要由构建证明。
 
 ## 本章完成后的能力清单
 

@@ -6,25 +6,13 @@ Request 和 Response 的形状确定后，还剩下两个最容易在“示例�
 
 本章把 Header 建模为有序字段行，并在 Response 构造时拒绝不合法组合。目标是尽早、明确地失败，而不是等字节写到 socket 后由服务器丢弃、去重或发出相互矛盾的分帧信息。
 
-## 涉及的核心文件与变更
-
-- [Headers.java:90](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L90)：of 创建单字段，with 追加并返回新实例。
-- [Headers.java:128](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L128)：first 返回 Optional，大小写不敏感匹配。
-- [Headers.java:149](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L149)：values 保留同名字段的所有值和顺序。
-- [Headers.java:221](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L221)：名称 token 与值控制字符校验。
-- [HeadersTest.java:23](../../framework/barezen-web/src/test/java/com/barezen/web/HeadersTest.java#L23)：大小写、重复、缺失、安全拒绝、不可变和脱敏测试。
-- [Response.java:179](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L179)：1xx/204/304 非空 body 拒绝。
-- [Response.java:205](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L205)：两种 framing 字段拒绝。
-- [ResponseTest.java:197](../../framework/barezen-web/src/test/java/com/barezen/web/ResponseTest.java#L197)：无体状态与 framing 的全部构造测试。
-- [ADR-0029 决策表](../../docs/adr/0029-response-framing-and-304-length.md#L106)：200/204/304/HEAD/404/405/500 的最终 wire 矩阵。
-
-`32ebc41` 已建立 Headers 的有序行模型；`ef1f5db` 把响应体与 framing 规则加入 Response；`ace40f5` 后来用一张真实 socket 表把多个状态组合固定下来。本章先解释构造规则，第六章再用适配器证明它们与 wire 输出一致。
-
-## 为什么这样设计
+## 先想清楚再写
 
 HTTP 允许同名 Header 出现多次。Map<String,String> 只能保留一个值；把值逗号拼接也不可靠，因为 Set-Cookie 的值本身就可能含逗号和分号。Headers 因此保存每个字段行，values(name) 返回全部值，first(name) 只服务本来只有一个值的字段。
 
 匹配大小写不敏感，拼写保持原样。Headers.of("Content-Type", ...) 写入后仍显示 Content-Type，不会在构造时全部小写。names() 返回每个不同名称第一次出现时的拼写；若 Set-Cookie 和 set-cookie 同时出现，values 保留两行，names 只列一次。这样信息不丢，读取也有稳定规则。
+
+first 与 values 也不是同一需求的两种别名。first 刻意保留“第一个值”的 wire 顺序，适用于本来就只有单值的字段；values 才用于需要处理全部字段行的场景。框架没有替应用决定多个 Location、多个 Content-Type 或合并 Link 值时怎样解释，因为那是具体协议消费方的责任。把领域解析塞进 Headers，会让所有请求和响应都承担一套无法覆盖全部字段的规则，也会诱使调用方忽略 first 只返回首项这一事实。容器只保证可靠保存和查找，语义由使用这些字段的小类型决定。
 
 缺失与空值不同。没有 X-Cursor 时 first 是 Optional.empty()，发送 `X-Cursor:` 时是 Optional.of("")。这会影响“没有游标”和“游标位于起点”的业务解释。读取 null 名称直接拒绝，空字符串名称也拒绝，因为那不是一次有效的字段查询。
 
@@ -44,7 +32,27 @@ HEAD 与 304 常被混为一谈，但规则不同。HEAD 的 Response 可以保�
 
 因此 Response 只负责“这个状态能不能携带 body”和“Handler 能不能声明 framing”，不负责完整 wire 矩阵。200 空 body 的 Content-Length 是 0，200 非空是 body 长度，204/304 两种 framing 都缺席，HEAD 是 representation 长度且无 body，404/405/500 是普通 body 长度。Transfer-Encoding 在当前 JDK 适配器中始终不写。
 
-## 怎么验证
+## 动手
+
+- [Headers.java:90](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L90)：of 创建单字段，with 追加并返回新实例。
+- [Headers.java:128](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L128)：first 返回 Optional，大小写不敏感匹配。
+- [Headers.java:149](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L149)：values 保留同名字段的所有值和顺序。
+- [Headers.java:221](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L221)：名称 token 与值控制字符校验。
+- [HeadersTest.java:23](../../framework/barezen-web/src/test/java/com/barezen/web/HeadersTest.java#L23)：大小写、重复、缺失、安全拒绝、不可变和脱敏测试。
+- [Response.java:179](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L179)：1xx/204/304 非空 body 拒绝。
+- [Response.java:205](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L205)：两种 framing 字段拒绝。
+- [ResponseTest.java:197](../../framework/barezen-web/src/test/java/com/barezen/web/ResponseTest.java#L197)：无体状态与 framing 的全部构造测试。
+- [ADR-0029 决策表](../../docs/adr/0029-response-framing-and-304-length.md#L106)：200/204/304/HEAD/404/405/500 的最终 wire 矩阵。
+
+`32ebc41` 已建立 Headers 的有序行模型；`ef1f5db` 把响应体与 framing 规则加入 Response；`ace40f5` 后来用一张真实 socket 表把多个状态组合固定下来。本章先解释构造规则，第六章再用适配器证明它们与 wire 输出一致。
+
+## 常见的第一次写错
+
+用 Map 存 Header 会静默覆盖 Set-Cookie；用逗号 join 会把一个字段值的语法破坏成框架规定的组合规则。允许空名称或控制字符，会让无效字段进入输出；把 CR/LF 原样放进异常消息，则响应拆分防线在日志层被绕过。
+
+只对 204 禁 body，会漏掉 1xx 与 304；只拒绝 Content-Length 的非空值，会允许空值或重复 framing 进入 socket；只按精确大写匹配，则 content-length 可以绕过。正确规则是按字段名大小写不敏感地拒绝整个字段，而不是校验一个看似合理的数字。
+
+## 怎么确认这一步没造错
 
 Headers 测试按规则分组，而不是按方法逐个测试。大小写组覆盖三种拼写和前缀不匹配；重复组证明 Link 与 Set-Cookie 不拼接；缺失组证明 Optional 的空值语义；安全组覆盖非法名称、CR、LF、tab、BEL、DEL 和脱敏错误消息；不可变组证明 with 不影响原对象、返回列表不可修改。
 
@@ -58,12 +66,6 @@ mvn -o -B -ntp -pl framework/barezen-web -am test \
 
 当前 HeadersTest 23 项、ResponseTest 26 项。完整矩阵的真实 socket 测试属于 JDK 适配器，本章不能仅凭这两个单元测试类声称已经验证 HEAD 与 304 的 wire 输出。
 
-## 常见错误与失败后果
-
-用 Map 存 Header 会静默覆盖 Set-Cookie；用逗号 join 会把一个字段值的语法破坏成框架规定的组合规则。允许空名称或控制字符，会让无效字段进入输出；把 CR/LF 原样放进异常消息，则响应拆分防线在日志层被绕过。
-
-只对 204 禁 body，会漏掉 1xx 与 304；只拒绝 Content-Length 的非空值，会允许空值或重复 framing 进入 socket；只按精确大写匹配，则 content-length 可以绕过。正确规则是按字段名大小写不敏感地拒绝整个字段，而不是校验一个看似合理的数字。
-
-## 本步交付物
+## 此刻的代码长什么样
 
 Headers 现在完整保留字段行且不可变，Response 在构造时拒绝无体状态带 body 和 Handler 自带 framing。你已拥有可独立测试的 HTTP 契约。下一步运行模块检查点，证明这些能力不依赖真实服务器，并明确哪些 wire 行为仍需后续适配器验证。

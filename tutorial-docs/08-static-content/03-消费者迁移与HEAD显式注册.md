@@ -2,9 +2,9 @@
 
 ## 这一步要解决什么
 
-StaticContent 已经能独立通过行为测试，但架构决定不能没有真实消费者。`24a0240` 引入它时，文档站还是一个由 BareZen 提供 HTTP 服务的 `site/` Maven 模块；ADR-0051 也明确把那个站命名为第一个消费者。随后部署目标确定为 GitHub Pages：Pages 从分支与文件夹提供静态文件，不运行 BareZen 的 main、adapter 或 ETag 逻辑。
+StaticContent 已经能独立通过行为测试，但架构决定不能没有真实消费者。`326c25a` 引入它时，文档站还是一个由 BareZen 提供 HTTP 服务的 `site/` Maven 模块；ADR-0051 也明确把那个站命名为第一个消费者。随后部署目标确定为 GitHub Pages：Pages 从分支与文件夹提供静态文件，不运行 BareZen 的 main、adapter 或 ETag 逻辑。
 
-`c2ca0f8` 因此不是小范围清理，而是一次消费者迁移。它删除 `site/pom.xml`、`Site.java` 和 `SiteTest.java`，把资源树摊平为 `site/index.html`、`site/docs/*.html`、`site/zh/...` 与 `site/assets/site.css`，同时新增 `examples/staticcontent/StaticFileExample` 和对应 TestKit 测试。内容模块不再被框架内部服务器消费，而由一个公开 API 示例承担真实运行证据。
+`9aeb03e` 因此不是小范围清理，而是一次消费者迁移。它删除 `site/pom.xml`、`Site.java` 和 `SiteTest.java`，把资源树摊平为 `site/index.html`、`site/docs/*.html`、`site/zh/...` 与 `site/assets/site.css`，同时新增 `examples/staticcontent/StaticFileExample` 和对应 TestKit 测试。内容模块不再被框架内部服务器消费，而由一个公开 API 示例承担真实运行证据。
 
 这一步还暴露了一个原文档站没有测到的事实：Router 按客户端发送的方法匹配，GET-only 路由不会自动接受 HEAD。adapter 的 HEAD 规则只决定“已经有 Handler 的响应如何写”，不会替应用补一条路由。新的示例为每个文件同时注册 GET 与 HEAD，并增加一个 GET-only 对照测试，把 405 固定下来。
 
