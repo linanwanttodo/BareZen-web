@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Static content — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html" aria-current="page">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/content.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Static content</h1>
+  <p class="lede">barezen-content provides StaticContent — one file on disk served as one route, with ETag and conditional GET (304) support.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-content</code> module provides a single class: <code>StaticContent</code>. It creates a <code>Handler</code> for one file on disk. The handler reads the file per request, computes an ETag from the content bytes, and answers 304 to a client that already has the current version.</p>
+
+  <p>Design decisions:</p>
+  <ul>
+    <li><strong>One handler per file.</strong> The router has no wildcard or prefix match, so static files are enumerated — one route per asset.</li>
+    <li><strong>ETag from content, not from the clock.</strong> A SHA-256 hash of the bytes changes exactly when the representation does, making it correct across restarts and machines.</li>
+    <li><strong>Whole file in memory.</strong> Suitable for stylesheets, favicons, and documentation pages. Not for large files (videos, downloads).</li>
+    <li><strong>Missing file returns 404.</strong> No stack trace, no directory listing.</li>
+  </ul>
+
+  <h2>Basic usage</h2>
+  <p>Create a handler for a single file. The content type is inferred from the file extension:</p>
+  <pre><code>import com.barezen.content.StaticContent;
+import java.nio.file.Path;
+
+Handler cssHandler = StaticContent.file(Path.of("public/styles.css"));
+Handler jsHandler = StaticContent.file(Path.of("public/app.js"));
+Handler imgHandler = StaticContent.file(Path.of("public/logo.png"));</code></pre>
+
+  <h2>Registering routes</h2>
+  <p>Register each static file as a route. Because the router matches exact paths, you register one route per file:</p>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/styles.css",
+        StaticContent.file(Path.of("public/styles.css")))
+    .route(HttpMethod.GET, "/app.js",
+        StaticContent.file(Path.of("public/app.js")))
+    .route(HttpMethod.GET, "/logo.png",
+        StaticContent.file(Path.of("public/logo.png")))
+    .build();</code></pre>
+
+  <h3>HEAD support</h3>
+  <p>If the representation's length should be knowable to a client that asks with HEAD, register the same handler on both GET and HEAD:</p>
+  <pre><code>Handler cssHandler = StaticContent.file(Path.of("public/styles.css"));
+
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/styles.css", cssHandler)
+    .route(HttpMethod.HEAD, "/styles.css", cssHandler)
+    .build();</code></pre>
+
+  <h2>Custom content type</h2>
+  <p>Override the inferred content type by providing it explicitly:</p>
+  <pre><code>// Serve a .json file as application/manifest+json
+Handler manifest = StaticContent.file(
+    Path.of("public/manifest.json"),
+    "application/manifest+json");
+
+// Serve a .html file with a custom charset
+Handler page = StaticContent.file(
+    Path.of("public/index.html"),
+    "text/html; charset=utf-8");</code></pre>
+
+  <h2>Supported MIME types</h2>
+  <p><code>StaticContent.contentTypeOf()</code> maps file extensions to MIME types using a fixed table (not platform-dependent):</p>
+  <table>
+    <tr><th>Extension</th><th>Content-Type</th></tr>
+    <tr><td><code>.html</code>, <code>.htm</code></td><td><code>text/html; charset=utf-8</code></td></tr>
+    <tr><td><code>.css</code></td><td><code>text/css; charset=utf-8</code></td></tr>
+    <tr><td><code>.js</code>, <code>.mjs</code></td><td><code>text/javascript; charset=utf-8</code></td></tr>
+    <tr><td><code>.json</code>, <code>.map</code></td><td><code>application/json</code></td></tr>
+    <tr><td><code>.txt</code>, <code>.md</code></td><td><code>text/plain; charset=utf-8</code></td></tr>
+    <tr><td><code>.xml</code></td><td><code>application/xml</code></td></tr>
+    <tr><td><code>.svg</code></td><td><code>image/svg+xml</code></td></tr>
+    <tr><td><code>.png</code></td><td><code>image/png</code></td></tr>
+    <tr><td><code>.jpg</code>, <code>.jpeg</code></td><td><code>image/jpeg</code></td></tr>
+    <tr><td><code>.gif</code></td><td><code>image/gif</code></td></tr>
+    <tr><td><code>.webp</code></td><td><code>image/webp</code></td></tr>
+    <tr><td><code>.ico</code></td><td><code>image/x-icon</code></td></tr>
+    <tr><td><code>.woff</code></td><td><code>font/woff</code></td></tr>
+    <tr><td><code>.woff2</code></td><td><code>font/woff2</code></td></tr>
+    <tr><td><code>.wasm</code></td><td><code>application/wasm</code></td></tr>
+    <tr><td><code>.pdf</code></td><td><code>application/pdf</code></td></tr>
+    <tr><td>Unknown</td><td><code>application/octet-stream</code></td></tr>
+  </table>
+
+  <h2>ETag and conditional GET</h2>
+  <p>The handler computes a strong ETag from the file content using SHA-256 (first 8 bytes, hex-encoded, in quotes). When a client sends <code>If-None-Match</code> with a matching ETag, the handler returns <code>304 Not Modified</code> with no body.</p>
+
+  <h3>How it works</h3>
+  <ol>
+    <li>Client requests <code>GET /styles.css</code></li>
+    <li>Server responds with <code>200 OK</code>, body, and <code>ETag: "a1b2c3d4e5f60708"</code></li>
+    <li>Later, client requests <code>GET /styles.css</code> with <code>If-None-Match: "a1b2c3d4e5f60708"</code></li>
+    <li>Server reads the file, computes the same ETag, and returns <code>304 Not Modified</code> with no body</li>
+  </ol>
+
+  <h3>ETag format</h3>
+  <p>The ETag is a strong tag: the first 8 bytes of the content's SHA-256 hash, hex-encoded, enclosed in double quotes. For example: <code>"a1b2c3d4e5f60708"</code>. This provides 2^64 values — collision-free for the set of files one deployment serves.</p>
+
+  <h3>If-None-Match handling</h3>
+  <p>The handler supports the three shapes defined by RFC 9110:</p>
+  <ul>
+    <li><strong>Wildcard.</strong> <code>If-None-Match: *</code> matches any ETag.</li>
+    <li><strong>Comma-separated list.</strong> <code>If-None-Match: "abc", "def"</code> matches if any tag matches.</li>
+    <li><strong>Weak tags.</strong> <code>If-None-Match: W/"abc"</code> is treated the same as <code>"abc"</code> for conditional GET.</li>
+  </ul>
+
+  <h2>Error handling</h2>
+  <h3>File not found at construction</h3>
+  <p>If the file does not exist or is not a regular file at construction time, <code>StaticContent.file()</code> throws <code>IllegalArgumentException</code>:</p>
+  <pre><code>// Throws IllegalArgumentException if the file does not exist
+Handler handler = StaticContent.file(Path.of("public/missing.css"));</code></pre>
+
+  <h3>File disappears at request time</h3>
+  <p>If the file exists at construction but is deleted before a request arrives, the handler returns <code>404 Not Found</code> — the same plain answer the adapters use for their own 404s. No path is leaked, no stack trace is exposed.</p>
+
+  <h3>Blank content type</h3>
+  <p>A blank content type is refused at construction. A byte stream with no type is a browser guessing, and the framework refuses to be that browser.</p>
+
+  <h2>Dynamic asset registration</h2>
+  <p>For a directory of assets, enumerate them at startup:</p>
+  <pre><code>Path assetsDir = Path.of("public");
+Router.Builder builder = Router.builder();
+
+try (DirectoryStream&lt;Path&gt; stream = Files.newDirectoryStream(assetsDir)) {
+    for (Path file : stream) {
+        if (Files.isRegularFile(file)) {
+            String name = file.getFileName().toString();
+            String path = "/" + name;
+            builder.route(HttpMethod.GET, path, StaticContent.file(file));
+        }
+    }
+}
+Router router = builder.build();</code></pre>
+
+  <h2>What this module does not do</h2>
+  <ul>
+    <li><strong>No directory listing.</strong> A directory would leak the deployment's layout.</li>
+    <li><strong>No streaming.</strong> The whole file is read into memory. For large files, write a custom handler.</li>
+    <li><strong>No Last-Modified header.</strong> Only ETag is used. A clock-based validator would make the output untestable.</li>
+    <li><strong>No caching headers.</strong> The handler does not set <code>Cache-Control</code>. Add a middleware or wrapper handler if you need caching control.</li>
+  </ul>
+
+  <h2>Best practices</h2>
+  <ul>
+    <li>Register static files at startup, not per request — the handler is stateless and reusable.</li>
+    <li>Use absolute paths or paths relative to the working directory, not classpath resources.</li>
+    <li>For production, consider a reverse proxy (Nginx, Caddy) for static file serving — it is faster and supports range requests.</li>
+    <li>Register HEAD routes alongside GET routes for assets where clients may check size before downloading.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"no regular file at /path/to/file"</h3>
+  <p>The file does not exist or is a directory at construction time. Check the path and ensure the file is present before building the router.</p>
+
+  <h3>"the content type must not be blank"</h3>
+  <p>You passed a blank string as the content type. Provide a valid MIME type or let the framework infer it from the extension.</p>
+
+  <h3>404 for a file that exists</h3>
+  <p>The file was deleted or moved after the handler was created. The handler re-reads the file per request, so a missing file returns 404. Check the file path and permissions.</p>
+
+  <div class="notes">
+    <p>Next: <a href="testkit.html">TestKit</a> — integration testing with TestServer, TestHttpClient, and Assertions.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · Static content · one file per route, ETag, conditional GET.</p></div>
+</footer>
+</body>
+</html>

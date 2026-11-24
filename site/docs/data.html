@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data module — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html" aria-current="page">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/data.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Data module</h1>
+  <p class="lede">barezen-data provides Database, Transaction, RowMapper, and Migration — a minimal JDBC layer with transactions and schema migrations.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-data</code> module provides a thin, product-agnostic data layer built on JDBC. It takes a <code>DataSource</code> and provides queries, updates, transactions, and schema migrations — without knowing which database it talks to.</p>
+
+  <p>Key types:</p>
+  <table>
+    <tr><th>Type</th><th>Role</th></tr>
+    <tr><td><code>Database</code></td><td>Entry point: queries, updates, transactions</td></tr>
+    <tr><td><code>Transaction</code></td><td>Transaction-scoped access for multi-statement units of work</td></tr>
+    <tr><td><code>RowMapper</code></td><td>Maps a ResultSet row to a domain object</td></tr>
+    <tr><td><code>Migration</code></td><td>One schema or data change, identified by a version number</td></tr>
+    <tr><td><code>Migrator</code></td><td>Applies pending migrations in version order</td></tr>
+    <tr><td><code>DataAccessException</code></td><td>Runtime exception wrapping SQLException</td></tr>
+  </table>
+
+  <h2>Database</h2>
+  <p><code>Database</code> is the entry point of the data layer. It takes a <code>DataSource</code> and never names a driver, URL, user, or password — the application's assembly code creates the data source and hands it over.</p>
+
+  <h3>Creating a Database</h3>
+  <pre><code>// With H2 in-memory database (for tests)
+JdbcDataSource dataSource = new JdbcDataSource();
+dataSource.setURL("jdbc:h2:mem:test;DB_CLOSE_DELAY=-1");
+Database db = new Database(dataSource);
+
+// With a connection pool (for production)
+HikariConfig config = new HikariConfig();
+config.setJdbcUrl("jdbc:postgresql://localhost/mydb");
+config.setUsername("user");
+config.setPassword("password");
+DataSource dataSource = new HikariDataSource(config);
+Database db = new Database(dataSource);</code></pre>
+
+  <h3>Two access styles</h3>
+  <p>The difference between them is the whole transaction story (ADR-0039):</p>
+
+  <h4>Auto-commit style (single statement)</h4>
+  <p><code>query()</code> and <code>executeUpdate()</code> run on a connection borrowed for the call, in the pool's auto-commit default. Use these for statements that are complete units by themselves:</p>
+  <pre><code>// Single query
+List&lt;User&gt; users = db.query(
+    "SELECT id, name, email FROM users WHERE active = ?",
+    (rs, rowNum) -> new User(
+        rs.getLong("id"),
+        rs.getString("name"),
+        rs.getString("email")),
+    true);
+
+// Single update
+int rows = db.executeUpdate(
+    "UPDATE users SET name = ? WHERE id = ?",
+    "Alice", 1L);</code></pre>
+
+  <h4>Transaction style (multi-statement unit of work)</h4>
+  <p><code>transaction()</code> opens one connection, puts it in transaction scope, runs a callback, and commits when the callback returns normally. A unit of work that spans more than one statement uses this path:</p>
+  <pre><code>db.transaction((tx) -> {
+    tx.executeUpdate("INSERT INTO users (name, email) VALUES (?, ?)",
+        "Alice", "alice@example.com");
+    long userId = tx.queryForLong(
+        "SELECT last_insert_id()");
+    tx.executeUpdate("INSERT INTO profiles (user_id, bio) VALUES (?, ?)",
+        userId, "Hello!");
+    return userId;
+});  // Commits automatically on success, rolls back on failure</code></pre>
+
+  <h3>Transaction guarantees</h3>
+  <table>
+    <tr><th>Scenario</th><th>Outcome</th></tr>
+    <tr><td>Callback returns normally</td><td><code>commit()</code> — changes are durable</td></tr>
+    <tr><td>Callback throws SQLException</td><td><code>rollback()</code> — failure is translated to <code>DataAccessException</code></td></tr>
+    <tr><td>Callback throws RuntimeException</td><td><code>rollback()</code> — failure propagates untranslated</td></tr>
+    <tr><td>Callback returns but commit fails</td><td>Rolls back first, then throws <code>DataAccessException</code></td></tr>
+  </table>
+
+  <p>In every case, the connection is closed before <code>transaction()</code> returns.</p>
+
+  <h3>Transaction API</h3>
+  <p>Inside a transaction callback, you receive a <code>Transaction</code> with the same methods as <code>Database</code>:</p>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>query(sql, mapper, params)</code></td><td>Execute a query and map rows</td></tr>
+    <tr><td><code>executeUpdate(sql, params)</code></td><td>Execute an insert/update/delete, returns affected row count</td></tr>
+    <tr><td><code>queryForLong(sql, params)</code></td><td>Execute a query returning a single long value</td></tr>
+  </table>
+
+  <h3>Connection lifecycle</h3>
+  <p>Every connection is closed before any public method returns, on every path — normal return, translated failure, application exception, or cleanup failure. PreparedStatement and ResultSet are managed internally and never handed to the caller.</p>
+
+  <h3>Exception translation</h3>
+  <p>Every <code>SQLException</code> leaving this module is rethrown as <code>DataAccessException</code> with the SQL or operation named, and the driver exception kept as the cause. A runtime exception thrown by a callback is <strong>not</strong> translated — it is the application's own failure type.</p>
+
+  <h2>RowMapper</h2>
+  <p>A <code>RowMapper</code> is a functional interface that maps a <code>ResultSet</code> row to a domain object:</p>
+  <pre><code>@FunctionalInterface
+public interface RowMapper&lt;T&gt; {
+    T map(ResultSet rs, int rowNum) throws SQLException;
+}</code></pre>
+
+  <h3>Usage example</h3>
+  <pre><code>RowMapper&lt;User&gt; userMapper = (rs, rowNum) -> new User(
+    rs.getLong("id"),
+    rs.getString("name"),
+    rs.getString("email"),
+    rs.getTimestamp("created_at") != null
+        ? rs.getTimestamp("created_at").toLocalDateTime()
+        : null);
+
+List&lt;User&gt; users = db.query(
+    "SELECT id, name, email, created_at FROM users",
+    userMapper);</code></pre>
+
+  <h2>Schema migrations</h2>
+  <p>Migrations are versioned schema or data changes applied in order. The <code>Migrator</code> tracks which versions have been applied in a history table and runs only the pending ones.</p>
+
+  <h3>Migration interface</h3>
+  <pre><code>public interface Migration {
+    long version();       // Positive, unique, strictly increasing
+    String description(); // Human label stored in the history table
+    void apply(Connection connection) throws SQLException;
+}</code></pre>
+
+  <h3>Writing a migration</h3>
+  <pre><code>Migration createUsersTable = new Migration() {
+    @Override
+    public long version() {
+        return 1L;
+    }
+
+    @Override
+    public String description() {
+        return "Create users table";
+    }
+
+    @Override
+    public void apply(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("""
+                CREATE TABLE users (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    name VARCHAR(255) NOT NULL,
+                    email VARCHAR(255) NOT NULL UNIQUE,
+                    password_hash VARCHAR(500) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """);
+        }
+    }
+};</code></pre>
+
+  <h3>Applying migrations</h3>
+  <pre><code>Migrator migrator = new Migrator(db);
+migrator.migrate(List.of(
+    createUsersTable,
+    createProfilesTable,
+    addEmailVerifiedColumn
+));</code></pre>
+
+  <h3>Migration guarantees</h3>
+  <ul>
+    <li>A recorded version never runs again.</li>
+    <li>Migrations run in version order.</li>
+    <li>Each migration runs in its own transaction.</li>
+    <li>If a migration fails, its version is not recorded, and no later migration runs.</li>
+    <li>A failed migration may leave schema behind — write DDL idempotently (<code>IF NOT EXISTS</code>) so a retried migration completes.</li>
+  </ul>
+
+  <h3>History table</h3>
+  <p>The migrator creates a <code>applied_migrations</code> table automatically:</p>
+  <pre><code>CREATE TABLE applied_migrations (
+    version BIGINT PRIMARY KEY,
+    description VARCHAR(255) NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)</code></pre>
+
+  <h2>DataAccessException</h2>
+  <p>A runtime exception wrapping <code>SQLException</code>. It carries the SQL or operation name and the original driver exception as the cause:</p>
+  <pre><code>try {
+    db.query("SELECT * FROM nonexistent", mapper);
+} catch (DataAccessException e) {
+    // e.getMessage() — "query failed: SELECT * FROM nonexistent"
+    // e.getCause() — the original SQLException from the driver
+    log.error("Database error: {}", e.getMessage(), e);
+}</code></pre>
+
+  <h2>Complete example: User repository</h2>
+  <pre><code>public class UserRepository {
+
+    private final Database db;
+
+    public UserRepository(Database db) {
+        this.db = db;
+    }
+
+    public Optional&lt;User&gt; findById(long id) {
+        List&lt;User&gt; users = db.query(
+            "SELECT id, name, email, password_hash, created_at FROM users WHERE id = ?",
+            (rs, rowNum) -> new User(
+                rs.getLong("id"),
+                rs.getString("name"),
+                rs.getString("email"),
+                rs.getString("password_hash"),
+                rs.getTimestamp("created_at").toLocalDateTime()),
+            id);
+        return users.stream().findFirst();
+    }
+
+    public User create(String name, String email, String passwordHash) {
+        long id = db.transaction((tx) -> {
+            tx.executeUpdate(
+                "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+                name, email, passwordHash);
+            return tx.queryForLong("SELECT last_insert_id()");
+        });
+        return findById(id).orElseThrow();
+    }
+
+    public void updateEmail(long id, String newEmail) {
+        db.executeUpdate(
+            "UPDATE users SET email = ? WHERE id = ?",
+            newEmail, id);
+    }
+}</code></pre>
+
+  <h2>Best practices</h2>
+  <h3>Database access</h3>
+  <ul>
+    <li>Use <code>query()</code> and <code>executeUpdate()</code> for single-statement operations.</li>
+    <li>Use <code>transaction()</code> for multi-statement units of work.</li>
+    <li>Never nest <code>transaction()</code> calls — each opens a new connection.</li>
+    <li>Use parameterized queries (<code>?</code>) — never concatenate SQL with user input.</li>
+  </ul>
+
+  <h3>Migrations</h3>
+  <ul>
+    <li>Write DDL idempotently: use <code>IF NOT EXISTS</code> and <code>IF EXISTS</code>.</li>
+    <li>Assign version numbers that are strictly increasing and never reused.</li>
+    <li>Keep descriptions descriptive — they appear in the history table for operators.</li>
+    <li>Test migrations against the actual database product you deploy to.</li>
+  </ul>
+
+  <h3>Connection pooling</h3>
+  <ul>
+    <li>Use a connection pool (HikariCP, Tomcat JDBC) in production.</li>
+    <li>Use an unpooled <code>JdbcDataSource</code> (H2) for tests.</li>
+    <li>The framework never asks what kind of DataSource it got — it behaves identically.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"query failed: ..." with DataAccessException</h3>
+  <p>The SQL query failed. Check the cause (<code>e.getCause()</code>) for the driver's SQLException for details. Common causes: syntax error, missing table, or type mismatch.</p>
+
+  <h3>"could not acquire a connection from the data source"</h3>
+  <p>The DataSource cannot produce a connection. Check that the database is running, the URL is correct, and the credentials are valid.</p>
+
+  <h3>"transaction failed and was rolled back"</h3>
+  <p>A statement inside the transaction callback failed. The transaction was rolled back, and no changes were committed. Check the callback's SQL and parameters.</p>
+
+  <h3>"Migration version X already applied"</h3>
+  <p>A migration with a version that was already recorded was submitted again. Version numbers must be unique and strictly increasing.</p>
+
+  <div class="notes">
+    <p>Next: <a href="content.html">Static content</a> — serving static files with ETag and conditional GET.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · Data · Database, transactions, RowMapper, migrations.</p></div>
+</footer>
+</body>
+</html>

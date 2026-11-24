@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据模块 — BareZen</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">快速开始</a>
+      <a href="core.html">核心</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">插件</a>
+      <a href="security.html">安全</a>
+      <a href="data.html" aria-current="page">数据</a>
+      <a href="content.html">内容</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">教程</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">常见问题</a>
+      <a class="lang" hreflang="en" href="../../docs/data.html">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>数据模块</h1>
+  <p class="lede">barezen-data 提供 Database、Transaction、RowMapper 和 Migration — 一个带事务和模式迁移的最小 JDBC 层。</p>
+
+  <h2>模块概览</h2>
+  <p><code>barezen-data</code> 模块提供一个基于 JDBC 的薄型、与产品无关的数据层。它接收一个 <code>DataSource</code> 并提供查询、更新、事务和模式迁移 — 而不知道它与哪个数据库通信。</p>
+
+  <p>关键类型：</p>
+  <table>
+    <tr><th>类型</th><th>角色</th></tr>
+    <tr><td><code>Database</code></td><td>入口点：查询、更新、事务</td></tr>
+    <tr><td><code>Transaction</code></td><td>事务作用域访问，用于多语句工作单元</td></tr>
+    <tr><td><code>RowMapper</code></td><td>将 ResultSet 行映射到域对象</td></tr>
+    <tr><td><code>Migration</code></td><td>一个模式或数据更改，由版本号标识</td></tr>
+    <tr><td><code>Migrator</code></td><td>按版本顺序应用待处理的迁移</td></tr>
+    <tr><td><code>DataAccessException</code></td><td>包装 SQLException 的运行时异常</td></tr>
+  </table>
+
+  <h2>Database</h2>
+  <p><code>Database</code> 是数据层的入口点。它接收一个 <code>DataSource</code>，从不命名驱动、URL、用户或密码 — 应用的组装代码创建数据源并将其传递。</p>
+
+  <h3>创建 Database</h3>
+  <pre><code>// 使用 H2 内存数据库（用于测试）
+JdbcDataSource dataSource = new JdbcDataSource();
+dataSource.setURL("jdbc:h2:mem:test;DB_CLOSE_DELAY=-1");
+Database db = new Database(dataSource);
+
+// 使用连接池（用于生产）
+HikariConfig config = new HikariConfig();
+config.setJdbcUrl("jdbc:postgresql://localhost/mydb");
+config.setUsername("user");
+config.setPassword("password");
+DataSource dataSource = new HikariDataSource(config);
+Database db = new Database(dataSource);</code></pre>
+
+  <h3>两种访问风格</h3>
+  <p>它们之间的区别是整个事务故事（ADR-0039）：</p>
+
+  <h4>自动提交风格（单语句）</h4>
+  <p><code>query()</code> 和 <code>executeUpdate()</code> 在借用用于调用的连接上运行，使用池的自动提交默认值。对这些是自身完整单元的语句使用这些：</p>
+  <pre><code>// 单个查询
+List&lt;User&gt; users = db.query(
+    "SELECT id, name, email FROM users WHERE active = ?",
+    (rs, rowNum) -> new User(
+        rs.getLong("id"),
+        rs.getString("name"),
+        rs.getString("email")),
+    true);
+
+// 单个更新
+int rows = db.executeUpdate(
+    "UPDATE users SET name = ? WHERE id = ?",
+    "Alice", 1L);</code></pre>
+
+  <h4>事务风格（多语句工作单元）</h4>
+  <p><code>transaction()</code> 打开一个连接，将其放在事务作用域中，运行回调，在回调正常返回时提交。跨越多个语句的工作单元使用此路径：</p>
+  <pre><code>db.transaction((tx) -> {
+    tx.executeUpdate("INSERT INTO users (name, email) VALUES (?, ?)",
+        "Alice", "alice@example.com");
+    long userId = tx.queryForLong(
+        "SELECT last_insert_id()");
+    tx.executeUpdate("INSERT INTO profiles (user_id, bio) VALUES (?, ?)",
+        userId, "Hello!");
+    return userId;
+});  // 成功时自动提交，失败时回滚</code></pre>
+
+  <h3>事务保证</h3>
+  <table>
+    <tr><th>场景</th><th>结果</th></tr>
+    <tr><td>回调正常返回</td><td><code>commit()</code> — 更改是持久的</td></tr>
+    <tr><td>回调抛出 SQLException</td><td><code>rollback()</code> — 失败被转换为 <code>DataAccessException</code></td></tr>
+    <tr><td>回调抛出 RuntimeException</td><td><code>rollback()</code> — 失败原样传播</td></tr>
+    <tr><td>回调返回但提交失败</td><td>先回滚，然后抛出 <code>DataAccessException</code></td></tr>
+  </table>
+
+  <p>在所有情况下，连接在 <code>transaction()</code> 返回之前关闭。</p>
+
+  <h3>Transaction API</h3>
+  <p>在事务回调内部，你接收一个与 <code>Database</code> 具有相同方法的 <code>Transaction</code>：</p>
+  <table>
+    <tr><th>方法</th><th>描述</th></tr>
+    <tr><td><code>query(sql, mapper, params)</code></td><td>执行查询并映射行</td></tr>
+    <tr><td><code>executeUpdate(sql, params)</code></td><td>执行插入/更新/删除，返回受影响的行数</td></tr>
+    <tr><td><code>queryForLong(sql, params)</code></td><td>执行返回单个 long 值的查询</td></tr>
+  </table>
+
+  <h3>连接生命周期</h3>
+  <p>在任何公共方法返回之前，每条路径上的连接都被关闭 — 正常返回、转换的失败、应用异常或清理失败。PreparedStatement 和 ResultSet 在内部管理，从不交给调用者。</p>
+
+  <h3>异常转换</h3>
+  <p>离开此模块的每个 <code>SQLException</code> 都作为 <code>DataAccessException</code> 重新抛出，命名 SQL 或操作，并将驱动异常保留为原因。回调抛出的运行时异常<strong>不</strong>被转换 — 它是应用自己的失败类型。</p>
+
+  <h2>RowMapper</h2>
+  <p><code>RowMapper</code> 是一个函数式接口，将 <code>ResultSet</code> 行映射到域对象：</p>
+  <pre><code>@FunctionalInterface
+public interface RowMapper&lt;T&gt; {
+    T map(ResultSet rs, int rowNum) throws SQLException;
+}</code></pre>
+
+  <h3>使用示例</h3>
+  <pre><code>RowMapper&lt;User&gt; userMapper = (rs, rowNum) -> new User(
+    rs.getLong("id"),
+    rs.getString("name"),
+    rs.getString("email"),
+    rs.getTimestamp("created_at") != null
+        ? rs.getTimestamp("created_at").toLocalDateTime()
+        : null);
+
+List&lt;User&gt; users = db.query(
+    "SELECT id, name, email, created_at FROM users",
+    userMapper);</code></pre>
+
+  <h2>Schema 迁移</h2>
+  <p>迁移是按顺序应用的带版本号的模式或数据更改。<code>Migrator</code> 在历史表中跟踪哪些版本已应用，并只运行待处理的版本。</p>
+
+  <h3>Migration 接口</h3>
+  <pre><code>public interface Migration {
+    long version();       // 正数、唯一、严格递增
+    String description(); // 存储在历史表中的人类标签
+    void apply(Connection connection) throws SQLException;
+}</code></pre>
+
+  <h3>编写迁移</h3>
+  <pre><code>Migration createUsersTable = new Migration() {
+    @Override
+    public long version() {
+        return 1L;
+    }
+
+    @Override
+    public String description() {
+        return "Create users table";
+    }
+
+    @Override
+    public void apply(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("""
+                CREATE TABLE users (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    name VARCHAR(255) NOT NULL,
+                    email VARCHAR(255) NOT NULL UNIQUE,
+                    password_hash VARCHAR(500) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """);
+        }
+    }
+};</code></pre>
+
+  <h3>应用迁移</h3>
+  <pre><code>Migrator migrator = new Migrator(db);
+migrator.migrate(List.of(
+    createUsersTable,
+    createProfilesTable,
+    addEmailVerifiedColumn
+));</code></pre>
+
+  <h3>迁移保证</h3>
+  <ul>
+    <li>记录的版本永远不会再次运行。</li>
+    <li>迁移按版本顺序运行。</li>
+    <li>每个迁移在其自己的事务中运行。</li>
+    <li>如果迁移失败，其版本不会被记录，也没有后面的迁移运行。</li>
+    <li>失败的迁移可能会留下模式 — 以幂等方式编写 DDL（<code>IF NOT EXISTS</code>），以便重试的迁移完成。</li>
+  </ul>
+
+  <h3>历史表</h3>
+  <p>迁移器自动创建 <code>applied_migrations</code> 表：</p>
+  <pre><code>CREATE TABLE applied_migrations (
+    version BIGINT PRIMARY KEY,
+    description VARCHAR(255) NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)</code></pre>
+
+  <h2>DataAccessException</h2>
+  <p>一个包装 <code>SQLException</code> 的运行时异常。它携带 SQL 或操作名称，原始驱动异常作为原因：</p>
+  <pre><code>try {
+    db.query("SELECT * FROM nonexistent", mapper);
+} catch (DataAccessException e) {
+    // e.getMessage() — "query failed: SELECT * FROM nonexistent"
+    // e.getCause() — 驱动程序的原始 SQLException
+    log.error("数据库错误: {}", e.getMessage(), e);
+}</code></pre>
+
+  <h2>完整示例：用户仓库</h2>
+  <pre><code>public class UserRepository {
+
+    private final Database db;
+
+    public UserRepository(Database db) {
+        this.db = db;
+    }
+
+    public Optional&lt;User&gt; findById(long id) {
+        List&lt;User&gt; users = db.query(
+            "SELECT id, name, email, password_hash, created_at FROM users WHERE id = ?",
+            (rs, rowNum) -> new User(
+                rs.getLong("id"),
+                rs.getString("name"),
+                rs.getString("email"),
+                rs.getString("password_hash"),
+                rs.getTimestamp("created_at").toLocalDateTime()),
+            id);
+        return users.stream().findFirst();
+    }
+
+    public User create(String name, String email, String passwordHash) {
+        long id = db.transaction((tx) -> {
+            tx.executeUpdate(
+                "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+                name, email, passwordHash);
+            return tx.queryForLong("SELECT last_insert_id()");
+        });
+        return findById(id).orElseThrow();
+    }
+
+    public void updateEmail(long id, String newEmail) {
+        db.executeUpdate(
+            "UPDATE users SET email = ? WHERE id = ?",
+            newEmail, id);
+    }
+}</code></pre>
+
+  <h2>最佳实践</h2>
+  <h3>数据库访问</h3>
+  <ul>
+    <li>对单语句操作使用 <code>query()</code> 和 <code>executeUpdate()</code>。</li>
+    <li>对多语句工作单元使用 <code>transaction()</code>。</li>
+    <li>永远不要嵌套 <code>transaction()</code> 调用 — 每个都打开一个新连接。</li>
+    <li>使用参数化查询（<code>?</code>） — 永远不要将 SQL 与用户输入连接。</li>
+  </ul>
+
+  <h3>迁移</h3>
+  <ul>
+    <li>以幂等方式编写 DDL：使用 <code>IF NOT EXISTS</code> 和 <code>IF EXISTS</code>。</li>
+    <li>分配严格递增且永不重用的版本号。</li>
+    <li>保持描述具有描述性 — 它们出现在操作员的历史表中。</li>
+    <li>针对你部署到的实际数据库产品测试迁移。</li>
+  </ul>
+
+  <h3>连接池</h3>
+  <ul>
+    <li>在生产中使用连接池（HikariCP、Tomcat JDBC）。</li>
+    <li>在测试中使用未池化的 <code>JdbcDataSource</code>（H2）。</li>
+    <li>框架从不询问它得到了什么类型的 DataSource — 它的行为相同。</li>
+  </ul>
+
+  <h2>常见问题</h2>
+  <h3>"query failed: ..." 带有 DataAccessException</h3>
+  <p>SQL 查询失败。检查原因（<code>e.getCause()</code>）以获取驱动程序的 SQLException 的详细信息。常见原因：语法错误、缺少表或类型不匹配。</p>
+
+  <h3>"could not acquire a connection from the data source"</h3>
+  <p>DataSource 无法产生连接。检查数据库是否正在运行、URL 是否正确以及凭据是否有效。</p>
+
+  <h3>"transaction failed and was rolled back"</h3>
+  <p>事务回调内的语句失败。事务已回滚，没有提交任何更改。检查回调的 SQL 和参数。</p>
+
+  <h3>"Migration version X already applied"</h3>
+  <p>已再次提交已记录版本的迁移。版本号必须唯一且严格递增。</p>
+
+  <div class="notes">
+    <p>下一步：<a href="content.html">静态内容</a> — 使用 ETag 和条件 GET 提供静态文件。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 数据 · Database、事务、RowMapper、迁移。</p></div>
+</footer>
+</body>
+</html>

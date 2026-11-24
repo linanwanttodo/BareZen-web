@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JDK HTTP 适配器 — BareZen</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">快速开始</a>
+      <a href="core.html">核心</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html" aria-current="page">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">插件</a>
+      <a href="security.html">安全</a>
+      <a href="data.html">数据</a>
+      <a href="content.html">内容</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">教程</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">常见问题</a>
+      <a class="lang" hreflang="en" href="../../docs/http-jdk.html">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>JDK HTTP 适配器</h1>
+  <p class="lede">barezen-http-jdk 在 JDK 内置的 com.sun.net.httpserver 上提供 HttpServerAdapter，支持虚拟线程和 TLS/HTTPS。</p>
+
+  <h2>模块概览</h2>
+  <p><code>barezen-http-jdk</code> 模块将 JDK 自己的 HTTP 服务器（<code>com.sun.net.httpserver</code>）适配到 BareZen Web 契约。这是框架中唯一命名该包的模块 — 其他一切保持与服务器无关（ADR-0021）。</p>
+
+  <p>主要功能：</p>
+  <ul>
+    <li><strong>Java 21+ 上的虚拟线程。</strong> 自动检测并在可用时使用虚拟线程，否则使用平台线程。</li>
+    <li><strong>TLS/HTTPS 支持。</strong> 可通过密钥库路径和密码配置。</li>
+    <li><strong>请求主体限制。</strong> 防止无界主体读取导致的拒绝服务。</li>
+    <li><strong>错误处理。</strong> 为路由和协议错误生成 404、405、400、413 和 500 响应。</li>
+  </ul>
+
+  <h2>构造函数</h2>
+  <p>有三个公共构造函数，每个都有不同的配置选项：</p>
+
+  <h3>简单构造函数（自动配置）</h3>
+  <pre><code>InetSocketAddress address = new InetSocketAddress("0.0.0.0", 8080);
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(address, router);</code></pre>
+
+  <p>此构造函数：</p>
+  <ul>
+    <li>使用 <code>ThreadPolicy.AUTO</code> 创建自己的 <code>ThreadProvider</code>（Java 21+ 上使用虚拟线程，否则使用平台线程）。</li>
+    <li>使用配置键默认值的默认请求主体限制。</li>
+    <li>提供明文 HTTP（无 TLS）。</li>
+    <li>拥有线程提供者在 <code>stop()</code> 时关闭它。</li>
+  </ul>
+
+  <h3>带共享 ThreadProvider 的构造函数</h3>
+  <pre><code>ThreadProvider threads = ThreadProviders.create(
+    ThreadPolicy.VIRTUAL, RuntimeCapabilities.detect());
+
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, threads);</code></pre>
+
+  <p>此构造函数借用线程提供者 — 它从中创建一个执行器但从不关闭任何一个。调用者拥有提供者，应在 <code>adapter.stop()</code> 后关闭它。</p>
+
+  <h3>带 Configuration 的构造函数</h3>
+  <pre><code>Configuration config = Configuration.standard(
+    Path.of("application.properties"));
+
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, config);</code></pre>
+
+  <p>此构造函数读取以下配置键：</p>
+  <table>
+    <tr><th>键</th><th>类型</th><th>默认值</th><th>描述</th></tr>
+    <tr><td><code>barezen.http.jdk.maxRequestBodyBytes</code></td><td><code>Long</code></td><td>1 MB</td><td>最大请求主体大小（字节）。超过此限制的请求以 413 拒绝。</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePath</code></td><td><code>String</code></td><td>无（明文）</td><td>密钥库文件路径（JKS 或 PKCS12）。不存在表示明文 HTTP。</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePassword</code></td><td><code>String</code></td><td>如果设置了 keystorePath 则必需</td><td>打开密钥库的密码。当 keystorePath 存在时必需。</td></tr>
+  </table>
+
+  <h2>生命周期</h2>
+  <p>适配器遵循严格的生命周期：<code>NEW → RUNNING → STOPPED</code>，没有回退路径。第二次 <code>start()</code> 会抛出异常，<code>start → stop → start</code> 也会。重启需要构建新的适配器。</p>
+
+  <h3>启动</h3>
+  <pre><code>adapter.start();
+// 服务器现在在配置的地址上监听
+int port = adapter.port().getAsInt();  // 实际绑定的端口</code></pre>
+
+  <p><code>start()</code> 绑定端口并开始接受连接。如果绑定失败（例如，端口已在使用），它会抛出 <code>UncheckedIOException</code> 并将适配器留在 <code>STOPPED</code> 状态。</p>
+
+  <h3>停止</h3>
+  <pre><code>adapter.stop();  // 幂等，永不抛出异常</code></pre>
+
+  <p><code>stop()</code> 给进行中的交换 3 秒完成，然后释放资源。它是幂等的 — 对从未启动的适配器调用它是合法的，什么都不做。</p>
+
+  <h3>查询方法</h3>
+  <pre><code>boolean running = adapter.isRunning();  // start() 和 stop() 之间为 true
+OptionalInt port = adapter.port();      // 实际绑定的端口（未运行时为空）</code></pre>
+
+  <h2>TLS / HTTPS 配置</h2>
+  <p>要启用 HTTPS，在 <code>application.properties</code> 中配置密钥库路径和密码：</p>
+  <pre><code># application.properties
+barezen.http.jdk.tls.keystorePath=/path/to/keystore.p12
+barezen.http.jdk.tls.keystorePassword=changeit</code></pre>
+
+  <p>或通过环境变量设置：</p>
+  <pre><code>export BAREZEN_HTTP_JDK_TLS_KEYSTOREPATH=/path/to/keystore.p12
+export BAREZEN_HTTP_JDK_TLS_KEYSTOREPASSWORD=changeit</code></pre>
+
+  <h3>创建密钥库</h3>
+  <p>使用 JDK 的 <code>keytool</code> 创建密钥库：</p>
+  <pre><code># 创建带有自签名证书的 PKCS12 密钥库
+keytool -genkeypair \
+  -alias server \
+  -keyalg RSA \
+  -keysize 2048 \
+  -storetype PKCS12 \
+  -keystore keystore.p12 \
+  -validity 365 \
+  -dname "CN=localhost, OU=Dev, O=MyOrg, L=City, ST=State, C=US" \
+  -storepass changeit \
+  -keypass changeit</code></pre>
+
+  <h3>TLS 协议</h3>
+  <p>适配器使用 <code>TLSv1.2</code> 作为上限，优先 <code>TLSv1.3</code>，这是 JDK 的默认排序。不配置协议列表，不选择密码套件，不请求客户端证书（无 mTLS）。</p>
+
+  <h3>错误处理</h3>
+  <ul>
+    <li>如果设置了 <code>keystorePath</code> 但 <code>keystorePassword</code> 不存在，构建以 <code>ConfigurationException</code> 失败。</li>
+    <li>如果无法打开密钥库文件，构建以 <code>ConfigurationException</code> 失败，命名路径和 JDK 异常。</li>
+    <li>密码永远不会在错误消息或日志中回显。</li>
+  </ul>
+
+  <h2>请求主体限制</h2>
+  <p>适配器强制执行最大请求主体大小以防止拒绝服务攻击。默认为 1 MB（1,048,576 字节）。超过此限制的请求在处理程序运行前以 <code>413 Payload Too Large</code> 拒绝。</p>
+
+  <p>在 <code>application.properties</code> 中配置限制：</p>
+  <pre><code># application.properties
+barezen.http.jdk.maxRequestBodyBytes=5242880  # 5 MB</code></pre>
+
+  <h2>线程模型</h2>
+  <p>默认情况下，适配器使用 <code>ThreadPolicy.AUTO</code> 创建自己的 <code>ThreadProvider</code>：</p>
+  <ul>
+    <li><strong>Java 21+</strong> — 每个请求在虚拟线程上运行。这以低内存开销提供高并发。</li>
+    <li><strong>Java 17</strong> — 每个请求来自缓存池的平台线程上运行。</li>
+  </ul>
+
+  <p>要强制特定的线程模型，使用带共享 <code>ThreadProvider</code> 的构造函数：</p>
+  <pre><code>ThreadProvider threads = ThreadProviders.create(
+    ThreadPolicy.VIRTUAL, RuntimeCapabilities.detect());
+
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, threads);</code></pre>
+
+  <h2>错误响应</h2>
+  <p>适配器处理以下错误情况：</p>
+  <table>
+    <tr><th>状态码</th><th>何时</th></tr>
+    <tr><td><code>400 Bad Request</code></td><td>格式错误的请求行或无效的 HTTP 方法。</td></tr>
+    <tr><td><code>404 Not Found</code></td><td>没有路由匹配请求方法和路径。</td></tr>
+    <tr><td><code>405 Method Not Allowed</code></td><td>路径存在路由但不是请求的方法。<code>Allow</code> 头部列出允许的方法。</td></tr>
+    <tr><td><code>413 Payload Too Large</code></td><td>请求主体超过配置的限制。</td></tr>
+    <tr><td><code>500 Internal Server Error</code></td><td>处理程序抛出异常。错误主体不包含详细信息 — 只有服务器日志有。</td></tr>
+  </table>
+
+  <h2>与 LifecycleOrchestrator 一起使用</h2>
+  <pre><code>Configuration config = Configuration.standard(
+    Path.of("application.properties"));
+
+InetSocketAddress address = new InetSocketAddress("0.0.0.0", 8080);
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, config);
+
+LifecycleOrchestrator orchestrator = LifecycleOrchestrator.builder()
+    .register("http", adapter)
+    .build();
+
+try {
+    orchestrator.start();
+    // 服务器正在运行
+} finally {
+    orchestrator.stop();
+}</code></pre>
+
+  <h2>使用临时端口</h2>
+  <p>对于测试或当你希望操作系统选择空闲端口时，使用端口 <code>0</code>：</p>
+  <pre><code>InetSocketAddress address = new InetSocketAddress("127.0.0.1", 0);
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(address, router);
+adapter.start();
+
+int actualPort = adapter.port().getAsInt();
+System.out.println("服务器在端口 " + actualPort + " 上监听");</code></pre>
+
+  <h2>最佳实践</h2>
+  <ul>
+    <li>在生产中使用 Configuration 构造函数从配置文件读取主体限制和 TLS 设置。</li>
+    <li>在测试中使用端口 0 以避免并行测试运行之间的端口冲突。</li>
+    <li>将适配器注册为编排器中的最后一个参与者，以便在服务器绑定之前完全设置路由。</li>
+    <li>对于 HTTPS，使用 PKCS12 密钥库（Java 9 以来的 JDK 默认值）。</li>
+    <li>永远不要在日志或错误消息中暴露密钥库密码 — 框架强制执行此操作。</li>
+  </ul>
+
+  <h2>常见问题</h2>
+  <h3>"Address already in use"</h3>
+  <p>端口已被另一个进程绑定。更改端口或停止其他进程。使用 <code>lsof -i :8080</code> 或 <code>netstat -tlnp | grep 8080</code> 查找进程。</p>
+
+  <h3>"keystorePath names a keystore but keystorePassword supplies no password"</h3>
+  <p>你设置了密钥库路径但忘记了密码。TLS 需要两个键。在配置中设置 <code>barezen.http.jdk.tls.keystorePassword</code>。</p>
+
+  <h3>"cannot start the JDK HTTP server on ..."</h3>
+  <p>绑定失败。检查主机地址是否正确（使用 <code>0.0.0.0</code> 表示所有接口，<code>127.0.0.1</code> 表示仅本地主机）以及端口是否可用。</p>
+
+  <h3>"this adapter is STOPPED and cannot be started again"</h3>
+  <p>适配器已停止。构建新的 <code>JdkHttpServerAdapter</code> 实例以重启。适配器不支持重启 — 一个实例，一个生命周期。</p>
+
+  <div class="notes">
+    <p>下一步：<a href="http-servlet.html">Servlet 集成</a> — 部署到 Tomcat、Jetty 或 Wildfly。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · JDK HTTP 适配器 · 虚拟线程、TLS、请求主体限制。</p></div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security module — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html" aria-current="page">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/security.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Security module</h1>
+  <p class="lede">barezen-security provides authentication, authorization, session management, and password hashing — all pluggable and request-scoped.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-security</code> module provides a complete security layer for BareZen applications. It is organized around three core concerns:</p>
+  <table>
+    <tr><th>Concern</th><th>Types</th><th>Description</th></tr>
+    <tr><td>Authentication</td><td><code>Authentication</code>, <code>AuthenticationResult</code>, <code>Credential</code></td><td>Verifying who the client claims to be</td></tr>
+    <tr><td>Authorization</td><td><code>Authorization</code>, <code>Permission</code>, <code>Principal</code></td><td>Deciding what an authenticated identity may do</td></tr>
+    <tr><td>Sessions</td><td><code>SessionStore</code>, <code>SessionToken</code></td><td>Stateful session management with tokens</td></tr>
+    <tr><td>Passwords</td><td><code>PasswordHasher</code></td><td>PBKDF2-HMAC-SHA256 password hashing</td></tr>
+    <tr><td>Middleware</td><td><code>SecurityMiddleware</code>, <code>SecurityContext</code>, <code>SecuredHandler</code></td><td>Wiring authentication and authorization into the request pipeline</td></tr>
+  </table>
+
+  <h2>Authentication</h2>
+  <p>Authentication answers "who is this client?" The <code>Authentication</code> interface is a functional interface with one method:</p>
+  <pre><code>@FunctionalInterface
+public interface Authentication {
+    AuthenticationResult authenticate(Credential credential);
+}</code></pre>
+
+  <h3>AuthenticationResult — three states</h3>
+  <p>HTTP security has three answers, and the result is a sealed hierarchy to make all three explicit:</p>
+  <table>
+    <tr><th>State</th><th>Factory</th><th>HTTP response</th><th>Meaning</th></tr>
+    <tr><td><code>Authenticated</code></td><td><code>AuthenticationResult.authenticated(principal)</code></td><td>Pass through</td><td>Client proved an identity</td></tr>
+    <tr><td><code>Failure</code></td><td><code>AuthenticationResult.failure("reason")</code></td><td>401 Unauthorized</td><td>Client offered a credential that did not verify</td></tr>
+    <tr><td><code>Anonymous</code></td><td><code>AuthenticationResult.anonymous()</code></td><td>Depends on authorization</td><td>Client offered no credential at all</td></tr>
+  </table>
+
+  <p>The distinction between <code>Failure</code> and <code>Anonymous</code> is critical: a bad credential is a request that failed to prove anything (401), while no credential is a valid request that may or may not be allowed (401 or 403 depending on authorization).</p>
+
+  <h3>Credential</h3>
+  <p>A <code>Credential</code> is a record with two fields: <code>scheme</code> (e.g., "Bearer", "Basic") and <code>value</code> (the token or encoded credentials). The middleware extracts the credential from the <code>Authorization</code> header and passes it to the authentication implementation.</p>
+
+  <h3>Built-in authentication implementations</h3>
+  <h4>Anonymous authentication</h4>
+  <p>Trusts nothing — every request is anonymous. Used as the default when no authentication is configured:</p>
+  <pre><code>Authentication auth = Authentication.anonymous();</code></pre>
+
+  <h4>Bearer token authentication</h4>
+  <p>Matches a fixed scheme and value. Useful for tests and simple API key setups:</p>
+  <pre><code>Principal admin = Principal.of("admin");
+Authentication auth = Authentication.bearer("Bearer", "secret-token-123", admin);</code></pre>
+
+  <h3>Custom authentication</h3>
+  <p>Implement <code>Authentication</code> to verify credentials against a database, external service, or token issuer:</p>
+  <pre><code>Authentication auth = (credential) -> {
+    if (credential == null) {
+        return AuthenticationResult.anonymous();
+    }
+    // Look up user by token
+    Optional&lt;User&gt; user = userRepository.findByToken(credential.value());
+    if (user.isPresent()) {
+        return AuthenticationResult.authenticated(
+            Principal.of(user.get().username()));
+    }
+    return AuthenticationResult.failure("invalid token");
+};</code></pre>
+
+  <h2>Authorization</h2>
+  <p>Authorization answers "is this identity allowed to do this?" The <code>Authorization</code> interface is a functional interface:</p>
+  <pre><code>@FunctionalInterface
+public interface Authorization {
+    Decision authorize(Principal principal, Permission required);
+}</code></pre>
+
+  <h3>Decision</h3>
+  <p>Two states: <code>ALLOW</code> (pass through) or <code>DENY</code> (403 Forbidden). The default is deny — an identity without an explicit grant does not have the permission.</p>
+
+  <h3>Built-in authorization implementations</h3>
+  <h4>Allow all</h4>
+  <p>Every authenticated identity has every permission. Useful for tests:</p>
+  <pre><code>Authorization authz = Authorization.allowAll();</code></pre>
+
+  <h4>Deny all</h4>
+  <p>No authenticated identity has any permission. Used as the default when no authorization is configured:</p>
+  <pre><code>Authorization authz = Authorization.denyAll();</code></pre>
+
+  <h4>Table-based authorization</h4>
+  <p>A fixed table maps principals to their permissions:</p>
+  <pre><code>Permission READ = Permission.of("read:users");
+Permission WRITE = Permission.of("write:users");
+
+Principal alice = Principal.of("alice");
+Principal bob = Principal.of("bob");
+
+Authorization authz = Authorization.of(Map.of(
+    alice, Set.of(READ, WRITE),
+    bob, Set.of(READ)));
+
+// alice can read and write
+// bob can read only
+// anyone else is denied</code></pre>
+
+  <h3>Permission</h3>
+  <p>A <code>Permission</code> is an immutable string identifier. Use dot-separated names for hierarchy:</p>
+  <pre><code>Permission.READ_USERS = Permission.of("read:users");
+Permission.WRITE_USERS = Permission.of("write:users");
+Permission.DELETE_USERS = Permission.of("delete:users");</code></pre>
+
+  <h2>SecurityContext</h2>
+  <p>A <code>SecurityContext</code> is a request-scoped value that carries the authentication result. It is <strong>not</strong> a thread-local, not a session, and not a cache:</p>
+  <pre><code>public record SecurityContext(AuthenticationResult authentication) {
+    public Optional&lt;Principal&gt; principal();
+    public boolean isAuthenticated();
+}</code></pre>
+
+  <p>The context is immutable because a request's security answer is decided once. A handler cannot change the identity of the request it is answering.</p>
+
+  <h2>SecuredHandler</h2>
+  <p>Wrap a handler with security requirements using <code>SecuredHandler</code>:</p>
+  <pre><code>Handler inner = (req, params) -> {
+    // This code runs only if authentication and authorization pass
+    return new Response(200, ...);
+};
+
+// Require authentication (any authenticated user)
+Handler secured = SecuredHandler.authenticated(inner);
+
+// Require a specific permission
+Handler secured = SecuredHandler.require(inner, Permission.of("write:users"));</code></pre>
+
+  <h2>SecurityMiddleware</h2>
+  <p>The middleware wires authentication and authorization into the request pipeline. It implements <code>RouteContributor</code> and <code>LifecycleParticipant</code>:</p>
+  <pre><code>SecurityMiddleware middleware = SecurityMiddleware.create(
+    Authentication.bearer("Bearer", "secret", Principal.of("admin")),
+    Authorization.allowAll());
+
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", healthHandler)
+    .contributing(List.of(middleware))
+    .build();</code></pre>
+
+  <h3>What the middleware does</h3>
+  <ol>
+    <li>Extracts the <code>Authorization</code> header from the request</li>
+    <li>Creates a <code>Credential</code> (or <code>null</code> if absent)</li>
+    <li>Calls <code>Authentication.authenticate(credential)</code></li>
+    <li>If <code>Failure</code>, returns 401 Unauthorized</li>
+    <li>If <code>Authenticated</code> and the handler requires a permission, calls <code>Authorization.authorize()</code></li>
+    <li>If authorization denies, returns 403 Forbidden</li>
+    <li>Creates a <code>SecurityContext</code> and passes it to the handler</li>
+  </ol>
+
+  <h2>Session management</h2>
+  <p><code>SessionStore</code> provides in-memory session management. Sessions are keyed by a random token and expire after a configured duration.</p>
+
+  <h3>Creating a session</h3>
+  <pre><code>SessionStore store = SessionStore.standard();
+
+// After successful login:
+SessionStore.Session session = store.create(
+    Principal.of("alice"),
+    Duration.ofHours(24));
+
+// Return the token to the client (e.g., in a Set-Cookie header)
+String token = session.token().value();</code></pre>
+
+  <h3>Looking up a session</h3>
+  <pre><code>Optional&lt;SessionStore.Session&gt; session = store.lookup(token);
+if (session.isPresent()) {
+    Principal principal = session.get().principal();
+    // Session is valid and not expired
+} else {
+    // Token is unknown or expired
+}</code></pre>
+
+  <h3>Invalidating a session (logout)</h3>
+  <pre><code>boolean removed = store.invalidate(token);</code></pre>
+
+  <h3>Rotating a session</h3>
+  <p>Rotate creates a new token for the same principal, invalidating the old one. Use this after password changes or privilege escalation:</p>
+  <pre><code>Optional&lt;SessionStore.Session&gt; newSession = store.rotate(oldToken, Duration.ofHours(24));</code></pre>
+
+  <h3>Session token</h3>
+  <p>A <code>SessionToken</code> is a 32-byte random value encoded as URL-safe Base64. It carries an expiration time and can be checked for expiry:</p>
+  <pre><code>SessionToken token = session.token();
+boolean expired = token.isExpired(Clock.systemUTC().instant());</code></pre>
+
+  <h2>Password hashing</h2>
+  <p><code>PasswordHasher</code> uses PBKDF2 with HMAC-SHA-256. The default iteration count is 600,000 (OWASP 2023 recommendation).</p>
+
+  <h3>Hashing a password</h3>
+  <pre><code>PasswordHasher hasher = PasswordHasher.standard();
+
+// Hash a password for storage
+String hash = hasher.hash("user-password");
+// Format: PBKDF2WithHmacSHA256$600000$&lt;base64-salt&gt;$&lt;base64-derived-key&gt;
+
+// Store the hash in your database
+userRepository.save(username, hash);</code></pre>
+
+  <h3>Verifying a password</h3>
+  <pre><code>// Retrieve the stored hash
+String storedHash = userRepository.findHash(username);
+
+// Verify
+if (hasher.verify("user-password", storedHash)) {
+    // Password matches
+} else {
+    // Password does not match
+}</code></pre>
+
+  <h3>Encoded format</h3>
+  <p>The hash is self-describing: <code>algorithm$iterations$salt$derivedKey</code>, all Base64-encoded. This means:</p>
+  <ul>
+    <li>The iteration count is stored in the hash, so you can change the default without invalidating old hashes.</li>
+    <li>A malformed hash is rejected as a verification failure, not as an exception.</li>
+    <li>The raw password is never stored, never logged, and never returned.</li>
+  </ul>
+
+  <h3>Test-friendly hashing</h3>
+  <p>For tests, use a lower iteration count and a fixed random source:</p>
+  <pre><code>PasswordHasher testHasher = PasswordHasher.of(
+    1000, new SecureRandom(42));</code></pre>
+
+  <h2>Complete example: Login flow</h2>
+  <pre><code>// 1. Set up password hashing
+PasswordHasher hasher = PasswordHasher.standard();
+
+// 2. Set up session store
+SessionStore sessionStore = SessionStore.standard();
+Duration sessionDuration = Duration.ofHours(24);
+
+// 3. Authentication: verify username/password from request body
+Authentication auth = (credential) -> {
+    if (credential == null) {
+        return AuthenticationResult.anonymous();
+    }
+    // Parse username:password from Basic auth or custom body
+    String[] parts = decodeCredential(credential);
+    String username = parts[0];
+    String password = parts[1];
+
+    Optional&lt;String&gt; storedHash = userRepository.findHash(username);
+    if (storedHash.isPresent() &amp;&amp; hasher.verify(password, storedHash.get())) {
+        return AuthenticationResult.authenticated(Principal.of(username));
+    }
+    return AuthenticationResult.failure("invalid credentials");
+};
+
+// 4. Authorization
+Authorization authz = Authorization.of(Map.of(
+    Principal.of("admin"), Set.of(
+        Permission.of("read:users"),
+        Permission.of("write:users"))));
+
+// 5. Create middleware
+SecurityMiddleware middleware = SecurityMiddleware.create(auth, authz);
+
+// 6. Login handler
+Handler login = (req, params) -> {
+    // Parse username and password from request body
+    Map&lt;String, String&gt; body = parseJson(req.body());
+    String username = body.get("username");
+    String password = body.get("password");
+
+    Optional&lt;String&gt; storedHash = userRepository.findHash(username);
+    if (storedHash.isPresent() &amp;&amp; hasher.verify(password, storedHash.get())) {
+        SessionStore.Session session = sessionStore.create(
+            Principal.of(username), sessionDuration);
+        return new Response(200,
+            Headers.of("Content-Type", "application/json")
+                .with("Set-Cookie", "session=" + session.token().value()),
+            "{\"status\":\"ok\"}".getBytes());
+    }
+    return new Response(401,
+        Headers.of("Content-Type", "application/json"),
+        "{\"error\":\"invalid credentials\"}".getBytes());
+};
+
+// 7. Register routes
+Router router = Router.builder()
+    .route(HttpMethod.POST, "/login", login)
+    .route(HttpMethod.DELETE, "/logout", logoutHandler)
+    .contributing(List.of(middleware))
+    .build();</code></pre>
+
+  <h2>Best practices</h2>
+  <h3>Authentication</h3>
+  <ul>
+    <li>Always return one of the three states — never throw from <code>authenticate()</code> for expected failures.</li>
+    <li>Use <code>Failure</code> for bad credentials, <code>Anonymous</code> for missing credentials.</li>
+    <li>Never log the raw credential value.</li>
+  </ul>
+
+  <h3>Authorization</h3>
+  <ul>
+    <li>Default to deny — an unconfigured setup should not be silently permissive.</li>
+    <li>Use descriptive permission names: <code>read:users</code>, <code>write:users</code>, <code>delete:users</code>.</li>
+    <li>Anonymous requests are denied by the middleware before authorization is called.</li>
+  </ul>
+
+  <h3>Sessions</h3>
+  <ul>
+    <li>Use short session durations (1-24 hours) for sensitive applications.</li>
+    <li>Rotate sessions after password changes or privilege escalation.</li>
+    <li>Sessions are in-memory only — a server restart invalidates all sessions.</li>
+    <li>For distributed deployments, use an external session store (Redis, database).</li>
+  </ul>
+
+  <h3>Passwords</h3>
+  <ul>
+    <li>Always use <code>PasswordHasher</code> — never store plain-text passwords.</li>
+    <li>Use the default iteration count (600,000) for production.</li>
+    <li>Use a lower iteration count (1,000) only for tests.</li>
+    <li>The hash format is self-describing — you can change the iteration count over time.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"401 vs 403 confusion"</h3>
+  <p>401 means "you are not authenticated" — the client should provide credentials. 403 means "you are authenticated but not authorized" — the client's identity does not have the required permission. Use <code>Failure</code> for 401 and <code>DENY</code> for 403.</p>
+
+  <h3>"Session expired but token still valid"</h3>
+  <p><code>SessionStore.lookup()</code> checks expiry automatically. If a token is found but expired, it is removed and <code>Optional.empty()</code> is returned. No manual expiry check is needed.</p>
+
+  <h3>"Password hash verification is slow"</h3>
+  <p>This is intentional. PBKDF2 with 600,000 iterations is designed to be slow to resist brute-force attacks. If login is too slow, check that the server has adequate CPU resources, not the iteration count.</p>
+
+  <h3>"SecurityContext is null in my handler"</h3>
+  <p>The <code>SecurityContext</code> is created by the middleware. Make sure the middleware is registered as a <code>RouteContributor</code> and the handler is wrapped with <code>SecuredHandler</code>.</p>
+
+  <div class="notes">
+    <p>Next: <a href="data.html">Data module</a> — database access, transactions, and schema migrations.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · Security · authentication, authorization, sessions, password hashing.</p></div>
+</footer>
+</body>
+</html>

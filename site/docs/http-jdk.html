@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JDK HTTP adapter — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html" aria-current="page">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/http-jdk.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>JDK HTTP adapter</h1>
+  <p class="lede">barezen-http-jdk provides an HttpServerAdapter on the JDK's built-in com.sun.net.httpserver, with virtual thread support and TLS/HTTPS.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-http-jdk</code> module adapts the JDK's own HTTP server (<code>com.sun.net.httpserver</code>) to the BareZen web contract. This is the only module in the framework that names that package — everything else stays server-agnostic (ADR-0021).</p>
+
+  <p>Key features:</p>
+  <ul>
+    <li><strong>Virtual threads on Java 21+.</strong> Auto-detects and uses virtual threads when available, platform threads otherwise.</li>
+    <li><strong>TLS/HTTPS support.</strong> Configurable via keystore path and password.</li>
+    <li><strong>Request body limit.</strong> Prevents denial-of-service from unbounded body reads.</li>
+    <li><strong>Error handling.</strong> Produces 404, 405, 400, 413, and 500 responses for routing and protocol errors.</li>
+  </ul>
+
+  <h2>Constructors</h2>
+  <p>There are three public constructors, each with different configuration options:</p>
+
+  <h3>Simple constructor (auto-configured)</h3>
+  <pre><code>InetSocketAddress address = new InetSocketAddress("0.0.0.0", 8080);
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(address, router);</code></pre>
+
+  <p>This constructor:</p>
+  <ul>
+    <li>Creates its own <code>ThreadProvider</code> with <code>ThreadPolicy.AUTO</code> (virtual threads on Java 21+, platform threads otherwise).</li>
+    <li>Uses the default request body limit from the configuration key's default value.</li>
+    <li>Serves plaintext HTTP (no TLS).</li>
+    <li>Owns the thread provider and closes it on <code>stop()</code>.</li>
+  </ul>
+
+  <h3>Constructor with shared ThreadProvider</h3>
+  <pre><code>ThreadProvider threads = ThreadProviders.create(
+    ThreadPolicy.VIRTUAL, RuntimeCapabilities.detect());
+
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, threads);</code></pre>
+
+  <p>This constructor borrows the thread provider — it creates one executor from it but never closes either. The caller owns the provider and should close it after <code>adapter.stop()</code>.</p>
+
+  <h3>Constructor with Configuration</h3>
+  <pre><code>Configuration config = Configuration.standard(
+    Path.of("application.properties"));
+
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, config);</code></pre>
+
+  <p>This constructor reads the following configuration keys:</p>
+  <table>
+    <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>barezen.http.jdk.maxRequestBodyBytes</code></td><td><code>Long</code></td><td>1 MB</td><td>Maximum request body size in bytes. Requests exceeding this limit are rejected with 413.</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePath</code></td><td><code>String</code></td><td>None (plaintext)</td><td>Path to the keystore file (JKS or PKCS12). Absent means plaintext HTTP.</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePassword</code></td><td><code>String</code></td><td>Required if keystorePath is set</td><td>Password to open the keystore. Required when keystorePath is present.</td></tr>
+  </table>
+
+  <h2>Lifecycle</h2>
+  <p>The adapter follows a strict lifecycle: <code>NEW → RUNNING → STOPPED</code>, with no path back. A second <code>start()</code> throws, as does <code>start → stop → start</code>. A restart requires building a new adapter.</p>
+
+  <h3>Start</h3>
+  <pre><code>adapter.start();
+// Server is now listening on the configured address
+int port = adapter.port().getAsInt();  // The actual bound port</code></pre>
+
+  <p><code>start()</code> binds the port and begins accepting connections. If binding fails (e.g., port already in use), it throws <code>UncheckedIOException</code> and leaves the adapter in the <code>STOPPED</code> state.</p>
+
+  <h3>Stop</h3>
+  <pre><code>adapter.stop();  // Idempotent, never throws</code></pre>
+
+  <p><code>stop()</code> gives in-flight exchanges 3 seconds to complete, then releases resources. It is idempotent — calling it on a never-started adapter is legal and does nothing.</p>
+
+  <h3>Query methods</h3>
+  <pre><code>boolean running = adapter.isRunning();  // true between start() and stop()
+OptionalInt port = adapter.port();      // The actual bound port (empty if not running)</code></pre>
+
+  <h2>TLS / HTTPS configuration</h2>
+  <p>To enable HTTPS, configure the keystore path and password in your <code>application.properties</code>:</p>
+  <pre><code># application.properties
+barezen.http.jdk.tls.keystorePath=/path/to/keystore.p12
+barezen.http.jdk.tls.keystorePassword=changeit</code></pre>
+
+  <p>Or set them via environment variables:</p>
+  <pre><code>export BAREZEN_HTTP_JDK_TLS_KEYSTOREPATH=/path/to/keystore.p12
+export BAREZEN_HTTP_JDK_TLS_KEYSTOREPASSWORD=changeit</code></pre>
+
+  <h3>Creating a keystore</h3>
+  <p>Use the JDK's <code>keytool</code> to create a keystore:</p>
+  <pre><code># Create a PKCS12 keystore with a self-signed certificate
+keytool -genkeypair \
+  -alias server \
+  -keyalg RSA \
+  -keysize 2048 \
+  -storetype PKCS12 \
+  -keystore keystore.p12 \
+  -validity 365 \
+  -dname "CN=localhost, OU=Dev, O=MyOrg, L=City, ST=State, C=US" \
+  -storepass changeit \
+  -keypass changeit</code></pre>
+
+  <h3>TLS protocol</h3>
+  <p>The adapter uses <code>TLSv1.2</code> as the ceiling with <code>TLSv1.3</code> preferred, which is the JDK's default ordering. No protocol list is configured, no cipher suite is chosen, and no client certificate is requested (no mTLS).</p>
+
+  <h3>Error handling</h3>
+  <ul>
+    <li>If <code>keystorePath</code> is set but <code>keystorePassword</code> is absent, construction fails with <code>ConfigurationException</code>.</li>
+    <li>If the keystore file cannot be opened, construction fails with <code>ConfigurationException</code> naming the path and the JDK exception.</li>
+    <li>The password is never echoed in error messages or logs.</li>
+  </ul>
+
+  <h2>Request body limit</h2>
+  <p>The adapter enforces a maximum request body size to prevent denial-of-service attacks. The default is 1 MB (1,048,576 bytes). Requests exceeding this limit are rejected with <code>413 Payload Too Large</code> before the handler runs.</p>
+
+  <p>Configure the limit in <code>application.properties</code>:</p>
+  <pre><code># application.properties
+barezen.http.jdk.maxRequestBodyBytes=5242880  # 5 MB</code></pre>
+
+  <h2>Thread model</h2>
+  <p>By default, the adapter creates its own <code>ThreadProvider</code> with <code>ThreadPolicy.AUTO</code>:</p>
+  <ul>
+    <li><strong>Java 21+</strong> — Each request runs on a virtual thread. This provides high concurrency with low memory overhead.</li>
+    <li><strong>Java 17</strong> — Each request runs on a platform thread from a cached pool.</li>
+  </ul>
+
+  <p>To force a specific thread model, use the constructor with a shared <code>ThreadProvider</code>:</p>
+  <pre><code>ThreadProvider threads = ThreadProviders.create(
+    ThreadPolicy.VIRTUAL, RuntimeCapabilities.detect());
+
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, threads);</code></pre>
+
+  <h2>Error responses</h2>
+  <p>The adapter handles the following error cases:</p>
+  <table>
+    <tr><th>Status</th><th>When</th></tr>
+    <tr><td><code>400 Bad Request</code></td><td>Malformed request line or invalid HTTP method.</td></tr>
+    <tr><td><code>404 Not Found</code></td><td>No route matches the request method and path.</td></tr>
+    <tr><td><code>405 Method Not Allowed</code></td><td>A route exists for the path but not for the requested method. The <code>Allow</code> header lists the allowed methods.</td></tr>
+    <tr><td><code>413 Payload Too Large</code></td><td>Request body exceeds the configured limit.</td></tr>
+    <tr><td><code>500 Internal Server Error</code></td><td>Handler threw an exception. The error body contains no details — only the server log does.</td></tr>
+  </table>
+
+  <h2>Usage with LifecycleOrchestrator</h2>
+  <pre><code>Configuration config = Configuration.standard(
+    Path.of("application.properties"));
+
+InetSocketAddress address = new InetSocketAddress("0.0.0.0", 8080);
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(
+    address, router, config);
+
+LifecycleOrchestrator orchestrator = LifecycleOrchestrator.builder()
+    .register("http", adapter)
+    .build();
+
+try {
+    orchestrator.start();
+    // Server is running
+} finally {
+    orchestrator.stop();
+}</code></pre>
+
+  <h2>Usage with ephemeral port</h2>
+  <p>For tests or when you want the OS to pick a free port, use port <code>0</code>:</p>
+  <pre><code>InetSocketAddress address = new InetSocketAddress("127.0.0.1", 0);
+JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(address, router);
+adapter.start();
+
+int actualPort = adapter.port().getAsInt();
+System.out.println("Server listening on port " + actualPort);</code></pre>
+
+  <h2>Best practices</h2>
+  <ul>
+    <li>Use the Configuration constructor in production to read body limits and TLS settings from config files.</li>
+    <li>Use port 0 in tests to avoid port conflicts between parallel test runs.</li>
+    <li>Register the adapter as the last participant in the orchestrator, so routes are fully set up before the server binds.</li>
+    <li>For HTTPS, use a PKCS12 keystore (the JDK default since Java 9).</li>
+    <li>Never expose the keystore password in logs or error messages — the framework enforces this.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"Address already in use"</h3>
+  <p>The port is already bound by another process. Either change the port or stop the other process. Use <code>lsof -i :8080</code> or <code>netstat -tlnp | grep 8080</code> to find the process.</p>
+
+  <h3>"keystorePath names a keystore but keystorePassword supplies no password"</h3>
+  <p>You set the keystore path but forgot the password. Both keys are required for TLS. Set <code>barezen.http.jdk.tls.keystorePassword</code> in your configuration.</p>
+
+  <h3>"cannot start the JDK HTTP server on ..."</h3>
+  <p>The bind failed. Check that the host address is correct (use <code>0.0.0.0</code> for all interfaces, <code>127.0.0.1</code> for localhost only) and that the port is available.</p>
+
+  <h3>"this adapter is STOPPED and cannot be started again"</h3>
+  <p>The adapter was already stopped. Build a new <code>JdkHttpServerAdapter</code> instance to restart. The adapter does not support restart — one instance, one lifecycle.</p>
+
+  <div class="notes">
+    <p>Next: <a href="http-servlet.html">Servlet integration</a> — deploying to Tomcat, Jetty, or Wildfly.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · JDK HTTP adapter · virtual threads, TLS, request body limit.</p></div>
+</footer>
+</body>
+</html>

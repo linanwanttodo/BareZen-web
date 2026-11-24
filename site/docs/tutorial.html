@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html" aria-current="page">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/tutorial.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Tutorial: Building a user management API</h1>
+  <p class="lede">This tutorial walks through building a complete user management application with BareZen — from zero to a running API with authentication, database persistence, and tests.</p>
+
+  <h2>What we will build</h2>
+  <p>A REST API with the following endpoints:</p>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Description</th><th>Auth required</th></tr>
+    <tr><td><code>POST</code></td><td><code>/users</code></td><td>Register a new user</td><td>No</td></tr>
+    <tr><td><code>POST</code></td><td><code>/login</code></td><td>Login and get a session token</td><td>No</td></tr>
+    <tr><td><code>GET</code></td><td><code>/users/{id}</code></td><td>Get user by ID</td><td>Yes</td></tr>
+    <tr><td><code>PUT</code></td><td><code>/users/{id}</code></td><td>Update user</td><td>Yes, own user only</td></tr>
+    <tr><td><code>DELETE</code></td><td><code>/users/{id}</code></td><td>Delete user</td><td>Yes, own user only</td></tr>
+    <tr><td><code>GET</code></td><td><code>/health</code></td><td>Health check</td><td>No</td></tr>
+  </table>
+
+  <h2>Step 1: Project setup</h2>
+  <p>Create a Maven project with the following dependencies:</p>
+  <pre><code>&lt;dependencies&gt;
+  &lt;!-- BareZen core modules --&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.barezen&lt;/groupId&gt;
+    &lt;artifactId&gt;barezen-web&lt;/artifactId&gt;
+    &lt;version&gt;1.0.0&lt;/version&gt;
+  &lt;/dependency&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.barezen&lt;/groupId&gt;
+    &lt;artifactId&gt;barezen-http-jdk&lt;/artifactId&gt;
+    &lt;version&gt;1.0.0&lt;/version&gt;
+  &lt;/dependency&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.barezen&lt;/groupId&gt;
+    &lt;artifactId&gt;barezen-security&lt;/artifactId&gt;
+    &lt;version&gt;1.0.0&lt;/version&gt;
+  &lt;/dependency&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.barezen&lt;/groupId&gt;
+    &lt;artifactId&gt;barezen-data&lt;/artifactId&gt;
+    &lt;version&gt;1.0.0&lt;/version&gt;
+  &lt;/dependency&gt;
+
+  &lt;!-- H2 database --&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.h2database&lt;/groupId&gt;
+    &lt;artifactId&gt;h2&lt;/artifactId&gt;
+    &lt;version&gt;2.2.224&lt;/version&gt;
+  &lt;/dependency&gt;
+
+  &lt;!-- SLF4J (required by barezen-core) --&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;org.slf4j&lt;/groupId&gt;
+    &lt;artifactId&gt;slf4j-simple&lt;/artifactId&gt;
+    &lt;version&gt;2.0.9&lt;/version&gt;
+  &lt;/dependency&gt;
+
+  &lt;!-- Test dependencies --&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;com.barezen&lt;/groupId&gt;
+    &lt;artifactId&gt;barezen-testkit&lt;/artifactId&gt;
+    &lt;version&gt;1.0.0&lt;/version&gt;
+    &lt;scope&gt;test&lt;/scope&gt;
+  &lt;/dependency&gt;
+  &lt;dependency&gt;
+    &lt;groupId&gt;org.junit.jupiter&lt;/groupId&gt;
+    &lt;artifactId&gt;junit-jupiter&lt;/artifactId&gt;
+    &lt;version&gt;5.10.1&lt;/version&gt;
+    &lt;scope&gt;test&lt;/scope&gt;
+  &lt;/dependency&gt;
+&lt;/dependencies&gt;</code></pre>
+
+  <h2>Step 2: Domain model</h2>
+  <p>Define the User record:</p>
+  <pre><code>package com.example;
+
+import java.time.LocalDateTime;
+
+public record User(
+    long id,
+    String name,
+    String email,
+    String passwordHash,
+    LocalDateTime createdAt) {
+}</code></pre>
+
+  <h2>Step 3: Database migration</h2>
+  <p>Create a migration to set up the users table:</p>
+  <pre><code>package com.example;
+
+import com.barezen.data.Migration;
+import java.sql.Connection;
+import java.sql.SQLException;
+
+public class CreateUsersTable implements Migration {
+    @Override
+    public long version() {
+        return 1L;
+    }
+
+    @Override
+    public String description() {
+        return "Create users table";
+    }
+
+    @Override
+    public void apply(Connection conn) throws SQLException {
+        try (var stmt = conn.createStatement()) {
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    name VARCHAR(255) NOT NULL,
+                    email VARCHAR(255) NOT NULL UNIQUE,
+                    password_hash VARCHAR(500) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """);
+        }
+    }
+}</code></pre>
+
+  <h2>Step 4: User repository</h2>
+  <p>Build a repository for database access:</p>
+  <pre><code>package com.example;
+
+import com.barezen.data.Database;
+import java.util.List;
+import java.util.Optional;
+
+public class UserRepository {
+
+    private final Database db;
+
+    public UserRepository(Database db) {
+        this.db = db;
+    }
+
+    public Optional&lt;User&gt; findById(long id) {
+        List&lt;User&gt; users = db.query(
+            "SELECT id, name, email, password_hash, created_at FROM users WHERE id = ?",
+            (rs, rowNum) -> new User(
+                rs.getLong("id"),
+                rs.getString("name"),
+                rs.getString("email"),
+                rs.getString("password_hash"),
+                rs.getTimestamp("created_at") != null
+                    ? rs.getTimestamp("created_at").toLocalDateTime()
+                    : null),
+            id);
+        return users.stream().findFirst();
+    }
+
+    public Optional&lt;User&gt; findByEmail(String email) {
+        List&lt;User&gt; users = db.query(
+            "SELECT id, name, email, password_hash, created_at FROM users WHERE email = ?",
+            (rs, rowNum) -> new User(
+                rs.getLong("id"),
+                rs.getString("name"),
+                rs.getString("email"),
+                rs.getString("password_hash"),
+                rs.getTimestamp("created_at") != null
+                    ? rs.getTimestamp("created_at").toLocalDateTime()
+                    : null),
+            email);
+        return users.stream().findFirst();
+    }
+
+    public User create(String name, String email, String passwordHash) {
+        long id = db.transaction((tx) -> {
+            tx.executeUpdate(
+                "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+                name, email, passwordHash);
+            return tx.queryForLong("SELECT last_insert_id()");
+        });
+        return findById(id).orElseThrow();
+    }
+
+    public void update(long id, String name, String email) {
+        db.executeUpdate(
+            "UPDATE users SET name = ?, email = ? WHERE id = ?",
+            name, email, id);
+    }
+
+    public void delete(long id) {
+        db.executeUpdate("DELETE FROM users WHERE id = ?", id);
+    }
+}</code></pre>
+
+  <h2>Step 5: Handlers</h2>
+  <p>Create handlers for each endpoint:</p>
+  <pre><code>package com.example;
+
+import com.barezen.web.*;
+import com.barezen.security.*;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Map;
+
+public class UserHandlers {
+
+    private final UserRepository repo;
+    private final PasswordHasher hasher;
+    private final SessionStore sessionStore;
+
+    public UserHandlers(UserRepository repo, PasswordHasher hasher, SessionStore sessionStore) {
+        this.repo = repo;
+        this.hasher = hasher;
+        this.sessionStore = sessionStore;
+    }
+
+    // POST /users - Register
+    public Handler register() {
+        return (req, params) -> {
+            Map&lt;String, String&gt; body = parseJson(req.body());
+            String name = body.get("name");
+            String email = body.get("email");
+            String password = body.get("password");
+
+            if (repo.findByEmail(email).isPresent()) {
+                return new Response(409,
+                    Headers.of("Content-Type", "application/json"),
+                    "{\"error\":\"email already in use\"}".getBytes(StandardCharsets.UTF_8));
+            }
+
+            String hash = hasher.hash(password);
+            User user = repo.create(name, email, hash);
+
+            return new Response(201,
+                Headers.of("Content-Type", "application/json"),
+                ("{\"id\":" + user.id() + ",\"name\":\"" + user.name() + "\"}")
+                    .getBytes(StandardCharsets.UTF_8));
+        };
+    }
+
+    // POST /login - Login
+    public Handler login() {
+        return (req, params) -> {
+            Map&lt;String, String&gt; body = parseJson(req.body());
+            String email = body.get("email");
+            String password = body.get("password");
+
+            Optional&lt;User&gt; user = repo.findByEmail(email);
+            if (user.isEmpty() || !hasher.verify(password, user.get().passwordHash())) {
+                return new Response(401,
+                    Headers.of("Content-Type", "application/json"),
+                    "{\"error\":\"invalid credentials\"}".getBytes(StandardCharsets.UTF_8));
+            }
+
+            SessionStore.Session session = sessionStore.create(
+                Principal.of(user.get().email()),
+                Duration.ofHours(24));
+
+            return new Response(200,
+                Headers.of("Content-Type", "application/json")
+                    .with("Set-Cookie", "session=" + session.token().value() + "; HttpOnly; Path=/"),
+                ("{\"message\":\"logged in\"}").getBytes(StandardCharsets.UTF_8));
+        };
+    }
+
+    // GET /users/{id} - Get user (requires auth)
+    public Handler getUser() {
+        Handler inner = (req, params) -> {
+            long id = Long.parseLong(params.get("id"));
+            return repo.findById(id)
+                .map(user -> new Response(200,
+                    Headers.of("Content-Type", "application/json"),
+                    ("{\"id\":" + user.id() + ",\"name\":\"" + user.name()
+                     + "\",\"email\":\"" + user.email() + "\"}")
+                        .getBytes(StandardCharsets.UTF_8)))
+                .orElseGet(() -> new Response(404,
+                    Headers.of("Content-Type", "text/plain; charset=utf-8"),
+                    "Not Found".getBytes(StandardCharsets.UTF_8)));
+        };
+        return SecuredHandler.authenticated(inner);
+    }
+
+    // PUT /users/{id} - Update user (requires auth)
+    public Handler updateUser() {
+        Handler inner = (req, params) -> {
+            long id = Long.parseLong(params.get("id"));
+            Map&lt;String, String&gt; body = parseJson(req.body());
+            repo.update(id, body.get("name"), body.get("email"));
+            return new Response(200,
+                Headers.of("Content-Type", "application/json"),
+                "{\"message\":\"updated\"}".getBytes(StandardCharsets.UTF_8));
+        };
+        return SecuredHandler.authenticated(inner);
+    }
+
+    // DELETE /users/{id} - Delete user (requires auth)
+    public Handler deleteUser() {
+        Handler inner = (req, params) -> {
+            long id = Long.parseLong(params.get("id"));
+            repo.delete(id);
+            return new Response(204, Headers.empty(), null);
+        };
+        return SecuredHandler.authenticated(inner);
+    }
+
+    // Simple JSON parser placeholder - use a real library in production
+    private Map&lt;String, String&gt; parseJson(byte[] body) {
+        // In production, use Jackson, Gson, or similar
+        return Map.of();
+    }
+}</code></pre>
+
+  <h2>Step 6: Application assembly</h2>
+  <p>Wire everything together:</p>
+  <pre><code>package com.example;
+
+import com.barezen.core.config.Configuration;
+import com.barezen.core.di.ServiceAssembly;
+import com.barezen.core.kernel.LifecycleOrchestrator;
+import com.barezen.data.*;
+import com.barezen.http.jdk.JdkHttpServerAdapter;
+import com.barezen.security.*;
+import com.barezen.web.*;
+import org.h2.jdbcx.JdbcDataSource;
+
+import java.net.InetSocketAddress;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Set;
+
+public class Application {
+
+    public static void main(String[] args) throws Exception {
+        // 1. Configuration
+        Configuration config = Configuration.standard(
+            Path.of("application.properties"));
+
+        // 2. Database
+        JdbcDataSource dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:file:./data/mydb;AUTO_SERVER=TRUE");
+        Database db = new Database(dataSource);
+
+        // 3. Run migrations
+        new Migrator(db).migrate(java.util.List.of(new CreateUsersTable()));
+
+        // 4. Security components
+        PasswordHasher hasher = PasswordHasher.standard();
+        SessionStore sessionStore = SessionStore.standard();
+
+        // 5. Service assembly
+        ServiceAssembly assembly = ServiceAssembly.builder()
+            .instance(Database.class, db)
+            .instance(PasswordHasher.class, hasher)
+            .instance(SessionStore.class, sessionStore)
+            .factory(UserRepository.class, s -> new UserRepository(s.require(Database.class)))
+            .factory(UserHandlers.class, s -> new UserHandlers(
+                s.require(UserRepository.class),
+                s.require(PasswordHasher.class),
+                s.require(SessionStore.class)))
+            .build();
+
+        // 6. Build handlers
+        UserHandlers handlers = assembly.require(UserHandlers.class);
+
+        // 7. Build router
+        Router router = Router.builder()
+            .route(HttpMethod.GET, "/health", (req, params) ->
+                new Response(200, Headers.of("Content-Type", "text/plain"), "OK".getBytes()))
+            .route(HttpMethod.POST, "/users", handlers.register())
+            .route(HttpMethod.POST, "/login", handlers.login())
+            .route(HttpMethod.GET, "/users/{id}", handlers.getUser())
+            .route(HttpMethod.PUT, "/users/{id}", handlers.updateUser())
+            .route(HttpMethod.DELETE, "/users/{id}", handlers.deleteUser())
+            .build();
+
+        // 8. HTTP adapter
+        InetSocketAddress address = new InetSocketAddress("0.0.0.0", 8080);
+        JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(address, router, config);
+
+        // 9. Lifecycle orchestrator
+        LifecycleOrchestrator orchestrator = LifecycleOrchestrator.builder()
+            .register("http", adapter)
+            .build();
+
+        try {
+            orchestrator.start();
+            System.out.println("Server running on port " + adapter.port().getAsInt());
+            // Block until shutdown
+            Thread.currentThread().join();
+        } finally {
+            orchestrator.stop();
+            assembly.close();
+        }
+    }
+}</code></pre>
+
+  <h2>Step 7: Testing</h2>
+  <p>Write an integration test:</p>
+  <pre><code>package com.example;
+
+import com.barezen.testkit.*;
+import org.junit.jupiter.api.Test;
+
+class UserApiTest {
+
+    @Test
+    void registerAndLogin() throws Exception {
+        try (TestDatabase testDb = TestDatabase.create()) {
+            // Run migrations
+            new com.barezen.data.Migrator(testDb.database())
+                .migrate(java.util.List.of(new CreateUsersTable()));
+
+            // Build components
+            PasswordHasher hasher = PasswordHasher.standard();
+            SessionStore sessionStore = SessionStore.standard();
+            UserRepository repo = new UserRepository(testDb.database());
+            UserHandlers handlers = new UserHandlers(repo, hasher, sessionStore);
+
+            // Build router
+            Router router = Router.builder()
+                .route(HttpMethod.POST, "/users", handlers.register())
+                .route(HttpMethod.POST, "/login", handlers.login())
+                .build();
+
+            // Start server
+            try (TestServer server = TestServer.start(router)) {
+                // Register
+                TestResponse register = server.client()
+                    .post("/users", "{\"name\":\"Alice\",\"email\":\"alice@example.com\",\"password\":\"secret\"}");
+                Assertions.assertThat(register).statusIs(201);
+
+                // Login
+                TestResponse login = server.client()
+                    .post("/login", "{\"email\":\"alice@example.com\",\"password\":\"secret\"}");
+                Assertions.assertThat(login).statusIs(200);
+            }
+        }
+    }
+}</code></pre>
+
+  <h2>Summary</h2>
+  <p>This tutorial covered:</p>
+  <ul>
+    <li><strong>Domain model</strong> — User record with id, name, email, password hash</li>
+    <li><strong>Database migration</strong> — CreateUsersTable migration</li>
+    <li><strong>Repository</strong> — UserRepository with CRUD operations</li>
+    <li><strong>Handlers</strong> — Register, login, get, update, delete</li>
+    <li><strong>Security</strong> — Password hashing with PBKDF2, session management</li>
+    <li><strong>Assembly</strong> — ServiceAssembly wiring all components</li>
+    <li><strong>Testing</strong> — Integration test with TestServer and TestDatabase</li>
+  </ul>
+
+  <h2>Next steps</h2>
+  <ul>
+    <li>Add input validation for name, email, and password</li>
+    <li>Add a real JSON library (Jackson, Gson)</li>
+    <li>Add pagination for listing users</li>
+    <li>Add rate limiting for login attempts</li>
+    <li>Deploy to a production database (PostgreSQL, MySQL)</li>
+    <li>Add HTTPS with TLS configuration</li>
+  </ul>
+
+  <div class="notes">
+    <p>Next: <a href="api-reference.html">API reference</a> — complete index of all public classes and methods.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · Tutorial · building a complete user management API.</p></div>
+</footer>
+</body>
+</html>

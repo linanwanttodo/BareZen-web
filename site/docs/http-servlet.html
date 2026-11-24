@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Servlet integration — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html" aria-current="page">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/http-servlet.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Servlet integration</h1>
+  <p class="lede">barezen-http-servlet provides BarezenServlet, a standard HttpServlet that dispatches to a BareZen Router inside Tomcat, Jetty, or Wildfly.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-http-servlet</code> module integrates BareZen with the Jakarta Servlet API. Instead of running your own HTTP server, you deploy a standard WAR file to an existing servlet container. The container owns the port, thread pool, executor, and lifecycle — BareZen only provides the routing and handler dispatch.</p>
+
+  <p><code>BarezenServlet</code> is <strong>not</strong> an <code>HttpServerAdapter</code>. An adapter starts, stops, reports its bound port, and cannot restart. A servlet instantiated by a container it does not control cannot honestly answer <code>port()</code> or <code>isRunning()</code> (ADR-0049).</p>
+
+  <h2>Two deployment modes</h2>
+  <p>There are two ways to hand over the route table, because a container instantiates what it deploys:</p>
+
+  <h3>1. Programmatic embedding</h3>
+  <p>The application builds the router and hands it to the servlet constructor:</p>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", (req, params) ->
+        new Response(200, Headers.of("Content-Type", "text/plain"), "OK".getBytes()))
+    .build();
+
+BarezenServlet servlet = new BarezenServlet(router);
+// Register the servlet with the container programmatically</code></pre>
+
+  <h3>2. Declarative deployment (web.xml or @WebServlet)</h3>
+  <p>The container instantiates the servlet via its no-argument constructor. The application's <code>ServletContextListener</code> sets the router as a context attribute at startup:</p>
+
+  <pre><code>// In your ServletContextListener:
+public void contextInitialized(ServletContextEvent event) {
+    Router router = Router.builder()
+        .route(HttpMethod.GET, "/health", healthHandler)
+        .build();
+    event.getServletContext().setAttribute(
+        BarezenServlet.ROUTER_ATTRIBUTE, router);
+}</code></pre>
+
+  <h3>web.xml configuration</h3>
+  <pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+         version="6.0"&gt;
+
+  &lt;servlet&gt;
+    &lt;servlet-name&gt;barezen&lt;/servlet-name&gt;
+    &lt;servlet-class&gt;com.barezen.http.servlet.BarezenServlet&lt;/servlet-class&gt;
+    &lt;init-param&gt;
+      &lt;param-name&gt;barezen.maxRequestBodyBytes&lt;/param-name&gt;
+      &lt;param-value&gt;5242880&lt;/param-value&gt;
+    &lt;/init-param&gt;
+    &lt;load-on-startup&gt;1&lt;/load-on-startup&gt;
+  &lt;/servlet&gt;
+
+  &lt;servlet-mapping&gt;
+    &lt;servlet-name&gt;barezen&lt;/servlet-name&gt;
+    &lt;url-pattern&gt;/&lt;/url-pattern&gt;
+  &lt;/servlet-mapping&gt;
+
+&lt;/web-app&gt;</code></pre>
+
+  <h3>@WebServlet annotation</h3>
+  <pre><code>@WebServlet(
+    urlPatterns = "/*",
+    initParams = @WebInitParam(
+        name = "barezen.maxRequestBodyBytes",
+        value = "5242880"))
+public class MyServlet extends BarezenServlet {
+}</code></pre>
+
+  <h2>Configuration</h2>
+  <p>The servlet reads its configuration once during <code>init()</code>:</p>
+  <table>
+    <tr><th>Init parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>barezen.maxRequestBodyBytes</code></td><td><code>long</code></td><td>1 MB (1,048,576 bytes)</td><td>Maximum request body size. Requests exceeding this limit are rejected with 413.</td></tr>
+  </table>
+
+  <p>If the parameter is present but not a valid number, the deployment fails with a <code>ServletException</code> naming the parameter and the value found.</p>
+
+  <h2>ServletContext attribute</h2>
+  <p>For declarative deployment, the router must be placed under the attribute name <code>com.barezen.http.servlet.router</code> (accessible as <code>BarezenServlet.ROUTER_ATTRIBUTE</code>) before the servlet initializes.</p>
+
+  <h2>Error responses</h2>
+  <p>Identical to the JDK adapter — switching server must not change what a client reads (ADR-0023):</p>
+  <table>
+    <tr><th>Status</th><th>When</th></tr>
+    <tr><td><code>400 Bad Request</code></td><td>Malformed request target or body never arrived.</td></tr>
+    <tr><td><code>404 Not Found</code></td><td>No route matches the request method and path.</td></tr>
+    <tr><td><code>405 Method Not Allowed</code></td><td>A route exists for the path but not for the requested method. The <code>Allow</code> header lists the allowed methods.</td></tr>
+    <tr><td><code>413 Payload Too Large</code></td><td>Request body exceeds the configured limit.</td></tr>
+    <tr><td><code>500 Internal Server Error</code></td><td>Handler threw an exception. The stack trace goes to the log, not to the client.</td></tr>
+  </table>
+
+  <h2>Thread safety</h2>
+  <p>One servlet instance serves every request concurrently. It holds nothing but the route table and one number (the body limit), so there is no per-request state to leak. The servlet specification guarantees <code>init()</code> happens-before the first <code>service()</code> call, making those two fields safe to read without a lock.</p>
+
+  <h2>What the servlet does not do</h2>
+  <ul>
+    <li>It does not parse HTTP — the container refuses a malformed request line before a request object exists.</li>
+    <li>It does not answer <code>OPTIONS *</code> — the container resolved a target before routing.</li>
+    <li>It does not log one line per request — access logging is the container's job.</li>
+    <li>It does not catch <code>Error</code> — an <code>OutOfMemoryError</code> inside a handler is not a condition a 500 answers.</li>
+  </ul>
+
+  <h2>Supported containers</h2>
+  <p>The servlet module depends on the Jakarta Servlet API (jakarta.servlet). It has been tested with:</p>
+  <ul>
+    <li><strong>Apache Tomcat 10.x+</strong> — Jakarta EE 9+ (jakarta.* namespace)</li>
+    <li><strong>Eclipse Jetty 11.x+</strong> — Jakarta EE 9+</li>
+    <li><strong>Wildfly 27.x+</strong> — Jakarta EE 9+</li>
+  </ul>
+
+  <h2>Best practices</h2>
+  <ul>
+    <li>Use a <code>ServletContextListener</code> to build and register the router at startup, not in the servlet's <code>init()</code>.</li>
+    <li>Map the servlet to <code>/*</code> (or <code>/</code> in web.xml) so all requests pass through BareZen routing.</li>
+    <li>Set <code>load-on-startup</code> to <code>1</code> so the servlet initializes before the first request.</li>
+    <li>Configure the body limit via init parameter, not via code — keep it deployable without recompilation.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"no route table for this servlet"</h3>
+  <p>The servlet was instantiated by the container (no-argument constructor) but no router was set in the ServletContext. Either construct the servlet with <code>new BarezenServlet(router)</code>, or set the <code>com.barezen.http.servlet.router</code> attribute before the servlet initializes.</p>
+
+  <h3>"barezen.maxRequestBodyBytes is 'abc' ... which is not a byte count"</h3>
+  <p>The init parameter value is not a valid number. Check your web.xml or @WebServlet annotation for typos.</p>
+
+  <h3>405 for methods not listed in HttpServlet</h3>
+  <p><code>HttpServlet</code>'s default <code>service()</code> answers unlisted verbs with 405 before a router is asked. BarezenServlet overrides <code>service()</code> entirely to avoid this — make sure you are using <code>BarezenServlet</code>, not a subclass that calls <code>super.doGet()</code>.</p>
+
+  <div class="notes">
+    <p>Next: <a href="security.html">Security module</a> — authentication, authorization, and session management.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · Servlet integration · Tomcat, Jetty, Wildfly deployment.</p></div>
+</footer>
+</body>
+</html>

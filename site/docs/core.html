@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Core concepts — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html" aria-current="page">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/core.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Core concepts</h1>
+  <p class="lede">barezen-core provides the foundation: lifecycle management, configuration, dependency injection, event bus, and threading.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-core</code> module is the foundation of the entire framework. It has no external dependencies beyond <code>slf4j-api</code> (ADR-0001). Every other framework module depends on it, directly or indirectly.</p>
+
+  <p>It is organized into eight packages:</p>
+  <table>
+    <tr><th>Package</th><th>Responsibility</th></tr>
+    <tr><td><code>com.barezen.core.kernel</code></td><td>Lifecycle orchestration, application states, shutdown hooks</td></tr>
+    <tr><td><code>com.barezen.core.config</code></td><td>Configuration snapshots, sources, type conversion</td></tr>
+    <tr><td><code>com.barezen.core.di</code></td><td>Explicit dependency injection via ServiceAssembly</td></tr>
+    <tr><td><code>com.barezen.core.event</code></td><td>Synchronous event bus and subscriptions</td></tr>
+    <tr><td><code>com.barezen.core.concurrent</code></td><td>Thread providers, virtual threads, executor management</td></tr>
+    <tr><td><code>com.barezen.core.plugin</code></td><td>Plugin interface, descriptors, discovery, registration</td></tr>
+    <tr><td><code>com.barezen.core.runtime</code></td><td>Runtime capability detection (virtual threads, etc.)</td></tr>
+    <tr><td><code>com.barezen.core.error</code></td><td>Framework exceptions: Assembly, Configuration, Lifecycle</td></tr>
+  </table>
+
+  <h2>Lifecycle management</h2>
+  <p>Every BareZen application goes through a fixed set of states, managed by <code>LifecycleOrchestrator</code>. The orchestrator drives startup, shutdown, and startup rollback for all registered components.</p>
+
+  <h3>Application states</h3>
+  <table>
+    <tr><th>State</th><th>Meaning</th></tr>
+    <tr><td><code>NEW</code></td><td>Just built, not yet started. The orchestrator is ready to start.</td></tr>
+    <tr><td><code>STARTING</code></td><td>In the middle of startup; initialize() and start() phases are in progress.</td></tr>
+    <tr><td><code>RUNNING</code></td><td>All participants started successfully, accepting work.</td></tr>
+    <tr><td><code>STOPPING</code></td><td>Shutting down participants in reverse order.</td></tr>
+    <tr><td><code>STOPPED</code></td><td>Cleanly shut down. All resources released.</td></tr>
+    <tr><td><code>FAILED</code></td><td>Startup failed, rollback completed. No resources are left acquired.</td></tr>
+  </table>
+
+  <h3>LifecycleParticipant interface</h3>
+  <p>Every component whose startup and shutdown is driven by the orchestrator implements <code>LifecycleParticipant</code>:</p>
+  <pre><code>public interface LifecycleParticipant {
+    default void initialize() {}  // Acquire resources, complete internal wiring
+    default void start() {}       // Activate and begin serving work
+    default void stop() {}        // Release resources, called during shutdown
+    default void abort() {}       // Release resources after initialize() failed
+}</code></pre>
+
+  <p>All four methods have empty defaults, so an implementation writes only the phases it actually has. The orchestrator relies on these obligations:</p>
+  <ul>
+    <li><code>stop()</code> and <code>abort()</code> are idempotent and never throw.</li>
+    <li><code>stop()</code> must tolerate a participant that only reached <code>initialize()</code>, because the orchestrator uses it for both orderly shutdown and rollback of an initialized participant.</li>
+    <li>Registration order is startup order. Choosing that order is the assembler's job.</li>
+  </ul>
+
+  <h3>Two-phase startup</h3>
+  <p>Startup runs in two global phases (ADR-0003):</p>
+  <ol>
+    <li><strong>Initialize phase</strong> — every participant's <code>initialize()</code> is called. This is where routes are registered, migrations are applied, and routes are contributed.</li>
+    <li><strong>Start phase</strong> — every participant's <code>start()</code> is called. This is where ports are bound and servers begin listening.</li>
+  </ol>
+  <p>The two-phase ordering guarantees that a participant that makes work observable (such as an HTTP server binding a port) does so only after every earlier participant has finished its setup. Interleaving the two phases per component cannot express this invariant.</p>
+
+  <h3>Startup rollback</h3>
+  <p>If any participant fails during startup, the orchestrator performs a complete rollback (ADR-0004):</p>
+  <ul>
+    <li>Every participant that entered successfully receives <code>stop()</code> in reverse order.</li>
+    <li>The failing participant receives <code>abort()</code> instead of <code>stop()</code>.</li>
+    <li>The original failure is always what is reported; cleanup problems are attached as suppressed exceptions.</li>
+    <li>After rollback, the state is <code>FAILED</code> and nothing is left acquired.</li>
+  </ul>
+
+  <h3>Shutdown</h3>
+  <p>Shutdown is best-effort and never throws (ADR-0005). Every entered participant is attempted even if one fails, and a <code>ShutdownReport</code> collects all failures. Calling <code>stop()</code> on an application that never started is legal and idempotent (ADR-0012), which makes try-with-resources usable.</p>
+
+  <h3>Builder API</h3>
+  <p>The <code>LifecycleOrchestrator.Builder</code> provides the following configuration options:</p>
+  <table>
+    <tr><th>Method</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>register(String id, LifecycleParticipant)</code></td><td>Required</td><td>Registers a participant. Call order defines startup order.</td></tr>
+    <tr><td><code>threadPolicy(ThreadPolicy)</code></td><td><code>AUTO</code></td><td>Chooses the thread model: AUTO, PLATFORM, or VIRTUAL.</td></tr>
+    <tr><td><code>runtimeCapabilities(RuntimeCapabilities)</code></td><td>Auto-detected</td><td>Overrides the detected runtime capabilities (used by tests).</td></tr>
+    <tr><td><code>threads(ThreadProvider)</code></td><td>Resolved from policy</td><td>Supplies an externally created provider; the orchestrator still owns its shutdown.</td></tr>
+    <tr><td><code>threadCloseTimeout(Duration)</code></td><td>10 seconds</td><td>Grace period for terminating executors the owned provider created.</td></tr>
+    <tr><td><code>registerShutdownHook(boolean)</code></td><td><code>true</code></td><td>Whether to register a JVM shutdown hook. Turn off for container-deployed apps.</td></tr>
+  </table>
+
+  <h3>Usage example</h3>
+  <pre><code>LifecycleOrchestrator orchestrator = LifecycleOrchestrator.builder()
+    .register("web", httpAdapter)
+    .register("security", securityPlugin)
+    .register("data", database)
+    .build();
+
+try {
+    orchestrator.start();
+    // application runs until stopped
+} finally {
+    orchestrator.stop();  // or use try-with-resources
+}</code></pre>
+
+  <h3>Shutdown hooks</h3>
+  <p>By default, the orchestrator registers a JVM shutdown hook for embedded applications. Turn it off when a host container (e.g., Tomcat) already owns process lifecycle:</p>
+  <pre><code>LifecycleOrchestrator.builder()
+    .registerShutdownHook(false)
+    .build();</code></pre>
+
+  <h3>Querying state</h3>
+  <p>The orchestrator provides two query methods:</p>
+  <pre><code>// Check current state
+ApplicationState state = orchestrator.state();
+
+// List all participant IDs in registration order
+List&lt;String&gt; ids = orchestrator.participantIds();</code></pre>
+
+  <h2>Configuration system</h2>
+  <p>Configuration in BareZen is a read-only snapshot resolved before startup (ADR-0013). There is no write API: configuration is decided once and stays decided. This prevents two components from disagreeing about a value and prevents tests from leaving state behind for the next one.</p>
+
+  <h3>Configuration sources</h3>
+  <p>Three built-in source types, layered weakest-first:</p>
+  <table>
+    <tr><th>Source</th><th>Precedence</th><th>Use case</th></tr>
+    <tr><td><code>PropertiesConfigurationSource</code></td><td>Lowest</td><td><code>application.properties</code> file</td></tr>
+    <tr><td><code>EnvironmentVariablesSource</code></td><td>Medium</td><td>OS environment variables</td></tr>
+    <tr><td><code>SystemPropertiesSource</code></td><td>Highest</td><td><code>-D</code> JVM flags</td></tr>
+  </table>
+
+  <h3>Standard configuration</h3>
+  <p>The framework provides a standard three-layer configuration:</p>
+  <pre><code>Configuration config = Configuration.standard(
+    Path.of("application.properties"));
+
+// Layers: properties file &lt; env vars &lt; system properties
+// A key's own default sits below all three layers</code></pre>
+
+  <p>If the properties file does not exist, it contributes nothing rather than failing — running on defaults plus environment is a supported deployment.</p>
+
+  <h3>Custom configuration</h3>
+  <p>For custom layering, use <code>Configuration.of()</code>:</p>
+  <pre><code>Configuration config = Configuration.of(
+    PropertiesConfigurationSource.fromFile(Path.of("defaults.properties")),
+    EnvironmentVariablesSource.current(),
+    SystemPropertiesSource.current());</code></pre>
+
+  <h3>In-memory configuration for tests</h3>
+  <p>Tests use deterministic, file-free configuration:</p>
+  <pre><code>Configuration config = Configuration.inMemory(Map.of(
+    "server.port", "9090",
+    "server.host", "0.0.0.0"));</code></pre>
+
+  <h3>Type-safe configuration keys</h3>
+  <p>Configuration keys declare their type, so conversion errors fail fast. A component declares the keys it owns as constants, so a key name appears in exactly one place in the codebase and is greppable:</p>
+  <pre><code>// Declare keys as constants
+ConfigurationKey&lt;Integer&gt; PORT = ConfigurationKey.of(
+    "server.port", Integer.class, 8080);
+
+ConfigurationKey&lt;Duration&gt; TIMEOUT = ConfigurationKey.of(
+    "request.timeout", Duration.class, Duration.ofSeconds(30));
+
+ConfigurationKey&lt;String&gt; HOST = ConfigurationKey.of(
+    "server.host", String.class, "127.0.0.1");
+
+ConfigurationKey&lt;ThreadPolicy&gt; THREADS = ConfigurationKey.of(
+    "barezen.runtime.threads", ThreadPolicy.class, ThreadPolicy.AUTO);
+
+// Read values
+int port = config.get(PORT).orElse(8080);
+Duration timeout = config.get(TIMEOUT).orElse(Duration.ofSeconds(30));</code></pre>
+
+  <h3>Supported types</h3>
+  <p>The configuration system supports the following types out of the box:</p>
+  <table>
+    <tr><th>Type</th><th>Format</th><th>Example</th></tr>
+    <tr><td><code>String</code></td><td>Plain text</td><td><code>"hello"</code></td></tr>
+    <tr><td><code>Integer</code></td><td>Integer number</td><td><code>"8080"</code></td></tr>
+    <tr><td><code>Long</code></td><td>Long number</td><td><code>"9223372036854775807"</code></td></tr>
+    <tr><td><code>Boolean</code></td><td><code>true</code> or <code>false</code> (case-insensitive)</td><td><code>"true"</code></td></tr>
+    <tr><td><code>Duration</code></td><td>ISO-8601 duration</td><td><code>"PT10S"</code>, <code>"PT1H30M"</code></td></tr>
+    <tr><td>Enums</td><td>Enum name (case-insensitive)</td><td><code>"auto"</code> for <code>ThreadPolicy.AUTO</code></td></tr>
+  </table>
+
+  <p>Note: <code>Boolean</code> only accepts explicit <code>true</code> or <code>false</code>. A typo like <code>tru</code> will fail at startup rather than silently becoming <code>false</code>.</p>
+
+  <h3>Keys without defaults</h3>
+  <p>For optional configuration, declare a key with no default:</p>
+  <pre><code>ConfigurationKey&lt;String&gt; OPTIONAL_KEY = ConfigurationKey.of(
+    "optional.key", String.class);
+
+// Returns Optional.empty() if not configured
+Optional&lt;String&gt; value = config.get(OPTIONAL_KEY);</code></pre>
+
+  <h3>Key name validation</h3>
+  <p>Key names must be dot-separated segments of letters, digits, dashes, and underscores. Empty segments (e.g., <code>a..b</code>) are refused:</p>
+  <pre><code>// Valid
+ConfigurationKey.of("server.port", Integer.class, 8080);
+ConfigurationKey.of("my-app.host-name", String.class, "localhost");
+
+// Invalid — throws IllegalArgumentException
+ConfigurationKey.of("a..b", String.class);  // Empty segment
+ConfigurationKey.of("", String.class);       // Blank name</code></pre>
+
+  <h3>Error handling</h3>
+  <p>If a present value cannot be converted to the key's declared type, a <code>ConfigurationException</code> is thrown. A bad value is never replaced by a default, because a component quietly running on a fallback looks healthy while doing the wrong thing.</p>
+
+  <h2>Dependency injection</h2>
+  <p>BareZen uses explicit, reflection-free dependency injection (ADR-0014). There are no annotations, no classpath scanning, and no constructor picked by reflection. An application states what it has, and the framework works out the creation order.</p>
+
+  <h3>ServiceAssembly</h3>
+  <p>The assembly is where an application states what it has, and the framework works out the creation order:</p>
+  <pre><code>ServiceAssembly assembly = ServiceAssembly.builder()
+    .instance(DataSource.class, dataSource)          // caller-built, caller-owned
+    .factory(UserRepository.class, services ->
+        new SqlUserRepository(services.require(DataSource.class)))
+    .factory(UserService.class, services ->
+        new UserService(services.require(UserRepository.class)))
+    .build();
+
+UserService service = assembly.require(UserService.class);</code></pre>
+
+  <h3>Two registration methods</h3>
+  <table>
+    <tr><th>Method</th><th>Ownership</th><th>When to use</th></tr>
+    <tr><td><code>instance(Class, T)</code></td><td>Caller owns the instance</td><td>For objects created externally (DataSource, LifecycleParticipants)</td></tr>
+    <tr><td><code>factory(Class, Function)</code></td><td>Assembly owns the instance</td><td>For objects the assembly should create and close</td></tr>
+  </table>
+
+  <h3>Ownership rules</h3>
+  <ul>
+    <li><code>factory()</code> — the assembly creates and owns the instance. <code>close()</code> releases it in reverse creation order.</li>
+    <li><code>instance()</code> — the caller created it and releases it. The assembly never touches it.</li>
+  </ul>
+  <p>A component that is also a <code>LifecycleParticipant</code> should be registered via <code>instance()</code>, because the orchestrator drives its <code>stop()</code>, and two owners releasing one object causes double-release bugs.</p>
+
+  <h3>Services interface</h3>
+  <p>The <code>Services</code> interface is the view a factory receives during assembly. It is <strong>not</strong> a service locator: only assembly code and factories should hold this type. Two ArchUnit rules enforce this boundary (ADR-0006).</p>
+  <pre><code>// Inside a factory:
+.factory(MyService.class, services -> {
+    DataSource ds = services.require(DataSource.class);  // mandatory dependency
+    EventBus bus = services.find(EventBus.class).orElse(null);  // optional dependency
+    return new MyService(ds, bus);
+})</code></pre>
+
+  <h3>Resolution behavior</h3>
+  <ul>
+    <li><code>require(Class&lt;T&gt;)</code> — returns the object bound to the type, or throws <code>AssemblyException</code> if nothing is bound.</li>
+    <li><code>find(Class&lt;T&gt;)</code> — returns <code>Optional&lt;T&gt;</code>, empty when nothing is bound.</li>
+  </ul>
+
+  <h3>Closing the assembly</h3>
+  <p>When done, close the assembly to release all factory-created instances:</p>
+  <pre><code>try (ServiceAssembly assembly = ServiceAssembly.builder()
+    .factory(EventBus.class, s -> EventBus.create())
+    .factory(AuthPlugin.class, s ->
+        new AuthPlugin(s.require(EventBus.class)))
+    .build()) {
+    // use assembly
+} // factory-created instances are closed in reverse order</code></pre>
+
+  <h3>Error scenarios</h3>
+  <p>The assembly detects and reports the following errors at build time:</p>
+  <table>
+    <tr><th>Error</th><th>When</th></tr>
+    <tr><td>Missing dependency</td><td>A factory calls <code>require()</code> for a type that was never registered.</td></tr>
+    <tr><td>Circular dependency</td><td>A depends on B, B depends on A. The error message shows the full cycle path.</td></tr>
+    <tr><td>Duplicate registration</td><td>Two <code>instance()</code> or <code>factory()</code> calls for the same type.</td></tr>
+    <tr><td>Factory returned null</td><td>A factory returned <code>null</code> instead of an instance.</td></tr>
+    <tr><td>Type mismatch</td><td>A factory returned an object that is not an instance of the registered type.</td></tr>
+  </table>
+
+  <h3>Release order</h3>
+  <p>The recommended release order is: stop the <code>LifecycleOrchestrator</code> first, then close the <code>ServiceAssembly</code>. A participant finishing work during <code>stop()</code> may still be using the infrastructure assembled here.</p>
+
+  <h2>Event bus</h2>
+  <p>The event bus is a synchronous, in-process pub/sub mechanism (ADR-0017). It has no executor, no queue, and no worker thread.</p>
+
+  <h3>Dispatch contract</h3>
+  <ul>
+    <li><strong>Synchronous.</strong> <code>publish(event)</code> invokes every handler on the calling thread and only then returns.</li>
+    <li><strong>Exact type matching.</strong> A handler registered for <code>UserCreated.class</code> receives only exact instances — no supertype or interface matching.</li>
+    <li><strong>Registration order is invocation order.</strong> First registered, first invoked.</li>
+    <li><strong>First handler failure ends dispatch.</strong> The exception propagates unchanged; later handlers are not invoked.</li>
+    <li><strong>No lifecycle.</strong> The bus is not a <code>LifecycleParticipant</code> and has no <code>close()</code>.</li>
+    <li><strong>Concurrent publishing is supported.</strong> Two threads may publish at the same time.</li>
+  </ul>
+
+  <h3>Usage</h3>
+  <pre><code>EventBus bus = EventBus.create();
+
+// Define an event type
+record UserCreated(String username) {}
+
+// Subscribe
+Subscription sub = bus.subscribe(UserCreated.class, event -> {
+    log.info("User created: {}", event.username());
+});
+
+// Publish
+bus.publish(new UserCreated("alice"));
+
+// Unsubscribe when done
+sub.cancel();</code></pre>
+
+  <h3>Wiring with ServiceAssembly</h3>
+  <pre><code>ServiceAssembly assembly = ServiceAssembly.builder()
+    .factory(EventBus.class, s -> EventBus.create())
+    .factory(AuthPlugin.class, s ->
+        new AuthPlugin(s.require(EventBus.class)))
+    .build();</code></pre>
+
+  <h3>When to use the event bus</h3>
+  <p>The event bus is suitable for:</p>
+  <ul>
+    <li>Decoupling components: a component publishes an event without knowing who listens.</li>
+    <li>Auditing: a handler logs every <code>UserCreated</code> event.</li>
+    <li>Notifications: a handler sends an email when an order is placed.</li>
+  </ul>
+  <p>The event bus is <strong>not</strong> suitable for:</p>
+  <ul>
+    <li>Asynchronous processing: use an executor or message queue instead.</li>
+    <li>Cross-process communication: use a message broker instead.</li>
+    <li>Reliable delivery: if a handler fails, later handlers are not invoked.</li>
+  </ul>
+
+  <h2>Thread model</h2>
+  <p>BareZen supports both platform threads and virtual threads (Java 21+). The thread model is resolved at assembly time, not scattered across components.</p>
+
+  <h3>Thread policies</h3>
+  <table>
+    <tr><th>Policy</th><th>Behavior</th></tr>
+    <tr><td><code>AUTO</code></td><td>Picks virtual threads on Java 21+, platform threads otherwise. This is the default.</td></tr>
+    <tr><td><code>PLATFORM</code></td><td>Always platform threads, even on Java 21+. Use for legacy compatibility.</td></tr>
+    <tr><td><code>VIRTUAL</code></td><td>Virtual threads or fails startup. Use when virtual threads are required.</td></tr>
+  </table>
+
+  <h3>Runtime capability detection</h3>
+  <p><code>RuntimeCapabilities.detect()</code> probes the JVM for virtual thread support. The orchestrator uses this to resolve the thread provider:</p>
+  <pre><code>LifecycleOrchestrator.builder()
+    .threadPolicy(ThreadPolicy.AUTO)  // auto-detect
+    .build();</code></pre>
+
+  <h3>Scoped providers</h3>
+  <p>Each subsystem that needs executor ownership asks for its own <code>ThreadProvider</code> (ADR-0011). Shutting one down cannot affect another:</p>
+  <pre><code>ThreadProvider provider = ThreadProviders.create(
+    ThreadPolicy.AUTO, RuntimeCapabilities.detect());
+
+ExecutorService executor = provider.newBoundedExecutor(4, "worker");
+// ... use executor ...
+provider.close();  // releases all executors created by this provider</code></pre>
+
+  <h3>ThreadProvider API</h3>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>kind()</code></td><td>Returns <code>Kind.PLATFORM</code> or <code>Kind.VIRTUAL</code>.</td></tr>
+    <tr><td><code>name()</code></td><td>Short stable identifier for logs, e.g., <code>"virtual"</code>.</td></tr>
+    <tr><td><code>preferred()</code></td><td>Returns <code>true</code> when this is the recommended choice (what AUTO resolves to).</td></tr>
+    <tr><td><code>newBoundedExecutor(int maxConcurrency, String namePrefix)</code></td><td>Creates a bounded executor. Excess tasks are queued, not dropped.</td></tr>
+    <tr><td><code>newUnboundedExecutor(String namePrefix)</code></td><td>Creates an unbounded executor. Prefer bounded whenever the workload reaches a limited resource.</td></tr>
+    <tr><td><code>close()</code></td><td>Shuts down all executors created by this provider. Idempotent and never throws.</td></tr>
+  </table>
+
+  <h3>Default close timeout</h3>
+  <p>The default close timeout is 10 seconds (<code>ThreadProviders.DEFAULT_CLOSE_TIMEOUT</code>). Executors that refuse to terminate within this timeout are logged and force-stopped.</p>
+
+  <h2>Plugin interface</h2>
+  <p>The <code>Plugin</code> interface in core defines the contract that all plugins implement. A plugin is a <code>LifecycleParticipant</code> that can contribute routes, handlers, or other capabilities (ADR-0016).</p>
+
+  <pre><code>public interface Plugin extends LifecycleParticipant {
+    PluginDescriptor descriptor();
+}</code></pre>
+
+  <p>Plugins are discovered via <code>PluginDiscovery</code> using <code>ServiceLoader</code> (ADR-0048), and registered through <code>PluginRegistration</code> (ADR-0041). See the <a href="plugins.html">Plugins</a> page for writing plugins.</p>
+
+  <h2>Error types</h2>
+  <table>
+    <tr><th>Exception</th><th>When</th></tr>
+    <tr><td><code>StartupException</code></td><td>A participant failed during initialize() or start(). Contains the phase (INITIALIZE/START) and participant ID.</td></tr>
+    <tr><td><code>LifecycleException</code></td><td>Illegal state transition (e.g., start() on a RUNNING app).</td></tr>
+    <tr><td><code>AssemblyException</code></td><td>Missing or circular dependency in ServiceAssembly, or factory returned null.</td></tr>
+    <tr><td><code>ConfigurationException</code></td><td>Value cannot be converted to the key's declared type. Names the key, raw value, and source.</td></tr>
+    <tr><td><code>ThreadCapabilityUnavailableException</code></td><td>Virtual threads requested but JVM doesn't support them.</td></tr>
+  </table>
+
+  <h2>Best practices</h2>
+  <h3>Lifecycle management</h3>
+  <ul>
+    <li>Register participants in dependency order: infrastructure first, then business logic, then the HTTP adapter last.</li>
+    <li>Use try-with-resources for the orchestrator in embedded applications.</li>
+    <li>Turn off the shutdown hook when deploying to a container (Tomcat, Jetty).</li>
+    <li>Keep <code>initialize()</code> and <code>start()</code> fast — they block the startup thread.</li>
+  </ul>
+
+  <h3>Configuration</h3>
+  <ul>
+    <li>Declare all configuration keys as <code>static final</code> constants in the component that uses them.</li>
+    <li>Provide sensible defaults so the application runs without a properties file.</li>
+    <li>Use <code>Configuration.inMemory()</code> in tests for deterministic values.</li>
+    <li>Never write to configuration after startup — it is a read-only snapshot.</li>
+  </ul>
+
+  <h3>Dependency injection</h3>
+  <ul>
+    <li>Use <code>instance()</code> for objects the caller creates and owns (DataSource, LifecycleParticipants).</li>
+    <li>Use <code>factory()</code> for objects the assembly should create and close.</li>
+    <li>Never store the <code>Services</code> view in a field — it becomes invalid after <code>build()</code>.</li>
+    <li>Pass dependencies through constructors, not through the Services view at runtime.</li>
+  </ul>
+
+  <h3>Event bus</h3>
+  <ul>
+    <li>Keep event handlers fast and synchronous — they run on the publisher's thread.</li>
+    <li>Use record types for events to make them immutable and self-documenting.</li>
+    <li>Cancel subscriptions when the subscriber is no longer needed to avoid memory leaks.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"Cannot start in state RUNNING"</h3>
+  <p>This means <code>start()</code> was called twice. The orchestrator is not reentrant — once it reaches RUNNING, it stays there until stopped.</p>
+
+  <h3>"Nothing is registered as X"</h3>
+  <p>A factory called <code>require(X.class)</code> but <code>X</code> was never registered. Check that all dependencies are registered before calling <code>build()</code>.</p>
+
+  <h3>"Dependency cycle: A -> B -> A"</h3>
+  <p>Two or more types depend on each other. Refactor to break the cycle, for example by introducing an interface or moving one dependency to a different layer.</p>
+
+  <h3>"Value 'abc' of configuration key 'server.port' is not a valid Integer"</h3>
+  <p>A configuration value cannot be converted to the key's declared type. Check the properties file and environment variables for typos.</p>
+
+  <div class="notes">
+    <p>Next: <a href="web.html">Web core</a> — Request, Response, Router, and Handler — the server-agnostic HTTP contract.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · core concepts · lifecycle, configuration, DI, events, threads.</p></div>
+</footer>
+</body>
+</html>

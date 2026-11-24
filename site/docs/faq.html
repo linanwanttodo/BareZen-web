@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html" aria-current="page">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/faq.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Frequently asked questions</h1>
+  <p class="lede">Common questions about BareZen's design, architecture, and usage patterns.</p>
+
+  <h2>Design decisions</h2>
+
+  <h3>Why no annotations or reflection?</h3>
+  <p>BareZen uses explicit, reflection-free dependency injection (ADR-0014). There are no <code>@Inject</code>, <code>@Component</code>, or <code>@Autowired</code> annotations. An application states what it has in code, and the framework works out the creation order. This makes dependencies visible at the call site, greppable, and refactorable with standard IDE tools.</p>
+
+  <h3>Why is the router immutable?</h3>
+  <p>The router is immutable after <code>build()</code> (ADR-0019). There is no <code>unregister()</code>, <code>replace()</code>, or <code>reload()</code>. This means a request thread cannot race a registration — the race does not exist. If you need to change routes at runtime, build a new router and swap the reference atomically.</p>
+
+  <h3>Why no wildcard routes like /assets/*?</h3>
+  <p>The router answers "which handler is this request for" using exact segments or <code>{name}</code> parameters. There is no wildcard, prefix match, or multi-segment capture (ADR-0019 §5, §19). For static files, enumerate them — one route per asset. This keeps the router a simple, one-question component.</p>
+
+  <h3>Why is the request body in memory?</h3>
+  <p><code>Request.body()</code> returns <code>byte[]</code> (ADR-0030). A streaming body would require the contract to say who closes the stream, what happens when a handler returns without reading it, and what happens when a handler hands it to another thread. None of those questions has an answer that does not depend on a server. For large file uploads, use the adapter's request body limit configuration.</p>
+
+  <h3>Why no Content-Length in Response?</h3>
+  <p><code>Content-Length</code> and <code>Transfer-Encoding</code> are not a handler's to write (ADR-0027). These fields describe how many bytes follow the header block — a fact about the connection, not the application's answer. Only the adapter writing bytes can state them truly. The adapter derives <code>Content-Length</code> from the body bytes.</p>
+
+  <h3>Why two-phase startup?</h3>
+  <p>Startup runs in two global phases (ADR-0003): initialize then start. This guarantees that a participant that makes work observable (such as an HTTP server binding a port) does so only after every earlier participant has finished its setup. Interleaving the two phases per component cannot express this invariant.</p>
+
+  <h3>Why is SecurityContext not a ThreadLocal?</h3>
+  <p>A thread is not a request. A server thread may handle many requests, and a request may not complete on the thread that started it. A <code>ThreadLocal</code> would leak one request's identity into another. The context is request-scoped and passed through the middleware chain.</p>
+
+  <h2>Architecture</h2>
+
+  <h3>What is the difference between JdkHttpServerAdapter and BarezenServlet?</h3>
+  <table>
+    <tr><th></th><th>JdkHttpServerAdapter</th><th>BarezenServlet</th></tr>
+    <tr><td>Owns port</td><td>Yes</td><td>No — container owns it</td></tr>
+    <tr><td>Owns threads</td><td>Yes (virtual or platform)</td><td>No — container owns them</td></tr>
+    <tr><td>Lifecycle</td><td>HttpServerAdapter (start/stop)</td><td>HttpServlet (init/destroy)</td></tr>
+    <tr><td>Deployment</td><td>Embedded, run from main()</td><td>WAR deployed to Tomcat/Jetty/Wildfly</td></tr>
+    <tr><td>TLS</td><td>Built-in via configuration</td><td>Container-managed</td></tr>
+  </table>
+
+  <h3>Can I use both adapters in the same application?</h3>
+  <p>Yes, but they would be separate servers on different ports. Typically you choose one: JDK adapter for embedded deployments, Servlet for container deployments.</p>
+
+  <h3>How do I add middleware?</h3>
+  <p>BareZen does not have a generic middleware chain. Instead, use these patterns:</p>
+  <ul>
+    <li><strong>RouteContributor</strong> — for adding routes from plugins.</li>
+    <li><strong>Handler wrapping</strong> — wrap a handler to add cross-cutting behavior (logging, timing, CORS).</li>
+    <li><strong>SecurityMiddleware</strong> — for authentication and authorization.</li>
+  </ul>
+  <pre><code>// Example: Logging wrapper
+Handler logging(Handler inner) {
+    return (req, params) -> {
+        long start = System.nanoTime();
+        try {
+            return inner.handle(req, params);
+        } finally {
+            long elapsed = System.nanoTime() - start;
+            System.out.println(req.method() + " " + req.path() + " " + elapsed + "ns");
+        }
+    };
+}</code></pre>
+
+  <h3>How do I handle CORS?</h3>
+  <p>Wrap your handler to add CORS headers:</p>
+  <pre><code>Handler cors(Handler inner) {
+    return (req, params) -> {
+        if (req.method() == HttpMethod.OPTIONS) {
+            return new Response(204, Headers.empty(), null);
+        }
+        Response response = inner.handle(req, params);
+        // Add CORS headers to the response
+        return response; // With additional headers
+    };
+}</code></pre>
+
+  <h2>Configuration</h2>
+
+  <h3>What configuration keys are available?</h3>
+  <table>
+    <tr><th>Key</th><th>Module</th><th>Description</th></tr>
+    <tr><td><code>barezen.http.jdk.maxRequestBodyBytes</code></td><td>http-jdk</td><td>Max request body size (default: 1 MB)</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePath</code></td><td>http-jdk</td><td>Path to keystore for HTTPS</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePassword</code></td><td>http-jdk</td><td>Keystore password</td></tr>
+  </table>
+
+  <h3>How do I override configuration?</h3>
+  <p>Configuration layers are ordered weakest-first: properties file &lt; environment variables &lt; system properties. To override:</p>
+  <pre><code># Properties file (lowest priority)
+server.port=8080
+
+# Environment variable (medium priority)
+export BAREZEN_HTTP_JDK_TLS_KEYSTOREPATH=/path/to/keystore.p12
+
+# JVM system property (highest priority)
+java -Dserver.port=9090 -jar app.jar</code></pre>
+
+  <h2>Database</h2>
+
+  <h3>Which databases are supported?</h3>
+  <p>Any JDBC-compliant database. The framework has been tested with H2 (in-memory), PostgreSQL, and MySQL. The <code>Database</code> class is product-agnostic — it takes a <code>DataSource</code> and never names a driver.</p>
+
+  <h3>How do I use connection pooling?</h3>
+  <p>Create a pooled DataSource and pass it to <code>Database</code>:</p>
+  <pre><code>HikariConfig config = new HikariConfig();
+config.setJdbcUrl("jdbc:postgresql://localhost/mydb");
+config.setUsername("user");
+config.setPassword("password");
+DataSource ds = new HikariDataSource(config);
+Database db = new Database(ds);</code></pre>
+
+  <h3>Can I nest transactions?</h3>
+  <p>No. Each <code>transaction()</code> call opens a new connection on a new thread. Nesting is not supported (ADR-0039). If you need savepoints, use the underlying JDBC connection directly inside a transaction callback.</p>
+
+  <h2>Security</h2>
+
+  <h3>What's the difference between 401 and 403?</h3>
+  <ul>
+    <li><strong>401 Unauthorized</strong> — The client is not authenticated. The credential was bad or missing. Return <code>AuthenticationResult.failure()</code>.</li>
+    <li><strong>403 Forbidden</strong> — The client is authenticated but not authorized. The identity does not have the required permission. Return <code>Authorization.Decision.DENY</code>.</li>
+  </ul>
+
+  <h3>How do I implement JWT authentication?</h3>
+  <p>Implement the <code>Authentication</code> interface:</p>
+  <pre><code>Authentication jwtAuth = (credential) -> {
+    if (credential == null || !credential.scheme().equals("Bearer")) {
+        return AuthenticationResult.anonymous();
+    }
+    try {
+        Claims claims = Jwts.parser()
+            .setSigningKey(secret)
+            .parseClaimsJws(credential.value())
+            .getBody();
+        String username = claims.getSubject();
+        return AuthenticationResult.authenticated(Principal.of(username));
+    } catch (JwtException e) {
+        return AuthenticationResult.failure("invalid token");
+    }
+};</code></pre>
+
+  <h3>Are sessions distributed?</h3>
+  <p>No. <code>SessionStore</code> is in-memory only. A server restart invalidates all sessions. For distributed deployments, implement your own session store backed by Redis or a database.</p>
+
+  <h2>Testing</h2>
+
+  <h3>Why use TestServer instead of mocking?</h3>
+  <p><code>TestServer</code> starts a real HTTP server on a random port. An integration test that used a fake server would only prove the fake works. The bytes that cross the socket are the bytes the production adapter produces.</p>
+
+  <h3>Can I run tests in parallel?</h3>
+  <p>Yes. Each <code>TestServer</code> uses a random port (port 0), so parallel test classes never fight over a fixed number.</p>
+
+  <h2>Deployment</h2>
+
+  <h3>How do I deploy to production?</h3>
+  <p>Two options:</p>
+  <ol>
+    <li><strong>Embedded</strong> — Package as a JAR with a <code>main()</code> method. Use <code>JdkHttpServerAdapter</code> with configuration from <code>application.properties</code>.</li>
+    <li><strong>Container</strong> — Package as a WAR. Use <code>BarezenServlet</code> deployed to Tomcat, Jetty, or Wildfly.</li>
+  </ol>
+
+  <h3>How do I enable HTTPS in production?</h3>
+  <p>For JDK adapter, configure the keystore in <code>application.properties</code>:</p>
+  <pre><code>barezen.http.jdk.tls.keystorePath=/path/to/keystore.p12
+barezen.http.jdk.tls.keystorePassword=changeit</code></pre>
+
+  <p>For Servlet deployment, configure TLS at the container level (Tomcat's <code>server.xml</code>, Jetty's <code>etc/jetty-ssl.xml</code>).</p>
+
+  <h3>How do I handle graceful shutdown?</h3>
+  <p>The <code>LifecycleOrchestrator</code> registers a JVM shutdown hook by default. It gives in-flight requests 3 seconds to complete. For container deployment, turn off the shutdown hook:</p>
+  <pre><code>LifecycleOrchestrator.builder()
+    .registerShutdownHook(false)
+    .build();</code></pre>
+
+  <h2>Performance</h2>
+
+  <h3>Does BareZen use virtual threads?</h3>
+  <p>On Java 21+, yes — by default. The JDK adapter auto-detects virtual thread support and uses them. On Java 17, it falls back to platform threads.</p>
+
+  <h3>What is the request body limit?</h3>
+  <p>Default is 1 MB. Configure it via <code>barezen.http.jdk.maxRequestBodyBytes</code> (JDK adapter) or <code>barezen.maxRequestBodyBytes</code> init parameter (Servlet). Requests exceeding the limit are rejected with 413 before the handler runs.</p>
+
+  <h3>Is StaticContent suitable for large files?</h3>
+  <p>No. <code>StaticContent</code> reads the whole file into memory. It is designed for stylesheets, JavaScript, images, and small documents. For large files (videos, downloads), write a custom handler that streams the response.</p>
+
+  <h2>Migrating from other frameworks</h2>
+
+  <h3>How does BareZen compare to Spring Boot?</h3>
+  <table>
+    <tr><th>Feature</th><th>Spring Boot</th><th>BareZen</th></tr>
+    <tr><td>DI</td><td>Annotation-based, reflection</td><td>Explicit, no reflection</td></tr>
+    <tr><td>Routing</td><td>@RequestMapping annotations</td><td>Programmatic Router.builder()</td></tr>
+    <tr><td>Server</td><td>Embedded Tomcat/Jetty/Undertow</td><td>JDK HttpServer or Servlet</td></tr>
+    <tr><td>Dependencies</td><td>Heavy (Spring Framework)</td><td>Minimal (slf4j-api only for core)</td></tr>
+    <tr><td>Startup time</td><td>Seconds</td><td>Milliseconds</td></tr>
+    <tr><td>Learning curve</td><td>Steep (many abstractions)</td><td>Shallow (few concepts)</td></tr>
+  </table>
+
+  <h3>What if I need a feature BareZen doesn't have?</h3>
+  <p>BareZen is designed to be minimal. If you need a feature not built in:</p>
+  <ul>
+    <li>Write a handler wrapper for cross-cutting concerns (logging, CORS, rate limiting).</li>
+    <li>Write a RouteContributor for plugin-style route additions.</li>
+    <li>Use a standard Java library (Jackson for JSON, HikariCP for pooling) alongside BareZen.</li>
+  </ul>
+  <p>The framework provides the contract (Request, Response, Handler, Router) and lets you fill in the rest.</p>
+
+  <h2>Getting help</h2>
+  <ul>
+    <li>Read the <a href="tutorial.html">tutorial</a> for a complete application walkthrough.</li>
+    <li>Check the <a href="api-reference.html">API reference</a> for class-level documentation.</li>
+    <li>Look at the <code>examples/</code> directory in the source repository for runnable examples.</li>
+    <li>Review the <a href="reference.html">ADR index</a> for design decision rationale.</li>
+  </ul>
+
+  <div class="notes">
+    <p>Back to <a href="../index.html">home</a> or start with the <a href="quick-start.html">quick start</a>.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · FAQ · design decisions, architecture, troubleshooting.</p></div>
+</footer>
+</body>
+</html>

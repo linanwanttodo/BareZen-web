@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web core — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html" aria-current="page">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/web.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Web core</h1>
+  <p class="lede">barezen-web defines the HTTP contract: Request, Response, Router, and Handler — server-agnostic and immutable.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-web</code> module defines the core HTTP abstractions. It depends only on <code>barezen-core</code> and has no server-specific dependencies. This is what lets the same handler run on any HTTP server — JDK HttpServer, Tomcat, Jetty, or Wildfly.</p>
+
+  <p>It contains ten types in a single package:</p>
+  <table>
+    <tr><th>Type</th><th>Role</th></tr>
+    <tr><td><code>Handler</code></td><td>Functional interface: <code>Response handle(Request, Map)</code></td></tr>
+    <tr><td><code>Request</code></td><td>Immutable request: method, path, query, headers, body</td></tr>
+    <tr><td><code>Response</code></td><td>Immutable response: status, headers, body</td></tr>
+    <tr><td><code>Headers</code></td><td>Multi-value header collection</td></tr>
+    <tr><td><code>HttpMethod</code></td><td>HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT, TRACE</td></tr>
+    <tr><td><code>Router</code></td><td>Route table: matches requests to handlers</td></tr>
+    <tr><td><code>RouteMatch</code></td><td>Result of a match: handler + captured parameters</td></tr>
+    <tr><td><code>RouteContributor</code></td><td>Extension point for plugins to add routes</td></tr>
+    <tr><td><code>HttpServerAdapter</code></td><td>Interface for server-specific adapters</td></tr>
+    <tr><td><code>HttpServerAdapterProvider</code></td><td>SPI for discovering adapters</td></tr>
+  </table>
+
+  <h2>Handler contract</h2>
+  <p>A handler is the entire extension surface of the web layer. One method, synchronous, returning a value:</p>
+  <pre><code>@FunctionalInterface
+public interface Handler {
+    Response handle(Request request, Map&lt;String, String&gt; parameters);
+}</code></pre>
+
+  <p>Two arguments, one return value. The handler receives the request and any path parameters captured by the router, and returns a response. There is no servlet context, no thread-local, no request scope — just data in, data out.</p>
+
+  <h3>Parameters map</h3>
+  <p>The <code>parameters</code> map contains the path parameters captured by the matched route pattern, keyed by the names declared in the pattern. It is immutable and raw (not percent-decoded). For a route with no parameters, it is an empty map (never null).</p>
+  <pre><code>// Route: GET /users/{id}/posts/{postId}
+// Request: GET /users/42/posts/7
+// parameters: {"id": "42", "postId": "7"}</code></pre>
+
+  <h3>Failure semantics</h3>
+  <ul>
+    <li>An exception may propagate out of a handler — nothing in this contract catches it.</li>
+    <li>A handler that translates its own failure into a <code>500</code> is fine, and a handler that lets a database exception escape is too.</li>
+    <li>Who turns an escaping exception into a response to the client is an adapter's decision, not the handler's.</li>
+  </ul>
+
+  <h3>Thread safety</h3>
+  <p>Handlers are invoked concurrently by an adapter. A handler must not hold mutable per-request state in fields. What belongs in a field is what was injected at construction. The parameters map is already per-request, immutable, and built by the route table.</p>
+
+  <h2>Request</h2>
+  <p>The <code>Request</code> type carries five facts about what the client sent (ADR-0018). Instances are immutable — arrays and lists are copied on access.</p>
+
+  <h3>Fields</h3>
+  <table>
+    <tr><th>Method</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>method()</code></td><td><code>HttpMethod</code></td><td>GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT, TRACE</td></tr>
+    <tr><td><code>path()</code></td><td><code>String</code></td><td>Raw path, percent-encoded, starting with <code>/</code> or <code>*</code> for OPTIONS *</td></tr>
+    <tr><td><code>query()</code></td><td><code>Optional&lt;String&gt;</code></td><td>Raw query without <code>?</code>; absent is distinct from empty</td></tr>
+    <tr><td><code>headers()</code></td><td><code>Headers</code></td><td>Multi-value header collection, never null</td></tr>
+    <tr><td><code>body()</code></td><td><code>byte[]</code></td><td>Complete body in memory; copied on each call. Empty array when no body.</td></tr>
+  </table>
+
+  <h3>Raw paths</h3>
+  <p>The path is kept in the form that arrived on the wire. Nothing is percent-decoded:</p>
+  <ul>
+    <li><code>/a%2Fb</code> is one segment containing a slash, while <code>/a/b</code> is two segments.</li>
+    <li><code>/%2e%2e/x</code> is not decoded to <code>/../x</code> — decoding is a decision about one resource, made by whoever owns it.</li>
+  </ul>
+  <p>There is no <code>uri()</code>, no <code>param(name)</code>, and no decoded twin of <code>path()</code>. A query parameter map is a parse with rules of its own and belongs to a helper, not the request type.</p>
+
+  <h3>Query: absent vs empty</h3>
+  <p>Absent and empty stay distinct: <code>/search</code> gives <code>Optional.empty()</code> while <code>/search?</code> gives <code>Optional.of("")</code>. A handler that treats those as one cannot tell "no filter given" from "filtered by nothing".</p>
+
+  <h3>Body in memory</h3>
+  <p><code>body()</code> returns a copy of the whole body as <code>byte[]</code>. This is a deliberate trade-off: a streaming body would require the contract to say who closes the stream, what happens when a handler returns without reading it, and what happens when a handler hands it to another thread. None of those questions has an answer that does not depend on a server.</p>
+
+  <h3>Constructor validation</h3>
+  <p>The constructor validates that the path starts with <code>/</code> or is exactly <code>*</code> (for <code>OPTIONS *</code>). A relative path like <code>user/1</code> is refused.</p>
+
+  <h2>Response</h2>
+  <p>A response is produced, not edited. A handler builds one and returns it — there is no <code>setStatus</code>, <code>addHeader</code>, or <code>send</code>:</p>
+  <pre><code>new Response(200, Headers.of("Content-Type", "application/json"), jsonBytes);</code></pre>
+
+  <h3>Fields</h3>
+  <table>
+    <tr><th>Method</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>status()</code></td><td><code>int</code></td><td>Status code between 100 and 599</td></tr>
+    <tr><td><code>headers()</code></td><td><code>Headers</code></td><td>Response headers, never null</td></tr>
+    <tr><td><code>body()</code></td><td><code>byte[]</code></td><td>Response body; copied on each call. Empty array when no body.</td></tr>
+  </table>
+
+  <h3>Enforced rules</h3>
+  <p>Two rules are enforced at construction (ADR-0027):</p>
+  <ol>
+    <li><strong>Status that forbids a body is not given one.</strong> HTTP says <code>1xx</code>, <code>204</code>, and <code>304</code> carry no body. A non-empty body alongside one of those statuses is refused at construction with a clear error message.</li>
+    <li><strong>Content-Length and Transfer-Encoding are not a handler's to write.</strong> These fields describe how many bytes follow the header block — a fact about the connection, not the application's answer. Only the adapter writing bytes can state them truly.</li>
+  </ol>
+
+  <h3>HEAD responses</h3>
+  <p>A handler returns the same <code>Response</code> for HEAD that it would for GET. The adapter decides both consequences: it writes no body bytes, and it derives the <code>Content-Length</code> of the body it did not write. A handler that returned an empty body for HEAD would be reporting a zero-length representation.</p>
+
+  <h3>Status code validation</h3>
+  <p>Status codes must be between 100 and 599 inclusive. An out-of-range code cannot be written on a response line, and a client branches on the status — so a wrong one is not a cosmetic error, it is the wrong answer delivered successfully.</p>
+
+  <h3>Common response patterns</h3>
+  <pre><code>// 200 OK with JSON body
+new Response(200,
+    Headers.of("Content-Type", "application/json"),
+    "{\"message\":\"ok\"}".getBytes(StandardCharsets.UTF_8));
+
+// 204 No Content
+new Response(204, Headers.empty(), null);
+
+// 404 Not Found
+new Response(404,
+    Headers.of("Content-Type", "text/plain; charset=utf-8"),
+    "Not Found".getBytes(StandardCharsets.UTF_8));
+
+// 304 Not Modified (no body allowed)
+new Response(304, Headers.of("ETag", "\"abc123\""), null);
+
+// 302 Redirect
+new Response(302, Headers.of("Location", "/new-path"), null);</code></pre>
+
+  <h2>Headers</h2>
+  <p>Headers are a multi-value collection. Each name can have multiple values, preserving the HTTP semantics where <code>Set-Cookie</code> or <code>Accept</code> commonly carry multiple values.</p>
+
+  <h3>API methods</h3>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>Headers.empty()</code></td><td>Returns an immutable empty instance, shared.</td></tr>
+    <tr><td><code>Headers.of(String name, String value)</code></td><td>Creates headers with one field.</td></tr>
+    <tr><td><code>with(String name, String value)</code></td><td>Returns a new instance with one more field appended. Calling twice with the same name gives a field with two values.</td></tr>
+    <tr><td><code>first(String name)</code></td><td>Returns the first value of a field as <code>Optional&lt;String&gt;</code>. Case-insensitive name matching.</td></tr>
+    <tr><td><code>values(String name)</code></td><td>Returns all values of a field in order. Returns an empty list if the field was not sent.</td></tr>
+    <tr><td><code>names()</code></td><td>Returns distinct field names in first-appearance order, spelled as given.</td></tr>
+  </table>
+
+  <h3>Four enforced rules</h3>
+  <ol>
+    <li><strong>Names are case-insensitive for matching, keep the case given for output.</strong> A response built with <code>Content-Type</code> is sent as <code>Content-Type</code>, not <code>content-type</code>.</li>
+    <li><strong>Repeated names keep every value, in order.</strong> <code>values("Set-Cookie")</code> returns all cookies.</li>
+    <li><strong>Absent and empty are different.</strong> A field sent as <code>X-Cursor:</code> exists with an empty value (<code>Optional.of("")</code>); a field that was never sent is <code>Optional.empty()</code>.</li>
+    <li><strong>A name is an HTTP token and a value holds no control characters.</strong> This is a security rule: a CR or LF in a header value starts a new response line (HTTP response splitting).</li>
+  </ol>
+
+  <h3>Usage example</h3>
+  <pre><code>Headers headers = Headers.of("Content-Type", "application/json")
+    .with("Cache-Control", "no-cache")
+    .with("Set-Cookie", "session=abc")
+    .with("Set-Cookie", "tracking=xyz");
+
+List&lt;String&gt; cookies = headers.values("Set-Cookie");
+// ["session=abc", "tracking=xyz"]
+
+Optional&lt;String&gt; contentType = headers.first("Content-Type");
+// Optional["application/json"]</code></pre>
+
+  <h2>HttpMethod</h2>
+  <p>An HTTP request method is a type rather than a <code>String</code>, because the first thing a web component does with a request is compare its method, and a bare <code>String</code> makes that a trap: <code>"Get".equals(request.method())</code> never matches.</p>
+
+  <h3>Standard methods</h3>
+  <table>
+    <tr><th>Constant</th><th>Description</th></tr>
+    <tr><td><code>GET</code></td><td>Request for a representation, answered with a body.</td></tr>
+    <tr><td><code>HEAD</code></td><td>GET with no response body. The adapter handles this.</td></tr>
+    <tr><td><code>POST</code></td><td>Submit a representation for processing.</td></tr>
+    <tr><td><code>PUT</code></td><td>Replace the target resource.</td></tr>
+    <tr><td><code>DELETE</code></td><td>Remove the target resource.</td></tr>
+    <tr><td><code>PATCH</code></td><td>Apply a partial modification.</td></tr>
+    <tr><td><code>OPTIONS</code></td><td>Ask what options the target resource supports (CORS preflight).</td></tr>
+    <tr><td><code>CONNECT</code></td><td>Turn the connection into a tunnel.</td></tr>
+    <tr><td><code>TRACE</code></td><td>Echo the request back to the client.</td></tr>
+  </table>
+
+  <h3>Custom methods</h3>
+  <p>This is a class rather than an enum, so it can hold methods not in the standard set (e.g., <code>PROPFIND</code> from WebDAV, <code>PURGE</code> from cache managers). Use <code>HttpMethod.of("PURGE")</code> to parse any method token.</p>
+
+  <h3>Case rules</h3>
+  <ul>
+    <li>The nine standard names are recognized in any case: <code>of("get")</code> returns <code>HttpMethod.GET</code>.</li>
+    <li>Any other name is kept exactly as it arrived and compared exactly.</li>
+  </ul>
+
+  <h2>Router</h2>
+  <p>The router is an immutable route table (ADR-0019). It answers "which handler is this request for" and does not answer "what should the client be told when the answer is nobody".</p>
+
+  <h3>Building routes</h3>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", (req, params) ->
+        new Response(200, Headers.of("Content-Type", "text/plain"), "OK".getBytes()))
+    .route(HttpMethod.GET, "/users/{id}", (req, params) -> {
+        String id = params.get("id");
+        return new Response(200, Headers.of("Content-Type", "application/json"),
+            ("{\"id\":\"" + id + "\"}").getBytes());
+    })
+    .build();</code></pre>
+
+  <h3>Matching semantics</h3>
+  <p>Matching is decided in this order:</p>
+  <ol>
+    <li><strong>Raw segments.</strong> The path is split on <code>/</code> and each segment is compared as the bytes arrived. Nothing is decoded or normalized.</li>
+    <li><strong>Exact segment count.</strong> <code>/users</code> and <code>/users/</code> are two different routes (different segment counts).</li>
+    <li><strong>Literal segments match exactly.</strong> Case-sensitive, percent-encoding included.</li>
+    <li><strong>Parameter segments <code>{name}</code> match any non-empty segment.</strong> Captured undecoded.</li>
+    <li><strong>The most literal pattern wins.</strong> <code>/users/new</code> beats <code>/users/{id}</code> for <code>GET /users/new</code>.</li>
+  </ol>
+
+  <h3>Route conflicts</h3>
+  <p>Two routes with the same method and the same shape are refused at build time. <code>/users/{id}</code> and <code>/users/{userId}</code> have the same shape and will collide — ambiguity is a question of shape, not spelling.</p>
+
+  <h3>Pattern validation</h3>
+  <p>Patterns are validated at registration time:</p>
+  <ul>
+    <li>Must start with <code>/</code>.</li>
+    <li>Must not contain <code>?</code> (query strings are not routing data).</li>
+    <li>Parameter names must be valid Java identifiers (letter followed by letters, digits, underscores).</li>
+    <li>A parameter name cannot be used twice in one pattern.</li>
+    <li>Braces must form a complete segment: <code>{name}</code> is valid, <code>{name}suffix</code> is not.</li>
+  </ul>
+
+  <h3>RouteContributor</h3>
+  <p>Plugins can contribute routes without modifying the router directly. A <code>RouteContributor</code> is called during the router's build phase:</p>
+  <pre><code>public interface RouteContributor {
+    void contributeRoutes(Router.Builder builder);
+}</code></pre>
+
+  <p>Use <code>contributing()</code> to apply contributors:</p>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", healthHandler)
+    .contributing(List.of(userPlugin, authPlugin))
+    .build();</code></pre>
+
+  <h3>Immutability</h3>
+  <p>The router is immutable after <code>build()</code>. There is no <code>unregister</code>, <code>replace</code>, or <code>reload</code>. A request thread cannot race a registration because the race does not exist.</p>
+
+  <h3>Methods for a path</h3>
+  <p><code>methodsFor(String path)</code> returns which methods have a route for a given path. This is how an adapter distinguishes 404 (no route for this path) from 405 (route exists but not for this method):</p>
+  <pre><code>Set&lt;HttpMethod&gt; methods = router.methodsFor("/users");
+// If GET /users is registered and POST /users is requested:
+// match() returns empty, methodsFor() returns [GET]
+// → Adapter answers 405 Method Not Allowed</code></pre>
+
+  <h2>HttpServerAdapter</h2>
+  <p>The <code>HttpServerAdapter</code> interface defines what every server adapter must implement:</p>
+  <pre><code>public interface HttpServerAdapter extends LifecycleParticipant {
+    Optional&lt;Integer&gt; port();
+}</code></pre>
+
+  <p>It extends <code>LifecycleParticipant</code>, so the orchestrator drives its startup and shutdown. The adapter is responsible for:</p>
+  <ul>
+    <li>Binding a network port</li>
+    <li>Reading bytes from the socket and building a <code>Request</code></li>
+    <li>Calling <code>Router.match()</code> to find the handler</li>
+    <li>Invoking the handler and writing the <code>Response</code> back</li>
+    <li>Handling HTTP errors (404, 405, 414, etc.)</li>
+  </ul>
+
+  <h2>Module dependencies</h2>
+  <p><code>barezen-web</code> depends only on <code>barezen-core</code>. No server adapter, no database driver, no security library. Everything else is a module you add on purpose:</p>
+  <ul>
+    <li><code>barezen-http-jdk</code> — JDK HttpServer adapter</li>
+    <li><code>barezen-http-servlet</code> — Servlet container adapter</li>
+    <li><code>barezen-security</code> — Authentication and authorization</li>
+    <li><code>barezen-data</code> — Database access</li>
+    <li><code>barezen-content</code> — Static file serving</li>
+  </ul>
+
+  <h2>Best practices</h2>
+  <h3>Handlers</h3>
+  <ul>
+    <li>Keep handlers stateless — inject dependencies through constructors, not through request fields.</li>
+    <li>Return a response for every code path — never return <code>null</code>.</li>
+    <li>Let exceptions propagate for unexpected errors; the adapter will handle them.</li>
+    <li>For expected errors (validation, not found), return the appropriate status code explicitly.</li>
+  </ul>
+
+  <h3>Routing</h3>
+  <ul>
+    <li>Register literal routes before parameterized ones for clarity, though the router handles priority automatically.</li>
+    <li>Use <code>RouteContributor</code> for plugin routes to keep the main router clean.</li>
+    <li>Build the router once at startup — it is immutable and thread-safe.</li>
+  </ul>
+
+  <h3>Responses</h3>
+  <ul>
+    <li>Always set <code>Content-Type</code> on responses with a body.</li>
+    <li>Use <code>Headers.empty()</code> for responses with no headers (the adapter still writes <code>Content-Length</code>).</li>
+    <li>Never set <code>Content-Length</code> or <code>Transfer-Encoding</code> — the adapter derives them.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"Route pattern must start with '/'"</h3>
+  <p>All route patterns must start with <code>/</code>. A relative pattern like <code>users/{id}</code> is refused — the router needs an absolute path to match against.</p>
+
+  <h3>"GET /users/{id} is already registered as /users/{userId}"</h3>
+  <p>Two routes with the same method and the same shape (same pattern structure) cannot coexist. <code>/users/{id}</code> and <code>/users/{userId}</code> both match <code>/users/42</code>, so the router refuses the second one at build time.</p>
+
+  <h3>"A 204 response cannot carry a body"</h3>
+  <p>HTTP defines <code>1xx</code>, <code>204</code>, and <code>304</code> as responses with no message body. Return an empty body (<code>null</code> or <code>new byte[0]</code>) for these statuses.</p>
+
+  <h3>"A response must not carry Content-Length"</h3>
+  <p>The adapter derives <code>Content-Length</code> from the body bytes. Setting it manually causes duplicate headers or protocol errors. Remove the <code>Content-Length</code> header from your response headers.</p>
+
+  <div class="notes">
+    <p>Next: <a href="http-jdk.html">JDK HTTP adapter</a> — running on JDK's built-in HttpServer with TLS support.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · web core · Request, Response, Router, Handler — server-agnostic contract.</p></div>
+</footer>
+</body>
+</html>

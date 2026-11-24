@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API reference — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html" aria-current="page">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/api-reference.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>API reference</h1>
+  <p class="lede">Complete index of all public classes and interfaces across the nine BareZen modules.</p>
+
+  <h2>barezen-core</h2>
+  <p>Foundation: lifecycle, configuration, DI, events, threading.</p>
+  <h3>com.barezen.core.kernel</h3>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>LifecycleOrchestrator</code></td><td>Drives startup, shutdown, and rollback for registered participants. Builder API: <code>register()</code>, <code>threadPolicy()</code>, <code>registerShutdownHook()</code>.</td></tr>
+    <tr><td><code>LifecycleParticipant</code></td><td>Interface with <code>initialize()</code>, <code>start()</code>, <code>stop()</code>, <code>abort()</code>. All have empty defaults.</td></tr>
+    <tr><td><code>ApplicationState</code></td><td>Enum: NEW, STARTING, RUNNING, STOPPING, STOPPED, FAILED.</td></tr>
+  </table>
+
+  <h3>com.barezen.core.config</h3>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>Configuration</code></td><td>Read-only configuration snapshot. Factories: <code>standard(Path)</code>, <code>inMemory(Map)</code>, <code>of(ConfigurationSource...)</code>.</td></tr>
+    <tr><td><code>ConfigurationKey&lt;T&gt;</code></td><td>Type-safe key with optional default. <code>ConfigurationKey.of(name, type, default)</code>.</td></tr>
+    <tr><td><code>ConfigurationSource</code></td><td>Interface for configuration sources. Implementations: <code>PropertiesConfigurationSource</code>, <code>EnvironmentVariablesSource</code>, <code>SystemPropertiesSource</code>.</td></tr>
+  </table>
+
+  <h3>com.barezen.core.di</h3>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>ServiceAssembly</code></td><td>Explicit DI container. Builder: <code>instance(Class, T)</code>, <code>factory(Class, Function)</code>. Resolution: <code>require(Class)</code>, <code>find(Class)</code>.</td></tr>
+    <tr><td><code>Services</code></td><td>View a factory receives during assembly. <code>require(Class)</code> and <code>find(Class)</code>.</td></tr>
+  </table>
+
+  <h3>com.barezen.core.event</h3>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>EventBus</code></td><td>Synchronous in-process pub/sub. <code>create()</code>, <code>subscribe(Class, EventHandler)</code>, <code>publish(T)</code>.</td></tr>
+    <tr><td><code>Subscription</code></td><td>Handle returned by subscribe. <code>cancel()</code> to unsubscribe.</td></tr>
+  </table>
+
+  <h3>com.barezen.core.concurrent</h3>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>ThreadProvider</code></td><td>Creates executors. <code>newBoundedExecutor(int, String)</code>, <code>newUnboundedExecutor(String)</code>, <code>close()</code>.</td></tr>
+    <tr><td><code>ThreadProviders</code></td><td>Factory: <code>create(ThreadPolicy, RuntimeCapabilities)</code>.</td></tr>
+    <tr><td><code>ThreadPolicy</code></td><td>Enum: AUTO, PLATFORM, VIRTUAL.</td></tr>
+    <tr><td><code>RuntimeCapabilities</code></td><td>Detects virtual thread support. <code>detect()</code>.</td></tr>
+  </table>
+
+  <h3>com.barezen.core.plugin</h3>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>Plugin</code></td><td>Interface extending LifecycleParticipant. <code>descriptor()</code> returns PluginDescriptor.</td></tr>
+    <tr><td><code>PluginDescriptor</code></td><td>Record: name, version, description.</td></tr>
+    <tr><td><code>PluginDiscovery</code></td><td>Discovers plugins via ServiceLoader.</td></tr>
+  </table>
+
+  <h2>barezen-web</h2>
+  <p>HTTP contract: Request, Response, Router, Handler.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>Handler</code></td><td>Functional interface: <code>Response handle(Request, Map&lt;String, String&gt;)</code>.</td></tr>
+    <tr><td><code>Request</code></td><td>Immutable record: method, path, query (Optional), headers, body (byte[]).</td></tr>
+    <tr><td><code>Response</code></td><td>Immutable: status (int), headers, body (byte[]). Enforces: no body for 1xx/204/304, no Content-Length.</td></tr>
+    <tr><td><code>Headers</code></td><td>Multi-value header collection. <code>of()</code>, <code>with()</code>, <code>first()</code>, <code>values()</code>, <code>names()</code>.</td></tr>
+    <tr><td><code>HttpMethod</code></td><td>Class (not enum): GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS, CONNECT, TRACE. <code>of(String)</code> for custom methods.</td></tr>
+    <tr><td><code>Router</code></td><td>Immutable route table. Builder: <code>route(method, pattern, handler)</code>, <code>contributing(List&lt;RouteContributor&gt;)</code>. Query: <code>match(Request)</code>, <code>methodsFor(String)</code>.</td></tr>
+    <tr><td><code>RouteMatch</code></td><td>Record: handler, parameters (Map&lt;String, String&gt;).</td></tr>
+    <tr><td><code>RouteContributor</code></td><td>Interface: <code>contributeRoutes(Router.Builder)</code>.</td></tr>
+    <tr><td><code>HttpServerAdapter</code></td><td>Interface extending LifecycleParticipant: <code>port()</code> returns OptionalInt.</td></tr>
+  </table>
+
+  <h2>barezen-http-jdk</h2>
+  <p>JDK HttpServer adapter with virtual threads and TLS.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>JdkHttpServerAdapter</code></td><td>Constructors: <code>(address, router)</code>, <code>(address, router, ThreadProvider)</code>, <code>(address, router, Configuration)</code>. Methods: <code>start()</code>, <code>stop()</code>, <code>isRunning()</code>, <code>port()</code>.</td></tr>
+  </table>
+
+  <h3>Configuration keys</h3>
+  <table>
+    <tr><th>Key</th><th>Type</th><th>Default</th></tr>
+    <tr><td><code>barezen.http.jdk.maxRequestBodyBytes</code></td><td>Long</td><td>1 MB</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePath</code></td><td>String</td><td>None (plaintext)</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePassword</code></td><td>String</td><td>Required if keystorePath set</td></tr>
+  </table>
+
+  <h2>barezen-http-servlet</h2>
+  <p>Servlet container integration.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>BarezenServlet</code></td><td>Extends HttpServlet. Constructors: <code>()</code> (declarative), <code>(Router)</code> (programmatic). Constants: <code>ROUTER_ATTRIBUTE</code>, <code>MAX_REQUEST_BODY_BYTES_PARAM</code>.</td></tr>
+  </table>
+
+  <h2>barezen-security</h2>
+  <p>Authentication, authorization, sessions, password hashing.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>Authentication</code></td><td>Functional interface: <code>AuthenticationResult authenticate(Credential)</code>. Factories: <code>anonymous()</code>, <code>bearer(scheme, value, principal)</code>.</td></tr>
+    <tr><td><code>AuthenticationResult</code></td><td>Sealed interface. Subtypes: <code>Authenticated(Principal)</code>, <code>Failure(String)</code>, <code>Anonymous</code>. Factories: <code>authenticated()</code>, <code>failure()</code>, <code>anonymous()</code>.</td></tr>
+    <tr><td><code>Authorization</code></td><td>Functional interface: <code>Decision authorize(Principal, Permission)</code>. Factories: <code>allowAll()</code>, <code>denyAll()</code>, <code>of(Map&lt;Principal, Set&lt;Permission&gt;&gt;)</code>.</td></tr>
+    <tr><td><code>Principal</code></td><td>Record: name (String). Factory: <code>Principal.of(String)</code>.</td></tr>
+    <tr><td><code>Permission</code></td><td>Immutable string identifier. Factory: <code>Permission.of(String)</code>.</td></tr>
+    <tr><td><code>Credential</code></td><td>Record: scheme (String), value (String).</td></tr>
+    <tr><td><code>SecurityContext</code></td><td>Record: authentication (AuthenticationResult). Methods: <code>principal()</code>, <code>isAuthenticated()</code>.</td></tr>
+    <tr><td><code>SecuredHandler</code></td><td>Wraps a handler with security. <code>authenticated(Handler)</code>, <code>require(Handler, Permission)</code>.</td></tr>
+    <tr><td><code>SecurityMiddleware</code></td><td>Wires auth and authz into the pipeline. <code>create(Authentication, Authorization)</code>.</td></tr>
+    <tr><td><code>SessionStore</code></td><td>In-memory session store. <code>standard()</code>, <code>create(Principal, Duration)</code>, <code>lookup(String)</code>, <code>invalidate(String)</code>, <code>rotate(String, Duration)</code>.</td></tr>
+    <tr><td><code>SessionToken</code></td><td>32-byte random token. <code>value()</code>, <code>isExpired(Instant)</code>.</td></tr>
+    <tr><td><code>PasswordHasher</code></td><td>PBKDF2-HMAC-SHA256. <code>standard()</code>, <code>of(iterations, SecureRandom)</code>, <code>hash(String)</code>, <code>verify(String, String)</code>.</td></tr>
+  </table>
+
+  <h2>barezen-data</h2>
+  <p>Database access, transactions, migrations.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>Database</code></td><td>Entry point. Constructor: <code>(DataSource)</code>. Methods: <code>query(sql, RowMapper, params)</code>, <code>executeUpdate(sql, params)</code>, <code>transaction(TransactionCallback)</code>.</td></tr>
+    <tr><td><code>Transaction</code></td><td>Transaction-scoped access. Methods: <code>query()</code>, <code>executeUpdate()</code>, <code>queryForLong()</code>.</td></tr>
+    <tr><td><code>RowMapper&lt;T&gt;</code></td><td>Functional interface: <code>T map(ResultSet, int)</code>.</td></tr>
+    <tr><td><code>Migration</code></td><td>Interface: <code>version()</code>, <code>description()</code>, <code>apply(Connection)</code>.</td></tr>
+    <tr><td><code>Migrator</code></td><td>Applies migrations. Constructor: <code>(Database)</code>. Method: <code>migrate(List&lt;Migration&gt;)</code>.</td></tr>
+    <tr><td><code>DataAccessException</code></td><td>Runtime exception wrapping SQLException.</td></tr>
+  </table>
+
+  <h2>barezen-content</h2>
+  <p>Static file serving.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>StaticContent</code></td><td>Static utility. <code>file(Path)</code> infers content type. <code>file(Path, String)</code> with explicit type. <code>contentTypeOf(String)</code> maps extension to MIME type.</td></tr>
+  </table>
+
+  <h2>barezen-testkit</h2>
+  <p>Integration testing tools.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>TestServer</code></td><td>Real HTTP server on random port. <code>start(Router)</code>, <code>port()</code>, <code>baseUri()</code>, <code>client()</code>, <code>isRunning()</code>, <code>close()</code>.</td></tr>
+    <tr><td><code>TestHttpClient</code></td><td>HTTP client for TestServer. Methods: <code>get()</code>, <code>head()</code>, <code>post()</code>, <code>put()</code>, <code>patch()</code>, <code>delete()</code>, <code>options()</code>, <code>request(method, path)</code>.</td></tr>
+    <tr><td><code>TestResponse</code></td><td>Response: <code>status()</code>, <code>header(String)</code>, <code>body()</code>, <code>bodyBytes()</code>.</td></tr>
+    <tr><td><code>Assertions</code></td><td>Fluent assertions. <code>assertThat(TestResponse)</code>, <code>assertThat(int)</code>, <code>assertThat(Optional&lt;Principal&gt;)</code>.</td></tr>
+    <tr><td><code>TestDatabase</code></td><td>In-memory H2 database. <code>create()</code>, <code>database()</code>, <code>dataSource()</code>, <code>close()</code>.</td></tr>
+  </table>
+
+  <h2>barezen-plugins</h2>
+  <p>Built-in plugins.</p>
+  <table>
+    <tr><th>Type</th><th>Description</th></tr>
+    <tr><td><code>AuthPlugin</code></td><td>Authentication plugin. Contributes /auth routes.</td></tr>
+    <tr><td><code>UserPlugin</code></td><td>User management plugin. Contributes /users routes.</td></tr>
+    <tr><td><code>OpenApiPlugin</code></td><td>OpenAPI documentation plugin. Contributes /openapi.json route.</td></tr>
+  </table>
+
+  <h2>Exception hierarchy</h2>
+  <table>
+    <tr><th>Exception</th><th>Module</th><th>When</th></tr>
+    <tr><td><code>StartupException</code></td><td>core</td><td>Participant failed during initialize() or start()</td></tr>
+    <tr><td><code>LifecycleException</code></td><td>core</td><td>Illegal state transition</td></tr>
+    <tr><td><code>AssemblyException</code></td><td>core</td><td>Missing/circular dependency in ServiceAssembly</td></tr>
+    <tr><td><code>ConfigurationException</code></td><td>core</td><td>Value cannot be converted to key's declared type</td></tr>
+    <tr><td><code>ThreadCapabilityUnavailableException</code></td><td>core</td><td>Virtual threads requested but JVM doesn't support them</td></tr>
+    <tr><td><code>DataAccessException</code></td><td>data</td><td>SQLException wrapped with context</td></tr>
+    <tr><td><code>AssertionException</code></td><td>testkit</td><td>Test assertion failed</td></tr>
+    <tr><td><code>TestRequestFailedException</code></td><td>testkit</td><td>HTTP request to TestServer failed</td></tr>
+  </table>
+
+  <div class="notes">
+    <p>Next: <a href="faq.html">FAQ</a> — frequently asked questions and troubleshooting.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · API reference · all public classes and interfaces.</p></div>
+</footer>
+</body>
+</html>

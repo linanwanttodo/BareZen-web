@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>核心概念 — BareZen</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">快速开始</a>
+      <a href="core.html" aria-current="page">核心</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">插件</a>
+      <a href="security.html">安全</a>
+      <a href="data.html">数据</a>
+      <a href="content.html">内容</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">教程</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">常见问题</a>
+      <a class="lang" hreflang="en" href="../../docs/core.html">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>核心概念</h1>
+  <p class="lede">barezen-core 提供框架基础：生命周期管理、配置、依赖注入、事件总线和线程模型。</p>
+
+  <h2>模块概览</h2>
+  <p><code>barezen-core</code> 模块是整个框架的基础。除了 <code>slf4j-api</code> 之外没有其他外部依赖（ADR-0001）。所有其他框架模块都直接或间接依赖它。</p>
+
+  <p>它包含八个包：</p>
+  <table>
+    <tr><th>包</th><th>职责</th></tr>
+    <tr><td><code>com.barezen.core.kernel</code></td><td>生命周期编排、应用状态、关闭钩子</td></tr>
+    <tr><td><code>com.barezen.core.config</code></td><td>配置快照、配置源、类型转换</td></tr>
+    <tr><td><code>com.barezen.core.di</code></td><td>通过 ServiceAssembly 实现的显式依赖注入</td></tr>
+    <tr><td><code>com.barezen.core.event</code></td><td>同步事件总线和订阅</td></tr>
+    <tr><td><code>com.barezen.core.concurrent</code></td><td>线程提供者、虚拟线程、执行器管理</td></tr>
+    <tr><td><code>com.barezen.core.plugin</code></td><td>插件接口、描述符、发现、注册</td></tr>
+    <tr><td><code>com.barezen.core.runtime</code></td><td>运行时能力检测（虚拟线程等）</td></tr>
+    <tr><td><code>com.barezen.core.error</code></td><td>框架异常：Assembly、Configuration、Lifecycle</td></tr>
+  </table>
+
+  <h2>生命周期管理</h2>
+  <p>每个 BareZen 应用都会经历一组固定的状态，由 <code>LifecycleOrchestrator</code> 管理。编排器驱动所有注册组件的启动、关闭和启动回滚。</p>
+
+  <h3>应用状态</h3>
+  <table>
+    <tr><th>状态</th><th>含义</th></tr>
+    <tr><td><code>NEW</code></td><td>刚构建，尚未启动。编排器准备启动。</td></tr>
+    <tr><td><code>STARTING</code></td><td>启动中；initialize() 和 start() 阶段正在进行。</td></tr>
+    <tr><td><code>RUNNING</code></td><td>所有参与者启动成功，正在接受请求。</td></tr>
+    <tr><td><code>STOPPING</code></td><td>按逆序关闭参与者。</td></tr>
+    <tr><td><code>STOPPED</code></td><td>已干净关闭。所有资源已释放。</td></tr>
+    <tr><td><code>FAILED</code></td><td>启动失败，回滚完成。没有资源被占用。</td></tr>
+  </table>
+
+  <h3>LifecycleParticipant 接口</h3>
+  <p>每个由编排器驱动启动和关闭的组件都实现 <code>LifecycleParticipant</code>：</p>
+  <pre><code>public interface LifecycleParticipant {
+    default void initialize() {}  // 获取资源，完成内部连接
+    default void start() {}       // 激活并开始服务
+    default void stop() {}        // 释放资源，关闭时调用
+    default void abort() {}       // initialize() 失败后释放资源
+}</code></pre>
+
+  <p>所有四个方法都有空默认实现，所以实现类只需编写它实际有的阶段。编排器依赖以下约定：</p>
+  <ul>
+    <li><code>stop()</code> 和 <code>abort()</code> 是幂等的，永远不会抛出异常。</li>
+    <li><code>stop()</code> 必须能容忍只到达 <code>initialize()</code> 的参与者，因为编排器用它来执行有序关闭和已初始化参与者的回滚。</li>
+    <li>注册顺序就是启动顺序。选择这个顺序是组装者的工作。</li>
+  </ul>
+
+  <h3>两阶段启动</h3>
+  <p>启动分两个全局阶段运行（ADR-0003）：</p>
+  <ol>
+    <li><strong>初始化阶段</strong> — 调用每个参与者的 <code>initialize()</code>。在这里注册路由、应用迁移、贡献路由。</li>
+    <li><strong>启动阶段</strong> — 调用每个参与者的 <code>start()</code>。在这里绑定端口并开始监听。</li>
+  </ol>
+  <p>两阶段排序保证了一个使工作可见的参与者（如绑定端口的 HTTP 服务器）只在每个前面的参与者完成设置后才这样做。按组件交错两个阶段无法表达这个不变量。</p>
+
+  <h3>启动回滚</h3>
+  <p>如果任何参与者在启动期间失败，编排器执行完整回滚（ADR-0004）：</p>
+  <ul>
+    <li>每个成功进入的参与者按逆序接收 <code>stop()</code>。</li>
+    <li>失败的参与者接收 <code>abort()</code> 而不是 <code>stop()</code>。</li>
+    <li>原始失败始终是报告的内容；清理问题作为抑制异常附加。</li>
+    <li>回滚后，状态为 <code>FAILED</code>，没有任何资源被占用。</li>
+  </ul>
+
+  <h3>关闭</h3>
+  <p>关闭是尽力而为的，永远不会抛出异常（ADR-0005）。即使一个失败，也会尝试每个进入的参与者，<code>ShutdownReport</code> 收集所有失败。对从未启动的应用调用 <code>stop()</code> 是合法且幂等的（ADR-0012），这使得 try-with-resources 可用。</p>
+
+  <h3>Builder API</h3>
+  <p><code>LifecycleOrchestrator.Builder</code> 提供以下配置选项：</p>
+  <table>
+    <tr><th>方法</th><th>默认值</th><th>描述</th></tr>
+    <tr><td><code>register(String id, LifecycleParticipant)</code></td><td>必需</td><td>注册参与者。调用顺序定义启动顺序。</td></tr>
+    <tr><td><code>threadPolicy(ThreadPolicy)</code></td><td><code>AUTO</code></td><td>选择线程模型：AUTO、PLATFORM 或 VIRTUAL。</td></tr>
+    <tr><td><code>runtimeCapabilities(RuntimeCapabilities)</code></td><td>自动检测</td><td>覆盖检测到的运行时能力（测试用）。</td></tr>
+    <tr><td><code>threads(ThreadProvider)</code></td><td>从策略解析</td><td>提供外部创建的提供者；编排器仍拥有其关闭权。</td></tr>
+    <tr><td><code>threadCloseTimeout(Duration)</code></td><td>10 秒</td><td>终止拥有者创建的执行器的宽限期。</td></tr>
+    <tr><td><code>registerShutdownHook(boolean)</code></td><td><code>true</code></td><td>是否注册 JVM 关闭钩子。容器部署的应用应关闭。</td></tr>
+  </table>
+
+  <h3>使用示例</h3>
+  <pre><code>LifecycleOrchestrator orchestrator = LifecycleOrchestrator.builder()
+    .register("web", httpAdapter)
+    .register("security", securityPlugin)
+    .register("data", database)
+    .build();
+
+try {
+    orchestrator.start();
+    // 应用运行直到停止
+} finally {
+    orchestrator.stop();  // 或使用 try-with-resources
+}</code></pre>
+
+  <h3>关闭钩子</h3>
+  <p>默认情况下，编排器为嵌入式应用注册 JVM 关闭钩子。当宿主容器（如 Tomcat）已拥有进程生命周期时，请关闭它：</p>
+  <pre><code>LifecycleOrchestrator.builder()
+    .registerShutdownHook(false)
+    .build();</code></pre>
+
+  <h3>查询状态</h3>
+  <p>编排器提供两个查询方法：</p>
+  <pre><code>// 检查当前状态
+ApplicationState state = orchestrator.state();
+
+// 按注册顺序列出所有参与者 ID
+List&lt;String&gt; ids = orchestrator.participantIds();</code></pre>
+
+  <h2>配置系统</h2>
+  <p>BareZen 中的配置是启动前解析的只读快照（ADR-0013）。没有写入 API：配置一旦确定就保持不变。这防止了两个组件对值不一致，也防止测试为下一个测试留下状态。</p>
+
+  <h3>配置源</h3>
+  <p>三种内置源类型，按最弱到最强分层：</p>
+  <table>
+    <tr><th>源</th><th>优先级</th><th>用途</th></tr>
+    <tr><td><code>PropertiesConfigurationSource</code></td><td>最低</td><td><code>application.properties</code> 文件</td></tr>
+    <tr><td><code>EnvironmentVariablesSource</code></td><td>中等</td><td>操作系统环境变量</td></tr>
+    <tr><td><code>SystemPropertiesSource</code></td><td>最高</td><td><code>-D</code> JVM 参数</td></tr>
+  </table>
+
+  <h3>标准配置</h3>
+  <p>框架提供标准的三层配置：</p>
+  <pre><code>Configuration config = Configuration.standard(
+    Path.of("application.properties"));
+
+// 层级：属性文件 &lt; 环境变量 &lt; 系统属性
+// 键自身的默认值位于所有三层之下</code></pre>
+
+  <p>如果属性文件不存在，它不贡献任何内容而不是失败 — 使用默认值加环境运行是一种支持的部署方式。</p>
+
+  <h3>自定义配置</h3>
+  <p>对于自定义分层，使用 <code>Configuration.of()</code>：</p>
+  <pre><code>Configuration config = Configuration.of(
+    PropertiesConfigurationSource.fromFile(Path.of("defaults.properties")),
+    EnvironmentVariablesSource.current(),
+    SystemPropertiesSource.current());</code></pre>
+
+  <h3>测试用的内存配置</h3>
+  <p>测试使用确定性的、无文件的配置：</p>
+  <pre><code>Configuration config = Configuration.inMemory(Map.of(
+    "server.port", "9090",
+    "server.host", "0.0.0.0"));</code></pre>
+
+  <h3>类型安全的配置键</h3>
+  <p>配置键声明其类型，所以转换错误会快速失败。组件将其拥有的键声明为常量，这样键名在代码库中只出现在一个地方，可以搜索：</p>
+  <pre><code>// 将键声明为常量
+ConfigurationKey&lt;Integer&gt; PORT = ConfigurationKey.of(
+    "server.port", Integer.class, 8080);
+
+ConfigurationKey&lt;Duration&gt; TIMEOUT = ConfigurationKey.of(
+    "request.timeout", Duration.class, Duration.ofSeconds(30));
+
+ConfigurationKey&lt;String&gt; HOST = ConfigurationKey.of(
+    "server.host", String.class, "127.0.0.1");
+
+ConfigurationKey&lt;ThreadPolicy&gt; THREADS = ConfigurationKey.of(
+    "barezen.runtime.threads", ThreadPolicy.class, ThreadPolicy.AUTO);
+
+// 读取值
+int port = config.get(PORT).orElse(8080);
+Duration timeout = config.get(TIMEOUT).orElse(Duration.ofSeconds(30));</code></pre>
+
+  <h3>支持的类型</h3>
+  <p>配置系统开箱支持以下类型：</p>
+  <table>
+    <tr><th>类型</th><th>格式</th><th>示例</th></tr>
+    <tr><td><code>String</code></td><td>纯文本</td><td><code>"hello"</code></td></tr>
+    <tr><td><code>Integer</code></td><td>整数</td><td><code>"8080"</code></td></tr>
+    <tr><td><code>Long</code></td><td>长整数</td><td><code>"9223372036854775807"</code></td></tr>
+    <tr><td><code>Boolean</code></td><td><code>true</code> 或 <code>false</code>（不区分大小写）</td><td><code>"true"</code></td></tr>
+    <tr><td><code>Duration</code></td><td>ISO-8601 持续时间</td><td><code>"PT10S"</code>, <code>"PT1H30M"</code></td></tr>
+    <tr><td>枚举</td><td>枚举名称（不区分大小写）</td><td><code>"auto"</code> 对应 <code>ThreadPolicy.AUTO</code></td></tr>
+  </table>
+
+  <p>注意：<code>Boolean</code> 只接受显式的 <code>true</code> 或 <code>false</code>。像 <code>tru</code> 这样的拼写错误会在启动时失败，而不是静默变成 <code>false</code>。</p>
+
+  <h3>没有默认值的键</h3>
+  <p>对于可选配置，声明一个没有默认值的键：</p>
+  <pre><code>ConfigurationKey&lt;String&gt; OPTIONAL_KEY = ConfigurationKey.of(
+    "optional.key", String.class);
+
+// 如果未配置则返回 Optional.empty()
+Optional&lt;String&gt; value = config.get(OPTIONAL_KEY);</code></pre>
+
+  <h3>键名验证</h3>
+  <p>键名必须是点分隔的字母、数字、连字符和下划线段。空段（如 <code>a..b</code>）会被拒绝：</p>
+  <pre><code>// 有效
+ConfigurationKey.of("server.port", Integer.class, 8080);
+ConfigurationKey.of("my-app.host-name", String.class, "localhost");
+
+// 无效 — 抛出 IllegalArgumentException
+ConfigurationKey.of("a..b", String.class);  // 空段
+ConfigurationKey.of("", String.class);       // 空白名称</code></pre>
+
+  <h3>错误处理</h3>
+  <p>如果存在的值无法转换为键声明的类型，会抛出 <code>ConfigurationException</code>。错误的值永远不会被默认值替换，因为组件在回退值上静默运行看起来健康但做错了事。</p>
+
+  <h2>依赖注入</h2>
+  <p>BareZen 使用显式的、无反射的依赖注入（ADR-0014）。没有注解、没有类路径扫描、没有通过反射选择的构造函数。应用声明它有什么，框架计算出创建顺序。</p>
+
+  <h3>ServiceAssembly</h3>
+  <p>组装是应用声明它有什么的地方，框架计算出创建顺序：</p>
+  <pre><code>ServiceAssembly assembly = ServiceAssembly.builder()
+    .instance(DataSource.class, dataSource)          // 调用者构建，调用者拥有
+    .factory(UserRepository.class, services ->
+        new SqlUserRepository(services.require(DataSource.class)))
+    .factory(UserService.class, services ->
+        new UserService(services.require(UserRepository.class)))
+    .build();
+
+UserService service = assembly.require(UserService.class);</code></pre>
+
+  <h3>两种注册方法</h3>
+  <table>
+    <tr><th>方法</th><th>所有权</th><th>何时使用</th></tr>
+    <tr><td><code>instance(Class, T)</code></td><td>调用者拥有实例</td><td>用于外部创建的对象（DataSource、LifecycleParticipants）</td></tr>
+    <tr><td><code>factory(Class, Function)</code></td><td>组装拥有实例</td><td>用于组装应创建和关闭的对象</td></tr>
+  </table>
+
+  <h3>所有权规则</h3>
+  <ul>
+    <li><code>factory()</code> — 组装创建并拥有实例。<code>close()</code> 按逆序释放它。</li>
+    <li><code>instance()</code> — 调用者创建了它并释放它。组装从不碰它。</li>
+  </ul>
+  <p>同时也是 <code>LifecycleParticipant</code> 的组件应通过 <code>instance()</code> 注册，因为编排器驱动其 <code>stop()</code>，两个所有者释放一个对象会导致双重释放错误。</p>
+
+  <h3>Services 接口</h3>
+  <p><code>Services</code> 接口是工厂在组装期间接收的视图。它<strong>不是</strong>服务定位器：只有组装代码和工厂应持有此类型。两个 ArchUnit 规则强制执行此边界（ADR-0006）。</p>
+  <pre><code>// 在工厂内部：
+.factory(MyService.class, services -> {
+    DataSource ds = services.require(DataSource.class);  // 必需依赖
+    EventBus bus = services.find(EventBus.class).orElse(null);  // 可选依赖
+    return new MyService(ds, bus);
+})</code></pre>
+
+  <h3>解析行为</h3>
+  <ul>
+    <li><code>require(Class&lt;T&gt;)</code> — 返回绑定到类型的对象，如果没有绑定则抛出 <code>AssemblyException</code>。</li>
+    <li><code>find(Class&lt;T&gt;)</code> — 返回 <code>Optional&lt;T&gt;</code>，没有绑定时为空。</li>
+  </ul>
+
+  <h3>关闭组装</h3>
+  <p>完成后，关闭组装以释放所有工厂创建的实例：</p>
+  <pre><code>try (ServiceAssembly assembly = ServiceAssembly.builder()
+    .factory(EventBus.class, s -> EventBus.create())
+    .factory(AuthPlugin.class, s ->
+        new AuthPlugin(s.require(EventBus.class)))
+    .build()) {
+    // 使用组装
+} // 工厂创建的实例按逆序关闭</code></pre>
+
+  <h3>错误场景</h3>
+  <p>组装在构建时检测并报告以下错误：</p>
+  <table>
+    <tr><th>错误</th><th>何时</th></tr>
+    <tr><td>缺少依赖</td><td>工厂为从未注册的类型调用 <code>require()</code>。</td></tr>
+    <tr><td>循环依赖</td><td>A 依赖 B，B 依赖 A。错误消息显示完整的循环路径。</td></tr>
+    <tr><td>重复注册</td><td>同一类型的两个 <code>instance()</code> 或 <code>factory()</code> 调用。</td></tr>
+    <tr><td>工厂返回 null</td><td>工厂返回 <code>null</code> 而不是实例。</td></tr>
+    <tr><td>类型不匹配</td><td>工厂返回的对象不是注册类型的实例。</td></tr>
+  </table>
+
+  <h3>释放顺序</h3>
+  <p>推荐的释放顺序是：先停止 <code>LifecycleOrchestrator</code>，然后关闭 <code>ServiceAssembly</code>。在 <code>stop()</code> 期间完成工作的参与者可能仍在使用这里组装的基础设施。</p>
+
+  <h2>事件总线</h2>
+  <p>事件总线是同步的、进程内的发布/订阅机制（ADR-0017）。它没有执行器、没有队列、没有工作线程。</p>
+
+  <h3>分发契约</h3>
+  <ul>
+    <li><strong>同步。</strong> <code>publish(event)</code> 在调用线程上调用每个处理程序，然后才返回。</li>
+    <li><strong>精确类型匹配。</strong> 为 <code>UserCreated.class</code> 注册的处理程序只接收精确实例 — 没有超类型或接口匹配。</li>
+    <li><strong>注册顺序就是调用顺序。</strong> 先注册，先调用。</li>
+    <li><strong>第一个处理程序失败结束分发。</strong> 异常原样传播；后面的处理程序不被调用。</li>
+    <li><strong>无生命周期。</strong> 总线不是 <code>LifecycleParticipant</code>，没有 <code>close()</code>。</li>
+    <li><strong>支持并发发布。</strong> 两个线程可以同时发布。</li>
+  </ul>
+
+  <h3>使用</h3>
+  <pre><code>EventBus bus = EventBus.create();
+
+// 定义事件类型
+record UserCreated(String username) {}
+
+// 订阅
+Subscription sub = bus.subscribe(UserCreated.class, event -> {
+    log.info("用户创建: {}", event.username());
+});
+
+// 发布
+bus.publish(new UserCreated("alice"));
+
+// 完成后取消订阅
+sub.cancel();</code></pre>
+
+  <h3>与 ServiceAssembly 连接</h3>
+  <pre><code>ServiceAssembly assembly = ServiceAssembly.builder()
+    .factory(EventBus.class, s -> EventBus.create())
+    .factory(AuthPlugin.class, s ->
+        new AuthPlugin(s.require(EventBus.class)))
+    .build();</code></pre>
+
+  <h3>何时使用事件总线</h3>
+  <p>事件总线适用于：</p>
+  <ul>
+    <li>解耦组件：组件发布事件而不知道谁在监听。</li>
+    <li>审计：处理程序记录每个 <code>UserCreated</code> 事件。</li>
+    <li>通知：下单时处理程序发送邮件。</li>
+  </ul>
+  <p>事件总线<strong>不适用于</strong>：</p>
+  <ul>
+    <li>异步处理：改用执行器或消息队列。</li>
+    <li>跨进程通信：改用消息代理。</li>
+    <li>可靠投递：如果处理程序失败，后面的处理程序不会被调用。</li>
+  </ul>
+
+  <h2>线程模型</h2>
+  <p>BareZen 支持平台线程和虚拟线程（Java 21+）。线程模型在组装时解析，不分散在组件中。</p>
+
+  <h3>线程策略</h3>
+  <table>
+    <tr><th>策略</th><th>行为</th></tr>
+    <tr><td><code>AUTO</code></td><td>在 Java 21+ 上选择虚拟线程，否则使用平台线程。这是默认值。</td></tr>
+    <tr><td><code>PLATFORM</code></td><td>始终使用平台线程，即使在 Java 21+ 上。用于遗留兼容性。</td></tr>
+    <tr><td><code>VIRTUAL</code></td><td>虚拟线程或启动失败。在需要虚拟线程时使用。</td></tr>
+  </table>
+
+  <h3>运行时能力检测</h3>
+  <p><code>RuntimeCapabilities.detect()</code> 探测 JVM 的虚拟线程支持。编排器使用它来解析线程提供者：</p>
+  <pre><code>LifecycleOrchestrator.builder()
+    .threadPolicy(ThreadPolicy.AUTO)  // 自动检测
+    .build();</code></pre>
+
+  <h3>作用域提供者</h3>
+  <p>每个需要执行器所有权的子系统请求自己的 <code>ThreadProvider</code>（ADR-0011）。关闭一个不会影响另一个：</p>
+  <pre><code>ThreadProvider provider = ThreadProviders.create(
+    ThreadPolicy.AUTO, RuntimeCapabilities.detect());
+
+ExecutorService executor = provider.newBoundedExecutor(4, "worker");
+// ... 使用执行器 ...
+provider.close();  // 释放此提供者创建的所有执行器</code></pre>
+
+  <h3>ThreadProvider API</h3>
+  <table>
+    <tr><th>方法</th><th>描述</th></tr>
+    <tr><td><code>kind()</code></td><td>返回 <code>Kind.PLATFORM</code> 或 <code>Kind.VIRTUAL</code>。</td></tr>
+    <tr><td><code>name()</code></td><td>日志的简短稳定标识符，例如 <code>"virtual"</code>。</td></tr>
+    <tr><td><code>preferred()</code></td><td>当这是推荐选择时（AUTO 解析到的）返回 <code>true</code>。</td></tr>
+    <tr><td><code>newBoundedExecutor(int maxConcurrency, String namePrefix)</code></td><td>创建有界执行器。超额任务被排队，不会丢弃。</td></tr>
+    <tr><td><code>newUnboundedExecutor(String namePrefix)</code></td><td>创建无界执行器。当工作负载到达有限资源时，优先使用有界。</td></tr>
+    <tr><td><code>close()</code></td><td>关闭此提供者创建的所有执行器。幂等且永不抛出异常。</td></tr>
+  </table>
+
+  <h3>默认关闭超时</h3>
+  <p>默认关闭超时为 10 秒（<code>ThreadProviders.DEFAULT_CLOSE_TIMEOUT</code>）。在此超时内拒绝终止的执行器会被记录并强制停止。</p>
+
+  <h2>插件接口</h2>
+  <p>core 中的 <code>Plugin</code> 接口定义了所有插件实现的契约。插件是一个可以贡献路由、处理程序或其他能力的 <code>LifecycleParticipant</code>（ADR-0016）。</p>
+
+  <pre><code>public interface Plugin extends LifecycleParticipant {
+    PluginDescriptor descriptor();
+}</code></pre>
+
+  <p>插件通过 <code>PluginDiscovery</code> 使用 <code>ServiceLoader</code> 发现（ADR-0048），并通过 <code>PluginRegistration</code> 注册（ADR-0041）。有关编写插件，请参阅<a href="plugins.html">插件</a>页面。</p>
+
+  <h2>错误类型</h2>
+  <table>
+    <tr><th>异常</th><th>何时</th></tr>
+    <tr><td><code>StartupException</code></td><td>参与者在 initialize() 或 start() 期间失败。包含阶段（INITIALIZE/START）和参与者 ID。</td></tr>
+    <tr><td><code>LifecycleException</code></td><td>非法状态转换（例如在 RUNNING 应用上调用 start()）。</td></tr>
+    <tr><td><code>AssemblyException</code></td><td>ServiceAssembly 中缺少或循环依赖，或工厂返回 null。</td></tr>
+    <tr><td><code>ConfigurationException</code></td><td>值无法转换为键声明的类型。命名键、原始值和源。</td></tr>
+    <tr><td><code>ThreadCapabilityUnavailableException</code></td><td>请求虚拟线程但 JVM 不支持。</td></tr>
+  </table>
+
+  <h2>最佳实践</h2>
+  <h3>生命周期管理</h3>
+  <ul>
+    <li>按依赖顺序注册参与者：先基础设施，再业务逻辑，最后 HTTP 适配器。</li>
+    <li>在嵌入式应用中使用 try-with-resources 管理编排器。</li>
+    <li>部署到容器（Tomcat、Jetty）时关闭关闭钩子。</li>
+    <li>保持 <code>initialize()</code> 和 <code>start()</code> 快速 — 它们会阻塞启动线程。</li>
+  </ul>
+
+  <h3>配置</h3>
+  <ul>
+    <li>在使用它们的组件中将所有配置键声明为 <code>static final</code> 常量。</li>
+    <li>提供合理的默认值，使应用无需属性文件即可运行。</li>
+    <li>在测试中使用 <code>Configuration.inMemory()</code> 获取确定性的值。</li>
+    <li>启动后永远不要写入配置 — 它是只读快照。</li>
+  </ul>
+
+  <h3>依赖注入</h3>
+  <ul>
+    <li>对调用者创建和拥有的对象使用 <code>instance()</code>（DataSource、LifecycleParticipants）。</li>
+    <li>对组装应创建和关闭的对象使用 <code>factory()</code>。</li>
+    <li>永远不要将 <code>Services</code> 视图存储在字段中 — 它在 <code>build()</code> 后失效。</li>
+    <li>通过构造函数传递依赖，而不是在运行时通过 Services 视图传递。</li>
+  </ul>
+
+  <h3>事件总线</h3>
+  <ul>
+    <li>保持事件处理程序快速且同步 — 它们在发布者的线程上运行。</li>
+    <li>对事件使用 record 类型，使它们不可变且自文档化。</li>
+    <li>当订阅者不再需要时取消订阅，以避免内存泄漏。</li>
+  </ul>
+
+  <h2>常见问题</h2>
+  <h3>"Cannot start in state RUNNING"</h3>
+  <p>这意味着 <code>start()</code> 被调用了两次。编排器不可重入 — 一旦达到 RUNNING，它就会保持在那里直到停止。</p>
+
+  <h3>"Nothing is registered as X"</h3>
+  <p>工厂为从未注册的 <code>X</code> 调用了 <code>require(X.class)</code>。检查在调用 <code>build()</code> 之前是否已注册所有依赖。</p>
+
+  <h3>"Dependency cycle: A -> B -> A"</h3>
+  <p>两个或更多类型相互依赖。重构以打破循环，例如通过引入接口或将一个依赖移到不同的层。</p>
+
+  <h3>"Value 'abc' of configuration key 'server.port' is not a valid Integer"</h3>
+  <p>配置值无法转换为键声明的类型。检查属性文件和环境变量中的拼写错误。</p>
+
+  <div class="notes">
+    <p>下一步：<a href="web.html">Web 核心</a> — Request、Response、Router 和 Handler — 与服务器无关的 HTTP 契约。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 核心概念 · 生命周期、配置、DI、事件、线程。</p></div>
+</footer>
+</body>
+</html>

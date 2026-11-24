@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TestKit — BareZen</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">Quick start</a>
+      <a href="core.html">Core</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">Plugins</a>
+      <a href="security.html">Security</a>
+      <a href="data.html">Data</a>
+      <a href="content.html">Content</a>
+      <a href="testkit.html" aria-current="page">TestKit</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">FAQ</a>
+          <a class="lang" hreflang="zh" href="../zh/docs/testkit.html">中文</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>TestKit</h1>
+  <p class="lede">barezen-testkit provides TestServer, TestHttpClient, Assertions, and TestDatabase — tools for integration testing the whole stack.</p>
+
+  <h2>Module overview</h2>
+  <p>The <code>barezen-testkit</code> module provides tools for integration testing BareZen applications. Unlike unit tests that mock everything, TestKit starts a real HTTP server on a random port and lets you send real HTTP requests to it.</p>
+
+  <p>Key types:</p>
+  <table>
+    <tr><th>Type</th><th>Role</th></tr>
+    <tr><td><code>TestServer</code></td><td>Real HTTP server on a random loopback port</td></tr>
+    <tr><td><code>TestHttpClient</code></td><td>Thin HTTP client for talking to TestServer</td></tr>
+    <tr><td><code>TestResponse</code></td><td>Response from TestHttpClient: status, headers, body</td></tr>
+    <tr><td><code>Assertions</code></td><td>Fluent assertions for responses, counts, and security identity</td></tr>
+    <tr><td><code>TestDatabase</code></td><td>In-memory H2 database for tests</td></tr>
+    <tr><td><code>PrincipalFixture</code></td><td>Test fixture for security identity assertions</td></tr>
+  </table>
+
+  <h2>TestServer</h2>
+  <p><code>TestServer</code> wraps <code>JdkHttpServerAdapter</code> on a random loopback port. It binds the real adapter to <code>127.0.0.1</code> on port <code>0</code>, so the OS hands back an unused port — parallel test classes never fight over a fixed number.</p>
+
+  <h3>Basic usage</h3>
+  <pre><code>import com.barezen.testkit.TestServer;
+import com.barezen.testkit.Assertions;
+
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", (req, params) ->
+        new Response(200, Headers.of("Content-Type", "text/plain"), "OK".getBytes()))
+    .build();
+
+try (TestServer server = TestServer.start(router)) {
+    TestResponse response = server.client().get("/health");
+    Assertions.assertThat(response).statusIs(200).bodyIs("OK");
+}  // Server stops and port is released automatically</code></pre>
+
+  <h3>API methods</h3>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>start(Router)</code></td><td>Starts a server on a random port. Returns a started server.</td></tr>
+    <tr><td><code>port()</code></td><td>Returns the bound port (always positive once started).</td></tr>
+    <tr><td><code>baseUri()</code></td><td>Returns the base URI, e.g., <code>http://127.0.0.1:45678</code>.</td></tr>
+    <tr><td><code>client()</code></td><td>Returns a <code>TestHttpClient</code> wired to this server.</td></tr>
+    <tr><td><code>isRunning()</code></td><td>Returns <code>true</code> if the server is still serving.</td></tr>
+    <tr><td><code>close()</code></td><td>Stops the server. Idempotent — safe to call twice.</td></tr>
+  </table>
+
+  <h3>Try-with-resources</h3>
+  <p>Always use try-with-resources so the port is always released:</p>
+  <pre><code>try (TestServer server = TestServer.start(router)) {
+    // Run tests
+}  // Port is released even if a test fails</code></pre>
+
+  <h2>TestHttpClient</h2>
+  <p><code>TestHttpClient</code> is a thin HTTP client for talking to a <code>TestServer</code>. It resolves paths against the server's base URI and returns <code>TestResponse</code> objects.</p>
+
+  <h3>HTTP verb methods</h3>
+  <p>Every verb the framework routes has a direct method:</p>
+  <pre><code>TestHttpClient client = server.client();
+
+// GET
+TestResponse get = client.get("/users");
+
+// HEAD
+TestResponse head = client.head("/users");
+
+// POST with body
+TestResponse post = client.post("/users", "{\"name\":\"Alice\"}");
+
+// PUT with body
+TestResponse put = client.put("/users/1", "{\"name\":\"Bob\"}");
+
+// PATCH with body
+TestResponse patch = client.patch("/users/1", "{\"name\":\"Carol\"}");
+
+// DELETE
+TestResponse delete = client.delete("/users/1");
+
+// OPTIONS
+TestResponse options = client.options("/users");</code></pre>
+
+  <h3>Custom requests</h3>
+  <p>For requests with custom headers or any method not covered by the shortcuts:</p>
+  <pre><code>TestResponse response = client.request(HttpMethod.GET, "/users")
+    .header("Accept", "application/json")
+    .header("Authorization", "Bearer token123")
+    .send();</code></pre>
+
+  <h3>Request builder</h3>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>header(String name, String value)</code></td><td>Adds a request header. Chainable.</td></tr>
+    <tr><td><code>body(String body)</code></td><td>Sets the request body as UTF-8 text.</td></tr>
+    <tr><td><code>send()</code></td><td>Sends the request and returns the response.</td></tr>
+  </table>
+
+  <h3>Timeout</h3>
+  <p>Requests have a 10-second timeout. If the server does not respond within 10 seconds, a <code>TestRequestFailedException</code> is thrown.</p>
+
+  <h2>TestResponse</h2>
+  <p><code>TestResponse</code> carries the status code, headers, and body from the server:</p>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>status()</code></td><td>Returns the HTTP status code (e.g., 200, 404).</td></tr>
+    <tr><td><code>header(String name)</code></td><td>Returns the first value of a header as <code>Optional&lt;String&gt;</code>. Case-insensitive name matching.</td></tr>
+    <tr><td><code>body()</code></td><td>Returns the response body as a UTF-8 string.</td></tr>
+    <tr><td><code>bodyBytes()</code></td><td>Returns the response body as raw bytes.</td></tr>
+  </table>
+
+  <h2>Assertions</h2>
+  <p><code>Assertions</code> provides fluent assertions for BareZen integration tests. Every failure throws an <code>AssertionError</code> showing both what was expected and what was actually returned.</p>
+
+  <h3>Response assertions</h3>
+  <pre><code>Assertions.assertThat(response)
+    .statusIs(200)
+    .headerIs("Content-Type", "application/json")
+    .bodyIs("{\"message\":\"ok\"}")
+    .bodyContains("\"id\":1");</code></pre>
+
+  <h3>Assertion methods</h3>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>statusIs(int)</code></td><td>Asserts the status code.</td></tr>
+    <tr><td><code>headerIs(String, String)</code></td><td>Asserts a header's exact value.</td></tr>
+    <tr><td><code>headerExists(String)</code></td><td>Asserts a header is present, whatever its value.</td></tr>
+    <tr><td><code>bodyIs(String)</code></td><td>Asserts the body equals the expected string (UTF-8).</td></tr>
+    <tr><td><code>bodyContains(String)</code></td><td>Asserts the body contains the expected substring.</td></tr>
+    <tr><td><code>jsonStringIs(String path, String expected)</code></td><td>Asserts a JSON path's string value. Dot-separated path.</td></tr>
+    <tr><td><code>jsonNumberIs(String path, Number expected)</code></td><td>Asserts a JSON path's numeric value.</td></tr>
+  </table>
+
+  <h3>Count assertions</h3>
+  <p>Assert on a handler's invocation count:</p>
+  <pre><code>CountingHandler handler = new CountingHandler((req, params) ->
+    new Response(200, Headers.empty(), null));
+
+// ... invoke the handler ...
+
+Assertions.assertThat(handler.count()).isEqualTo(1);</code></pre>
+
+  <h3>Identity assertions</h3>
+  <p>Assert on the security identity a fixture recorded:</p>
+  <pre><code>PrincipalFixture fixture = new PrincipalFixture();
+// ... wire fixture into security middleware ...
+
+Assertions.assertThat(fixture.seen()).hasName("alice");</code></pre>
+
+  <h2>TestDatabase</h2>
+  <p><code>TestDatabase</code> provides an in-memory H2 database for tests:</p>
+  <pre><code>try (TestDatabase testDb = TestDatabase.create()) {
+    Database db = testDb.database();
+
+    // Run migrations
+    Migrator migrator = new Migrator(db);
+    migrator.migrate(List.of(createUsersTable));
+
+    // Use the database in your tests
+    db.executeUpdate("INSERT INTO users (name, email) VALUES (?, ?)",
+        "Alice", "alice@example.com");
+
+    List&lt;User&gt; users = db.query(
+        "SELECT id, name, email FROM users",
+        userMapper);
+}</code></pre>
+
+  <h3>API methods</h3>
+  <table>
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>create()</code></td><td>Creates a new in-memory H2 database. Auto-closes on try-with-resources end.</td></tr>
+    <tr><td><code>database()</code></td><td>Returns the <code>Database</code> instance for queries and updates.</td></tr>
+    <tr><td><code>dataSource()</code></td><td>Returns the underlying <code>DataSource</code> if you need it.</td></tr>
+    <tr><td><code>close()</code></td><td>Closes the database connection. Idempotent.</td></tr>
+  </table>
+
+  <h2>Complete test example</h2>
+  <pre><code>import com.barezen.testkit.*;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class UserApiTest {
+
+    @Test
+    void createUser() {
+        // 1. Set up in-memory database
+        try (TestDatabase testDb = TestDatabase.create()) {
+            Database db = testDb.database();
+
+            // 2. Run migrations
+            new Migrator(db).migrate(List.of(createUsersTable));
+
+            // 3. Build application components
+            UserRepository repo = new UserRepository(db);
+            Handler createUser = (req, params) -> {
+                Map&lt;String, String&gt; body = parseJson(req.body());
+                User user = repo.create(
+                    body.get("name"),
+                    body.get("email"),
+                    "hashed-password");
+                return new Response(201,
+                    Headers.of("Content-Type", "application/json"),
+                    ("{\"id\":" + user.id() + "}").getBytes());
+            };
+
+            // 4. Build router
+            Router router = Router.builder()
+                .route(HttpMethod.POST, "/users", createUser)
+                .build();
+
+            // 5. Start test server
+            try (TestServer server = TestServer.start(router)) {
+                // 6. Send request
+                TestResponse response = server.client()
+                    .post("/users", "{\"name\":\"Alice\",\"email\":\"alice@example.com\"}");
+
+                // 7. Assert
+                Assertions.assertThat(response)
+                    .statusIs(201)
+                    .headerIs("Content-Type", "application/json")
+                    .bodyContains("\"id\":");
+            }
+        }
+    }
+}</code></pre>
+
+  <h2>Best practices</h2>
+  <ul>
+    <li>Use try-with-resources for <code>TestServer</code> and <code>TestDatabase</code> to ensure cleanup.</li>
+    <li>Use <code>TestDatabase</code> for tests that need a database — it is isolated per test.</li>
+    <li>Use <code>Assertions.assertThat()</code> for readable test failures that show expected vs actual.</li>
+    <li>Run tests in parallel — each <code>TestServer</code> uses a random port, so they do not conflict.</li>
+    <li>For security tests, use <code>Authentication.bearer()</code> for simple token-based auth in tests.</li>
+  </ul>
+
+  <h2>Common issues</h2>
+  <h3>"Connection refused"</h3>
+  <p>The test server was not started or was already closed. Make sure <code>TestServer.start()</code> is called before sending requests, and that the server is not closed before the test completes.</p>
+
+  <h3>"TestRequestFailedException"</h3>
+  <p>The request could not be completed — connection refused, timeout, or interruption. Check that the server is running and the path is correct.</p>
+
+  <h3>"expected status 200 but got 404"</h3>
+  <p>The route was not registered or the path does not match. Check the router configuration and the request path.</p>
+
+  <div class="notes">
+    <p>Next: <a href="tutorial.html">Tutorial</a> — building a complete application from scratch.</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · TestKit · TestServer, TestHttpClient, Assertions, TestDatabase.</p></div>
+</footer>
+</body>
+</html>

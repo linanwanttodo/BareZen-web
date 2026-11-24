@@ -11,12 +11,23 @@
 <body>
 <header>
   <div class="band">
-    <a class="brand" href="index.html">BareZen</a>
+    <a class="brand" href="index.html">Bare<span>Zen</span></a>
     <nav>
       <a href="docs/quick-start.html">Quick start</a>
+      <a href="docs/core.html">Core</a>
+      <a href="docs/web.html">Web</a>
       <a href="docs/routing.html">Routing</a>
+      <a href="docs/http-jdk.html">JDK HTTP</a>
+      <a href="docs/http-servlet.html">Servlet</a>
+      <a href="docs/security.html">Security</a>
+      <a href="docs/data.html">Data</a>
       <a href="docs/plugins.html">Plugins</a>
-      <a href="docs/security-and-data.html">Security &amp; data</a>
+      <a href="docs/content.html">Content</a>
+      <a href="docs/testkit.html">TestKit</a>
+      <a href="docs/tutorial.html">Tutorial</a>
+      <a href="docs/api-reference.html">API</a>
+      <a href="docs/faq.html">FAQ</a>
+      <a href="docs/security-and-data.html">Sec &amp; Data</a>
       <a href="docs/reference.html">Reference</a>
       <a class="lang" hreflang="zh" href="zh/index.html">中文</a>
     </nav>
@@ -24,19 +35,20 @@
 </header>
 
 <main>
-  <h1>Small core. Real seams.</h1>
-  <p class="lede">BareZen is a Java web framework for people who have to put routing, sessions and persistence into a
-    project that already exists — under its server, in its container, on its database.</p>
-
-  <p>Three objects start an application: a <code>Handler</code>, a <code>Router</code>, and the server that runs it.
-    There is no annotation to scan, no container deciding which components exist, and no
-    <code>BareZenApplication.run()</code> that hides the wiring you are responsible for. Everything past that is a
-    module you add when you need it, and the framework below them never names the ones you add above it.</p>
+  <div class="hero">
+    <h1>Small core. Real seams.</h1>
+    <p class="lede">BareZen is a Java web framework for people who have to put routing, sessions and persistence into a
+      project that already exists — under its server, in its container, on its database.</p>
+    <span class="pill accent">JDK 17+</span>
+    <span class="pill">Plugin-based</span>
+    <span class="pill">Zero mandatory dependencies</span>
+    <span class="pill">SPI-driven</span>
+  </div>
 
   <pre><code>Router routes = Router.builder()
-    .route(GET, "/health", (req, params) -&gt; ok())
-    .route(GET, "/users/{id}", (req, params) -&gt; user(params.get("id")))
-    .build();
+  .route(GET, "/health", (req, params) -&gt; ok())
+  .route(GET, "/users/{id}", (req, params) -&gt; user(params.get("id")))
+  .build();
 
 var server = new JdkHttpServerAdapter(loopback(0), routes);
 server.start();</code></pre>
@@ -72,6 +84,43 @@ server.start();</code></pre>
     </tbody>
   </table>
 
+  <h2>Features at a glance</h2>
+
+  <div class="feature-grid">
+    <a class="feature-card" href="docs/core.html">
+      <h3>Core</h3>
+      <p>Lifecycle management, configuration, DI, event bus, and virtual thread support.</p>
+    </a>
+    <a class="feature-card" href="docs/web.html">
+      <h3>Web</h3>
+      <p>Immutable route table with Request, Response, and Handler contracts.</p>
+    </a>
+    <a class="feature-card" href="docs/http-jdk.html">
+      <h3>JDK HTTP</h3>
+      <p>Embedded server with virtual threads and TLS/HTTPS support.</p>
+    </a>
+    <a class="feature-card" href="docs/http-servlet.html">
+      <h3>Servlet</h3>
+      <p>Deploy inside Tomcat, Jetty, or Wildfly without port conflicts.</p>
+    </a>
+    <a class="feature-card" href="docs/security.html">
+      <h3>Security</h3>
+      <p>Authentication, authorization, sessions, and PBKDF2 password hashing.</p>
+    </a>
+    <a class="feature-card" href="docs/data.html">
+      <h3>Data</h3>
+      <p>JDBC queries, transaction management, and schema migrations.</p>
+    </a>
+    <a class="feature-card" href="docs/plugins.html">
+      <h3>Plugins</h3>
+      <p>SPI-driven plugin system with route contribution and auto-discovery.</p>
+    </a>
+    <a class="feature-card" href="docs/testkit.html">
+      <h3>TestKit</h3>
+      <p>Integration testing with real servers, HTTP client, and assertions.</p>
+    </a>
+  </div>
+
   <h2>The seams, and what they refuse</h2>
 
   <p>A plugin is a lifecycle participant that can name itself, plus whatever extension point the owning component
@@ -97,16 +146,67 @@ server.start();</code></pre>
 
   <h2>Where to read next</h2>
 
-  <ul>
-    <li><a href="docs/quick-start.html">Quick start</a> — the three objects, the Maven coordinates, what a handler may and
-      may not ask for.</li>
-    <li><a href="docs/plugins.html">Plugins</a> — writing one, contributing routes, being discovered, and the rules that
-      keep a plugin from becoming a container.</li>
-    <li><a href="docs/routing.html">Routing &amp; HTTP</a> — patterns, framing, the six error answers, HEAD and 304.</li>
-    <li><a href="docs/security-and-data.html">Security &amp; data</a> — the decorator, three authentication states, opaque
-      sessions, PBKDF2, and a transaction a repository cannot commit.</li>
-    <li><a href="docs/reference.html">Reference</a> — the modules, the decisions behind them, and how to run this site
-      locally.</li>
+  <ul class="quick-links">
+    <li>
+      <a href="docs/quick-start.html">Quick start</a>
+      <small>The three objects, the Maven coordinates, what a handler may and may not ask for.</small>
+    </li>
+    <li>
+      <a href="docs/core.html">Core concepts</a>
+      <small>Lifecycle management, configuration, DI, events, and threading.</small>
+    </li>
+    <li>
+      <a href="docs/web.html">Web core</a>
+      <small>Request, Response, Router, Handler — the server-agnostic contract.</small>
+    </li>
+    <li>
+      <a href="docs/routing.html">Routing &amp; HTTP</a>
+      <small>Patterns, framing, the six error answers, HEAD and 304.</small>
+    </li>
+    <li>
+      <a href="docs/http-jdk.html">JDK HTTP adapter</a>
+      <small>Embedded server with virtual threads and TLS.</small>
+    </li>
+    <li>
+      <a href="docs/http-servlet.html">Servlet integration</a>
+      <small>Deploying in Tomcat, Jetty, or Wildfly.</small>
+    </li>
+    <li>
+      <a href="docs/security.html">Security</a>
+      <small>Authentication, authorization, sessions, and password hashing.</small>
+    </li>
+    <li>
+      <a href="docs/data.html">Data persistence</a>
+      <small>JDBC queries, transactions, and schema migrations.</small>
+    </li>
+    <li>
+      <a href="docs/plugins.html">Plugins</a>
+      <small>Writing one, contributing routes, being discovered.</small>
+    </li>
+    <li>
+      <a href="docs/content.html">Static content</a>
+      <small>Serving files with MIME types and caching.</small>
+    </li>
+    <li>
+      <a href="docs/testkit.html">TestKit</a>
+      <small>Integration testing with real servers and assertions.</small>
+    </li>
+    <li>
+      <a href="docs/tutorial.html">Tutorial</a>
+      <small>Building a complete application from scratch.</small>
+    </li>
+    <li>
+      <a href="docs/api-reference.html">API reference</a>
+      <small>Complete class-level documentation index.</small>
+    </li>
+    <li>
+      <a href="docs/faq.html">FAQ</a>
+      <small>Common questions and troubleshooting.</small>
+    </li>
+    <li>
+      <a href="docs/reference.html">Reference</a>
+      <small>The modules, the decisions behind them, and how to run this site locally.</small>
+    </li>
   </ul>
 </main>
 
@@ -116,5 +216,17 @@ server.start();</code></pre>
       recommended · the framework's third-party compile dependency is <code>slf4j-api</code> and nothing else.</p>
   </div>
 </footer>
+
+<script>
+  // Add scrolled class to header on scroll for shadow effect
+  window.addEventListener('scroll', function() {
+    var header = document.querySelector('header');
+    if (window.scrollY > 10) {
+      header.classList.add('scrolled');
+    } else {
+      header.classList.remove('scrolled');
+    }
+  }, { passive: true });
+</script>
 </body>
 </html>

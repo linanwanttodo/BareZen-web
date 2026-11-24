@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>常见问题 — BareZen</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">快速开始</a>
+      <a href="core.html">核心</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">插件</a>
+      <a href="security.html">安全</a>
+      <a href="data.html">数据</a>
+      <a href="content.html">内容</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">教程</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html" aria-current="page">常见问题</a>
+      <a class="lang" hreflang="en" href="../../docs/faq.html">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>常见问题</h1>
+  <p class="lede">关于 BareZen 设计、架构和使用模式的常见问题。</p>
+
+  <h2>设计决策</h2>
+
+  <h3>为什么没有注解或反射？</h3>
+  <p>BareZen 使用显式的、无反射的依赖注入（ADR-0014）。没有 <code>@Inject</code>、<code>@Component</code> 或 <code>@Autowired</code> 注解。应用在代码中声明它有什么，框架计算出创建顺序。这使得依赖在调用点可见、可搜索，并可用标准 IDE 工具重构。</p>
+
+  <h3>为什么路由器是不可变的？</h3>
+  <p>路由器在 <code>build()</code> 后是不可变的（ADR-0019）。没有 <code>unregister()</code>、<code>replace()</code> 或 <code>reload()</code>。这意味着请求线程不能与注册竞争 — 竞争不存在。如果你需要在运行时更改路由，构建一个新路由器并原子地交换引用。</p>
+
+  <h3>为什么没有像 /assets/* 这样的通配符路由？</h3>
+  <p>路由器使用精确段或 <code>{name}</code> 参数回答"这个请求是哪个处理程序的"。没有通配符、前缀匹配或多段捕获（ADR-0019 §5、§19）。对于静态文件，枚举它们 — 每个资产一条路由。这使路由器保持为一个简单的、单问题组件。</p>
+
+  <h3>为什么请求主体在内存中？</h3>
+  <p><code>Request.body()</code> 返回 <code>byte[]</code>（ADR-0030）。流式主体需要契约说明谁关闭流、handler 未读取就返回时发生什么、handler 将其交给另一个线程时发生什么。这些问题都没有不依赖于服务器的答案。对于大文件上传，使用适配器的请求主体限制配置。</p>
+
+  <h3>为什么 Response 中没有 Content-Length？</h3>
+  <p><code>Content-Length</code> 和 <code>Transfer-Encoding</code> 不是 handler 要写的（ADR-0027）。这些字段描述头部块后有多少字节 — 这是关于连接的事实，不是应用的答案。只有写入字节的适配器才能真正说明它们。适配器从主体字节派生 <code>Content-Length</code>。</p>
+
+  <h3>为什么是两阶段启动？</h3>
+  <p>启动分两个全局阶段运行（ADR-0003）：先初始化再启动。这保证了一个使工作可见的参与者（如绑定端口的 HTTP 服务器）只在每个前面的参与者完成设置后才这样做。按组件交错两个阶段无法表达这个不变量。</p>
+
+  <h3>为什么 SecurityContext 不是 ThreadLocal？</h3>
+  <p>线程不是请求。服务器线程可能处理多个请求，请求可能不在开始它的线程上完成。<code>ThreadLocal</code> 会将一个请求的身份泄漏到另一个。上下文是请求作用域的，通过中间件链传递。</p>
+
+  <h2>架构</h2>
+
+  <h3>JdkHttpServerAdapter 和 BarezenServlet 有什么区别？</h3>
+  <table>
+    <tr><th></th><th>JdkHttpServerAdapter</th><th>BarezenServlet</th></tr>
+    <tr><td>拥有端口</td><td>是</td><td>否 — 容器拥有</td></tr>
+    <tr><td>拥有线程</td><td>是（虚拟或平台）</td><td>否 — 容器拥有</td></tr>
+    <tr><td>生命周期</td><td>HttpServerAdapter（start/stop）</td><td>HttpServlet（init/destroy）</td></tr>
+    <tr><td>部署</td><td>嵌入式，从 main() 运行</td><td>WAR 部署到 Tomcat/Jetty/Wildfly</td></tr>
+    <tr><td>TLS</td><td>通过配置内置</td><td>容器管理</td></tr>
+  </table>
+
+  <h3>我可以在同一个应用中使用两个适配器吗？</h3>
+  <p>可以，但它们会是不同端口上的独立服务器。通常你选择一个：嵌入式部署使用 JDK 适配器，容器部署使用 Servlet。</p>
+
+  <h3>如何添加中间件？</h3>
+  <p>BareZen 没有通用的中间件链。相反，使用这些模式：</p>
+  <ul>
+    <li><strong>RouteContributor</strong> — 用于从插件添加路由。</li>
+    <li><strong>Handler 包装</strong> — 包装处理程序以添加横切行为（日志、计时、CORS）。</li>
+    <li><strong>SecurityMiddleware</strong> — 用于认证和授权。</li>
+  </ul>
+  <pre><code>// 示例：日志包装器
+Handler logging(Handler inner) {
+    return (req, params) -> {
+        long start = System.nanoTime();
+        try {
+            return inner.handle(req, params);
+        } finally {
+            long elapsed = System.nanoTime() - start;
+            System.out.println(req.method() + " " + req.path() + " " + elapsed + "ns");
+        }
+    };
+}</code></pre>
+
+  <h3>如何处理 CORS？</h3>
+  <p>包装你的处理程序以添加 CORS 头部：</p>
+  <pre><code>Handler cors(Handler inner) {
+    return (req, params) -> {
+        if (req.method() == HttpMethod.OPTIONS) {
+            return new Response(204, Headers.empty(), null);
+        }
+        Response response = inner.handle(req, params);
+        // 向响应添加 CORS 头部
+        return response; // 带额外头部
+    };
+}</code></pre>
+
+  <h2>配置</h2>
+
+  <h3>有哪些配置键可用？</h3>
+  <table>
+    <tr><th>键</th><th>模块</th><th>描述</th></tr>
+    <tr><td><code>barezen.http.jdk.maxRequestBodyBytes</code></td><td>http-jdk</td><td>最大请求主体大小（默认：1 MB）</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePath</code></td><td>http-jdk</td><td>HTTPS 的密钥库路径</td></tr>
+    <tr><td><code>barezen.http.jdk.tls.keystorePassword</code></td><td>http-jdk</td><td>密钥库密码</td></tr>
+  </table>
+
+  <h3>如何覆盖配置？</h3>
+  <p>配置层按最弱到最强排序：属性文件 &lt; 环境变量 &lt; 系统属性。要覆盖：</p>
+  <pre><code># 属性文件（最低优先级）
+server.port=8080
+
+# 环境变量（中等优先级）
+export BAREZEN_HTTP_JDK_TLS_KEYSTOREPATH=/path/to/keystore.p12
+
+# JVM 系统属性（最高优先级）
+java -Dserver.port=9090 -jar app.jar</code></pre>
+
+  <h2>数据库</h2>
+
+  <h3>支持哪些数据库？</h3>
+  <p>任何 JDBC 兼容的数据库。框架已使用 H2（内存）、PostgreSQL 和 MySQL 测试。<code>Database</code> 类与产品无关 — 它接收一个 <code>DataSource</code>，从不命名驱动。</p>
+
+  <h3>如何使用连接池？</h3>
+  <p>创建池化的 DataSource 并将其传递给 <code>Database</code>：</p>
+  <pre><code>HikariConfig config = new HikariConfig();
+config.setJdbcUrl("jdbc:postgresql://localhost/mydb");
+config.setUsername("user");
+config.setPassword("password");
+DataSource ds = new HikariDataSource(config);
+Database db = new Database(ds);</code></pre>
+
+  <h3>可以嵌套事务吗？</h3>
+  <p>不可以。每个 <code>transaction()</code> 调用在新线程上打开新连接。不支持嵌套（ADR-0039）。如果你需要保存点，在事务回调内直接使用底层 JDBC 连接。</p>
+
+  <h2>安全</h2>
+
+  <h3>401 和 403 有什么区别？</h3>
+  <ul>
+    <li><strong>401 Unauthorized</strong> — 客户端未认证。凭据错误或缺失。返回 <code>AuthenticationResult.failure()</code>。</li>
+    <li><strong>403 Forbidden</strong> — 客户端已认证但未授权。身份没有所需的权限。返回 <code>Authorization.Decision.DENY</code>。</li>
+  </ul>
+
+  <h3>如何实现 JWT 认证？</h3>
+  <p>实现 <code>Authentication</code> 接口：</p>
+  <pre><code>Authentication jwtAuth = (credential) -> {
+    if (credential == null || !credential.scheme().equals("Bearer")) {
+        return AuthenticationResult.anonymous();
+    }
+    try {
+        Claims claims = Jwts.parser()
+            .setSigningKey(secret)
+            .parseClaimsJws(credential.value())
+            .getBody();
+        String username = claims.getSubject();
+        return AuthenticationResult.authenticated(Principal.of(username));
+    } catch (JwtException e) {
+        return AuthenticationResult.failure("invalid token");
+    }
+};</code></pre>
+
+  <h3>会话是分布式的吗？</h3>
+  <p>不是。<code>SessionStore</code> 仅在内存中。服务器重启会使所有会话无效。对于分布式部署，实现自己的由 Redis 或数据库支持的会话存储。</p>
+
+  <h2>测试</h2>
+
+  <h3>为什么使用 TestServer 而不是模拟？</h3>
+  <p><code>TestServer</code> 在随机端口上启动真实的 HTTP 服务器。使用假服务器的集成测试只会证明假服务器有效。穿过套接字的字节是生产适配器产生的字节。</p>
+
+  <h3>可以并行运行测试吗？</h3>
+  <p>可以。每个 <code>TestServer</code> 使用随机端口（端口 0），所以并行测试类永远不会争夺固定数字。</p>
+
+  <h2>部署</h2>
+
+  <h3>如何部署到生产？</h3>
+  <p>两个选项：</p>
+  <ol>
+    <li><strong>嵌入式</strong> — 打包为带 <code>main()</code> 方法的 JAR。使用来自 <code>application.properties</code> 配置的 <code>JdkHttpServerAdapter</code>。</li>
+    <li><strong>容器</strong> — 打包为 WAR。使用部署到 Tomcat、Jetty 或 Wildfly 的 <code>BarezenServlet</code>。</li>
+  </ol>
+
+  <h3>如何在生产中启用 HTTPS？</h3>
+  <p>对于 JDK 适配器，在 <code>application.properties</code> 中配置密钥库：</p>
+  <pre><code>barezen.http.jdk.tls.keystorePath=/path/to/keystore.p12
+barezen.http.jdk.tls.keystorePassword=changeit</code></pre>
+
+  <p>对于 Servlet 部署，在容器级别配置 TLS（Tomcat 的 <code>server.xml</code>、Jetty 的 <code>etc/jetty-ssl.xml</code>）。</p>
+
+  <h3>如何处理优雅关闭？</h3>
+  <p><code>LifecycleOrchestrator</code> 默认注册 JVM 关闭钩子。它给进行中的请求 3 秒完成。对于容器部署，关闭关闭钩子：</p>
+  <pre><code>LifecycleOrchestrator.builder()
+    .registerShutdownHook(false)
+    .build();</code></pre>
+
+  <h2>性能</h2>
+
+  <h3>BareZen 使用虚拟线程吗？</h3>
+  <p>在 Java 21+ 上，是的 — 默认使用。JDK 适配器自动检测虚拟线程支持并使用它们。在 Java 17 上，它回退到平台线程。</p>
+
+  <h3>请求主体限制是多少？</h3>
+  <p>默认为 1 MB。通过 <code>barezen.http.jdk.maxRequestBodyBytes</code>（JDK 适配器）或 <code>barezen.maxRequestBodyBytes</code> 初始化参数（Servlet）配置它。超过限制的请求在处理程序运行前以 413 拒绝。</p>
+
+  <h3>StaticContent 适合大文件吗？</h3>
+  <p>不适合。<code>StaticContent</code> 将整个文件读入内存。它设计用于样式表、JavaScript、图像和小文档。对于大文件（视频、下载），编写一个流式传输响应的自定义处理程序。</p>
+
+  <h2>从其他框架迁移</h2>
+
+  <h3>BareZen 与 Spring Boot 相比如何？</h3>
+  <table>
+    <tr><th>功能</th><th>Spring Boot</th><th>BareZen</th></tr>
+    <tr><td>DI</td><td>基于注解，反射</td><td>显式，无反射</td></tr>
+    <tr><td>路由</td><td>@RequestMapping 注解</td><td>编程式 Router.builder()</td></tr>
+    <tr><td>服务器</td><td>嵌入式 Tomcat/Jetty/Undertow</td><td>JDK HttpServer 或 Servlet</td></tr>
+    <tr><td>依赖</td><td>沉重（Spring Framework）</td><td>最小（核心只需 slf4j-api）</td></tr>
+    <tr><td>启动时间</td><td>秒</td><td>毫秒</td></tr>
+    <tr><td>学习曲线</td><td>陡峭（许多抽象）</td><td>平缓（少量概念）</td></tr>
+  </table>
+
+  <h3>如果我需要 BareZen 没有的功能怎么办？</h3>
+  <p>BareZen 设计为最小。如果你需要内置没有的功能：</p>
+  <ul>
+    <li>为横切关注点（日志、CORS、速率限制）编写处理程序包装器。</li>
+    <li>为插件式路由添加编写 RouteContributor。</li>
+    <li>与 BareZen 一起使用标准 Java 库（Jackson 用于 JSON、HikariCP 用于池化）。</li>
+  </ul>
+  <p>框架提供契约（Request、Response、Handler、Router），让你填充其余部分。</p>
+
+  <h2>获取帮助</h2>
+  <ul>
+    <li>阅读<a href="tutorial.html">教程</a>获取完整应用 walkthrough。</li>
+    <li>查看<a href="api-reference.html">API 参考</a>获取类级别文档。</li>
+    <li>查看源代码仓库中的 <code>examples/</code> 目录获取可运行的示例。</li>
+    <li>查看<a href="reference.html">ADR 索引</a>获取设计决策理由。</li>
+  </ul>
+
+  <div class="notes">
+    <p>返回<a href="../index.html">首页</a>或从<a href="quick-start.html">快速开始</a>开始。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 常见问题 · 设计决策、架构、故障排除。</p></div>
+</footer>
+</body>
+</html>

@@ -11,11 +11,22 @@
 <body>
 <header>
   <div class="band">
-    <a class="brand" href="index.html">BareZen</a>
+    <a class="brand" href="index.html">Bare<span>Zen</span></a>
     <nav>
       <a href="docs/quick-start.html">快速开始</a>
+      <a href="docs/core.html">核心</a>
+      <a href="docs/web.html">Web</a>
       <a href="docs/routing.html">路由</a>
+      <a href="docs/http-jdk.html">JDK HTTP</a>
+      <a href="docs/http-servlet.html">Servlet</a>
+      <a href="docs/security.html">安全</a>
+      <a href="docs/data.html">数据</a>
       <a href="docs/plugins.html">插件</a>
+      <a href="docs/content.html">内容</a>
+      <a href="docs/testkit.html">TestKit</a>
+      <a href="docs/tutorial.html">教程</a>
+      <a href="docs/api-reference.html">API</a>
+      <a href="docs/faq.html">常见问题</a>
       <a href="docs/security-and-data.html">安全与数据</a>
       <a href="docs/reference.html">参考</a>
       <a class="lang" hreflang="en" href="../index.html">EN</a>
@@ -24,18 +35,20 @@
 </header>
 
 <main>
-  <h1>内核很小，接缝是真的。</h1>
-  <p class="lede">BareZen 是给这样的人用的 Java Web 框架：你要把路由、会话和持久化放进一个<strong>已经存在</strong>的
-    项目里 —— 用它已有的服务器、它的容器、它的数据库。</p>
-
-  <p>启动一个应用只需要三个对象：一个 <code>Handler</code>、一个 <code>Router</code>，以及运行它的服务器。没有注解要扫描，
-    没有容器替你决定哪些组件存在，也没有一个把你本该负责的装配逻辑藏起来的
-    <code>BareZenApplication.run()</code>。除此之外都是你按需添加的模块，而它们下面的框架永远不会知道你加了什么。</p>
+  <div class="hero">
+    <h1>内核很小，接缝是真的。</h1>
+    <p class="lede">BareZen 是给这样的人用的 Java Web 框架：你要把路由、会话和持久化放进一个<strong>已经存在</strong>的
+      项目里 —— 用它已有的服务器、它的容器、它的数据库。</p>
+    <span class="pill accent">JDK 17+</span>
+    <span class="pill">插件化</span>
+    <span class="pill">零强制依赖</span>
+    <span class="pill">SPI 驱动</span>
+  </div>
 
   <pre><code>Router routes = Router.builder()
-    .route(GET, "/health", (req, params) -&gt; ok())
-    .route(GET, "/users/{id}", (req, params) -&gt; user(params.get("id")))
-    .build();
+  .route(GET, "/health", (req, params) -&gt; ok())
+  .route(GET, "/users/{id}", (req, params) -&gt; user(params.get("id")))
+  .build();
 
 var server = new JdkHttpServerAdapter(loopback(0), routes);
 server.start();</code></pre>
@@ -71,6 +84,43 @@ server.start();</code></pre>
     </tbody>
   </table>
 
+  <h2>功能一览</h2>
+
+  <div class="feature-grid">
+    <a class="feature-card" href="docs/core.html">
+      <h3>核心</h3>
+      <p>生命周期管理、配置系统、依赖注入、事件总线和虚拟线程支持。</p>
+    </a>
+    <a class="feature-card" href="docs/web.html">
+      <h3>Web</h3>
+      <p>不可变路由表，包含 Request、Response 和 Handler 契约。</p>
+    </a>
+    <a class="feature-card" href="docs/http-jdk.html">
+      <h3>JDK HTTP</h3>
+      <p>内嵌服务器，支持虚拟线程和 TLS/HTTPS。</p>
+    </a>
+    <a class="feature-card" href="docs/http-servlet.html">
+      <h3>Servlet</h3>
+      <p>部署到 Tomcat、Jetty 或 Wildfly，无端口冲突。</p>
+    </a>
+    <a class="feature-card" href="docs/security.html">
+      <h3>安全</h3>
+      <p>认证、授权、会话管理和 PBKDF2 密码哈希。</p>
+    </a>
+    <a class="feature-card" href="docs/data.html">
+      <h3>数据</h3>
+      <p>JDBC 查询、事务管理和 Schema 迁移。</p>
+    </a>
+    <a class="feature-card" href="docs/plugins.html">
+      <h3>插件</h3>
+      <p>SPI 驱动的插件系统，支持路由贡献和自动发现。</p>
+    </a>
+    <a class="feature-card" href="docs/testkit.html">
+      <h3>TestKit</h3>
+      <p>集成测试工具，包含真实服务器、HTTP 客户端和断言。</p>
+    </a>
+  </div>
+
   <h2>接缝，以及它们拒绝什么</h2>
 
   <p>插件是一个"能说出自己名字的生命周期参与者"，再加上它所贡献能力的所有者声明的扩展点。这个范围是刻意收窄的：
@@ -92,12 +142,67 @@ server.start();</code></pre>
 
   <h2>接下来读什么</h2>
 
-  <ul>
-    <li><a href="docs/quick-start.html">快速开始</a> —— 三个对象、Maven 坐标，以及 handler 能要什么、不能要什么。</li>
-    <li><a href="docs/plugins.html">插件</a> —— 怎么写一个、怎么贡献路由、怎么被发现，以及那些防止插件变成容器的规则。</li>
-    <li><a href="docs/routing.html">路由与 HTTP</a> —— 模式、framing、六种错误应答、HEAD 与 304。</li>
-    <li><a href="docs/security-and-data.html">安全与数据</a> —— 装饰器、三态认证、不透明会话、PBKDF2，以及仓储无法提交的事务。</li>
-    <li><a href="docs/reference.html">参考</a> —— 模块清单、背后的决策，以及如何在本地跑起这个站点。</li>
+  <ul class="quick-links">
+    <li>
+      <a href="docs/quick-start.html">快速开始</a>
+      <small>三个对象、Maven 坐标，以及 handler 能要什么、不能要什么。</small>
+    </li>
+    <li>
+      <a href="docs/core.html">核心概念</a>
+      <small>生命周期管理、配置、DI、事件和线程模型。</small>
+    </li>
+    <li>
+      <a href="docs/web.html">Web 核心</a>
+      <small>Request、Response、Router、Handler —— 与服务器无关的 HTTP 契约。</small>
+    </li>
+    <li>
+      <a href="docs/routing.html">路由与 HTTP</a>
+      <small>模式、分帧、六种错误应答、HEAD 与 304。</small>
+    </li>
+    <li>
+      <a href="docs/http-jdk.html">JDK HTTP 适配器</a>
+      <small>内嵌服务器，虚拟线程和 TLS。</small>
+    </li>
+    <li>
+      <a href="docs/http-servlet.html">Servlet 集成</a>
+      <small>在 Tomcat、Jetty 或 Wildfly 中部署。</small>
+    </li>
+    <li>
+      <a href="docs/security.html">安全</a>
+      <small>认证、授权、会话管理和密码哈希。</small>
+    </li>
+    <li>
+      <a href="docs/data.html">数据持久化</a>
+      <small>JDBC 查询、事务管理和 Schema 迁移。</small>
+    </li>
+    <li>
+      <a href="docs/plugins.html">插件</a>
+      <small>怎么写一个、怎么贡献路由、怎么被发现。</small>
+    </li>
+    <li>
+      <a href="docs/content.html">静态内容</a>
+      <small>带 MIME 类型和缓存的文件服务。</small>
+    </li>
+    <li>
+      <a href="docs/testkit.html">TestKit</a>
+      <small>用真实服务器和断言进行集成测试。</small>
+    </li>
+    <li>
+      <a href="docs/tutorial.html">教程</a>
+      <small>从零开始构建一个完整的应用。</small>
+    </li>
+    <li>
+      <a href="docs/api-reference.html">API 参考</a>
+      <small>完整的类级别文档索引。</small>
+    </li>
+    <li>
+      <a href="docs/faq.html">常见问题</a>
+      <small>常见问题解答和调试技巧。</small>
+    </li>
+    <li>
+      <a href="docs/reference.html">参考</a>
+      <small>模块清单、背后的决策，以及如何在本地运行此站点。</small>
+    </li>
   </ul>
 </main>
 
@@ -107,5 +212,16 @@ server.start();</code></pre>
       · 框架唯一的第三方编译依赖是 <code>slf4j-api</code>，没有别的。</p>
   </div>
 </footer>
+
+<script>
+  window.addEventListener('scroll', function() {
+    var header = document.querySelector('header');
+    if (window.scrollY > 10) {
+      header.classList.add('scrolled');
+    } else {
+      header.classList.remove('scrolled');
+    }
+  }, { passive: true });
+</script>
 </body>
 </html>

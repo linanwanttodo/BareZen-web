@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Servlet 集成 — BareZen</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">快速开始</a>
+      <a href="core.html">核心</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html" aria-current="page">Servlet</a>
+      <a href="plugins.html">插件</a>
+      <a href="security.html">安全</a>
+      <a href="data.html">数据</a>
+      <a href="content.html">内容</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">教程</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">常见问题</a>
+      <a class="lang" hreflang="en" href="../../docs/http-servlet.html">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>Servlet 集成</h1>
+  <p class="lede">barezen-http-servlet 提供 BarezenServlet，一个标准的 HttpServlet，在 Tomcat、Jetty 或 Wildfly 内部分发到 BareZen Router。</p>
+
+  <h2>模块概览</h2>
+  <p><code>barezen-http-servlet</code> 模块将 BareZen 与 Jakarta Servlet API 集成。你不是运行自己的 HTTP 服务器，而是将标准 WAR 文件部署到现有的 servlet 容器。容器拥有端口、线程池、执行器和生命周期 — BareZen 只提供路由和处理程序分发。</p>
+
+  <p><code>BarezenServlet</code> <strong>不是</strong> <code>HttpServerAdapter</code>。适配器启动、停止、报告其绑定端口，且无法重启。由它不控制的容器实例化的 servlet 无法诚实地回答 <code>port()</code> 或 <code>isRunning()</code>（ADR-0049）。</p>
+
+  <h2>两种部署模式</h2>
+  <p>因为容器实例化它部署的内容，有两种传递路由表的方式：</p>
+
+  <h3>1. 编程嵌入</h3>
+  <p>应用构建路由器并将其传递给 servlet 构造函数：</p>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", (req, params) ->
+        new Response(200, Headers.of("Content-Type", "text/plain"), "OK".getBytes()))
+    .build();
+
+BarezenServlet servlet = new BarezenServlet(router);
+// 以编程方式将 servlet 注册到容器</code></pre>
+
+  <h3>2. 声明式部署（web.xml 或 @WebServlet）</h3>
+  <p>容器通过其无参构造函数实例化 servlet。应用的 <code>ServletContextListener</code> 在启动时将路由器设置为上下文属性：</p>
+
+  <pre><code>// 在你的 ServletContextListener 中：
+public void contextInitialized(ServletContextEvent event) {
+    Router router = Router.builder()
+        .route(HttpMethod.GET, "/health", healthHandler)
+        .build();
+    event.getServletContext().setAttribute(
+        BarezenServlet.ROUTER_ATTRIBUTE, router);
+}</code></pre>
+
+  <h3>web.xml 配置</h3>
+  <pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+         version="6.0"&gt;
+
+  &lt;servlet&gt;
+    &lt;servlet-name&gt;barezen&lt;/servlet-name&gt;
+    &lt;servlet-class&gt;com.barezen.http.servlet.BarezenServlet&lt;/servlet-class&gt;
+    &lt;init-param&gt;
+      &lt;param-name&gt;barezen.maxRequestBodyBytes&lt;/param-name&gt;
+      &lt;param-value&gt;5242880&lt;/param-value&gt;
+    &lt;/init-param&gt;
+    &lt;load-on-startup&gt;1&lt;/load-on-startup&gt;
+  &lt;/servlet&gt;
+
+  &lt;servlet-mapping&gt;
+    &lt;servlet-name&gt;barezen&lt;/servlet-name&gt;
+    &lt;url-pattern&gt;/&lt;/url-pattern&gt;
+  &lt;/servlet-mapping&gt;
+
+&lt;/web-app&gt;</code></pre>
+
+  <h3>@WebServlet 注解</h3>
+  <pre><code>@WebServlet(
+    urlPatterns = "/*",
+    initParams = @WebInitParam(
+        name = "barezen.maxRequestBodyBytes",
+        value = "5242880"))
+public class MyServlet extends BarezenServlet {
+}</code></pre>
+
+  <h2>配置</h2>
+  <p>servlet 在 <code>init()</code> 期间读取一次其配置：</p>
+  <table>
+    <tr><th>初始化参数</th><th>类型</th><th>默认值</th><th>描述</th></tr>
+    <tr><td><code>barezen.maxRequestBodyBytes</code></td><td><code>long</code></td><td>1 MB（1,048,576 字节）</td><td>最大请求主体大小。超过此限制的请求以 413 拒绝。</td></tr>
+  </table>
+
+  <p>如果参数存在但不是有效的数字，部署以 <code>ServletException</code> 失败，命名参数和找到的值。</p>
+
+  <h2>ServletContext 属性</h2>
+  <p>对于声明式部署，必须在 servlet 初始化之前将路由器放在属性名 <code>com.barezen.http.servlet.router</code>（可作为 <code>BarezenServlet.ROUTER_ATTRIBUTE</code> 访问）下。</p>
+
+  <h2>错误响应</h2>
+  <p>与 JDK 适配器相同 — 切换服务器不应改变客户端读取的内容（ADR-0023）：</p>
+  <table>
+    <tr><th>状态码</th><th>何时</th></tr>
+    <tr><td><code>400 Bad Request</code></td><td>格式错误的请求目标或主体从未到达。</td></tr>
+    <tr><td><code>404 Not Found</code></td><td>没有路由匹配请求方法和路径。</td></tr>
+    <tr><td><code>405 Method Not Allowed</code></td><td>路径存在路由但不是请求的方法。<code>Allow</code> 头部列出允许的方法。</td></tr>
+    <tr><td><code>413 Payload Too Large</code></td><td>请求主体超过配置的限制。</td></tr>
+    <tr><td><code>500 Internal Server Error</code></td><td>处理程序抛出异常。堆栈跟踪进入日志，不进入客户端。</td></tr>
+  </table>
+
+  <h2>线程安全</h2>
+  <p>一个 servlet 实例并发地服务每个请求。它除了路由表和一个数字（主体限制）外不保留任何内容，所以没有每请求状态会泄漏。servlet 规范保证 <code>init()</code> 在第一次 <code>service()</code> 调用之前发生，使这两个字段无需锁即可安全读取。</p>
+
+  <h2>servlet 不做的事情</h2>
+  <ul>
+    <li>它不解析 HTTP — 容器在请求对象存在之前拒绝格式错误的请求行。</li>
+    <li>它不回答 <code>OPTIONS *</code> — 容器在路由之前解析了目标。</li>
+    <li>它不为每个请求记录一行 — 访问日志是容器的工作。</li>
+    <li>它不捕获 <code>Error</code> — handler 内部的 <code>OutOfMemoryError</code> 不是 500 回答的条件。</li>
+  </ul>
+
+  <h2>支持的容器</h2>
+  <p>servlet 模块依赖 Jakarta Servlet API（jakarta.servlet）。已使用以下容器测试：</p>
+  <ul>
+    <li><strong>Apache Tomcat 10.x+</strong> — Jakarta EE 9+（jakarta.* 命名空间）</li>
+    <li><strong>Eclipse Jetty 11.x+</strong> — Jakarta EE 9+</li>
+    <li><strong>Wildfly 27.x+</strong> — Jakarta EE 9+</li>
+  </ul>
+
+  <h2>最佳实践</h2>
+  <ul>
+    <li>使用 <code>ServletContextListener</code> 在启动时构建和注册路由器，而不是在 servlet 的 <code>init()</code> 中。</li>
+    <li>将 servlet 映射到 <code>/*</code>（或 web.xml 中的 <code>/</code>），以便所有请求通过 BareZen 路由。</li>
+    <li>将 <code>load-on-startup</code> 设置为 <code>1</code>，以便 servlet 在第一个请求之前初始化。</li>
+    <li>通过初始化参数配置主体限制，而不是通过代码 — 使其无需重新编译即可部署。</li>
+  </ul>
+
+  <h2>常见问题</h2>
+  <h3>"no route table for this servlet"</h3>
+  <p>servlet 由容器实例化（无参构造函数），但 ServletContext 中未设置路由器。要么用 <code>new BarezenServlet(router)</code> 构造 servlet，要么在 servlet 初始化之前设置 <code>com.barezen.http.servlet.router</code> 属性。</p>
+
+  <h3>"barezen.maxRequestBodyBytes is 'abc' ... which is not a byte count"</h3>
+  <p>初始化参数值不是有效的数字。检查你的 web.xml 或 @WebServlet 注解中的拼写错误。</p>
+
+  <h3>HttpServlet 中未列出的方法出现 405</h3>
+  <p><code>HttpServlet</code> 的默认 <code>service()</code> 在未列出动词上回答 405，而不询问路由器。BarezenServlet 完全覆盖 <code>service()</code> 以避免此问题 — 确保你使用的是 <code>BarezenServlet</code>，而不是调用 <code>super.doGet()</code> 的子类。</p>
+
+  <div class="notes">
+    <p>下一步：<a href="security.html">安全模块</a> — 认证、授权和会话管理。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · Servlet 集成 · Tomcat、Jetty、Wildfly 部署。</p></div>
+</footer>
+</body>
+</html>

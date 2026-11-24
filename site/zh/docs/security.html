@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安全模块 — BareZen</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">快速开始</a>
+      <a href="core.html">核心</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">插件</a>
+      <a href="security.html" aria-current="page">安全</a>
+      <a href="data.html">数据</a>
+      <a href="content.html">内容</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">教程</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">常见问题</a>
+      <a class="lang" hreflang="en" href="../../docs/security.html">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>安全模块</h1>
+  <p class="lede">barezen-security 提供认证、授权、会话管理和密码哈希 — 全部可插拔且请求作用域。</p>
+
+  <h2>模块概览</h2>
+  <p><code>barezen-security</code> 模块为 BareZen 应用提供完整的安全层。它围绕三个核心关注点组织：</p>
+  <table>
+    <tr><th>关注点</th><th>类型</th><th>描述</th></tr>
+    <tr><td>认证</td><td><code>Authentication</code>, <code>AuthenticationResult</code>, <code>Credential</code></td><td>验证客户端声称的身份</td></tr>
+    <tr><td>授权</td><td><code>Authorization</code>, <code>Permission</code>, <code>Principal</code></td><td>决定已认证身份可以做什么</td></tr>
+    <tr><td>会话</td><td><code>SessionStore</code>, <code>SessionToken</code></td><td>带令牌的状态会话管理</td></tr>
+    <tr><td>密码</td><td><code>PasswordHasher</code></td><td>PBKDF2-HMAC-SHA256 密码哈希</td></tr>
+    <tr><td>中间件</td><td><code>SecurityMiddleware</code>, <code>SecurityContext</code>, <code>SecuredHandler</code></td><td>将认证和授权连接到请求管道</td></tr>
+  </table>
+
+  <h2>认证</h2>
+  <p>认证回答"这个客户端是谁？"。<code>Authentication</code> 接口是一个带有一个方法的函数式接口：</p>
+  <pre><code>@FunctionalInterface
+public interface Authentication {
+    AuthenticationResult authenticate(Credential credential);
+}</code></pre>
+
+  <h3>AuthenticationResult — 三种状态</h3>
+  <p>HTTP 安全有三个答案，结果是一个密封层次结构，使所有三个都明确：</p>
+  <table>
+    <tr><th>状态</th><th>工厂</th><th>HTTP 响应</th><th>含义</th></tr>
+    <tr><td><code>Authenticated</code></td><td><code>AuthenticationResult.authenticated(principal)</code></td><td>通过</td><td>客户端证明了身份</td></tr>
+    <tr><td><code>Failure</code></td><td><code>AuthenticationResult.failure("reason")</code></td><td>401 Unauthorized</td><td>客户端提供的凭据未验证</td></tr>
+    <tr><td><code>Anonymous</code></td><td><code>AuthenticationResult.anonymous()</code></td><td>取决于授权</td><td>客户端根本没有提供凭据</td></tr>
+  </table>
+
+  <p><code>Failure</code> 和 <code>Anonymous</code> 之间的区别至关重要：错误的凭据是一个未能证明任何内容的请求（401），而没有凭据是一个可能被允许也可能不被允许的有效请求（取决于授权是 401 还是 403）。</p>
+
+  <h3>Credential</h3>
+  <p><code>Credential</code> 是一个带有两个字段的记录：<code>scheme</code>（例如 "Bearer"、"Basic"）和 <code>value</code>（令牌或编码凭据）。中间件从 <code>Authorization</code> 头部提取凭据并将其传递给认证实现。</p>
+
+  <h3>内置认证实现</h3>
+  <h4>匿名认证</h4>
+  <p>不信任任何东西 — 每个请求都是匿名的。在未配置认证时用作默认值：</p>
+  <pre><code>Authentication auth = Authentication.anonymous();</code></pre>
+
+  <h4>Bearer 令牌认证</h4>
+  <p>匹配固定的方案和值。适用于测试和简单的 API 密钥设置：</p>
+  <pre><code>Principal admin = Principal.of("admin");
+Authentication auth = Authentication.bearer("Bearer", "secret-token-123", admin);</code></pre>
+
+  <h3>自定义认证</h3>
+  <p>实现 <code>Authentication</code> 以针对数据库、外部服务或令牌颁发者验证凭据：</p>
+  <pre><code>Authentication auth = (credential) -> {
+    if (credential == null) {
+        return AuthenticationResult.anonymous();
+    }
+    // 通过令牌查找用户
+    Optional&lt;User&gt; user = userRepository.findByToken(credential.value());
+    if (user.isPresent()) {
+        return AuthenticationResult.authenticated(
+            Principal.of(user.get().username()));
+    }
+    return AuthenticationResult.failure("invalid token");
+};</code></pre>
+
+  <h2>授权</h2>
+  <p>授权回答"这个身份是否被允许这样做？"。<code>Authorization</code> 接口是一个函数式接口：</p>
+  <pre><code>@FunctionalInterface
+public interface Authorization {
+    Decision authorize(Principal principal, Permission required);
+}</code></pre>
+
+  <h3>Decision</h3>
+  <p>两种状态：<code>ALLOW</code>（通过）或 <code>DENY</code>（403 Forbidden）。默认是拒绝 — 没有明确授予的身份没有权限。</p>
+
+  <h3>内置授权实现</h3>
+  <h4>允许所有</h4>
+  <p>每个已认证的身份都有每个权限。适用于测试：</p>
+  <pre><code>Authorization authz = Authorization.allowAll();</code></pre>
+
+  <h4>拒绝所有</h4>
+  <p>没有已认证的身份有任何权限。在未配置授权时用作默认值：</p>
+  <pre><code>Authorization authz = Authorization.denyAll();</code></pre>
+
+  <h4>基于表的授权</h4>
+  <p>固定表将主体映射到其权限：</p>
+  <pre><code>Permission READ = Permission.of("read:users");
+Permission WRITE = Permission.of("write:users");
+
+Principal alice = Principal.of("alice");
+Principal bob = Principal.of("bob");
+
+Authorization authz = Authorization.of(Map.of(
+    alice, Set.of(READ, WRITE),
+    bob, Set.of(READ)));
+
+// alice 可以读写
+// bob 只能读
+// 其他任何人被拒绝</code></pre>
+
+  <h3>Permission</h3>
+  <p><code>Permission</code> 是一个不可变的字符串标识符。使用点分隔的名称表示层次结构：</p>
+  <pre><code>Permission.READ_USERS = Permission.of("read:users");
+Permission.WRITE_USERS = Permission.of("write:users");
+Permission.DELETE_USERS = Permission.of("delete:users");</code></pre>
+
+  <h2>SecurityContext</h2>
+  <p><code>SecurityContext</code> 是一个请求作用域的值，携带认证结果。它<strong>不是</strong>线程局部变量、不是会话、不是缓存：</p>
+  <pre><code>public record SecurityContext(AuthenticationResult authentication) {
+    public Optional&lt;Principal&gt; principal();
+    public boolean isAuthenticated();
+}</code></pre>
+
+  <p>上下文是不可变的，因为请求的安全答案一旦确定。Handler 不能改变它正在回答的请求的身份。</p>
+
+  <h2>SecuredHandler</h2>
+  <p>使用 <code>SecuredHandler</code> 用安全要求包装处理程序：</p>
+  <pre><code>Handler inner = (req, params) -> {
+    // 只有认证和授权通过时此代码才运行
+    return new Response(200, ...);
+};
+
+// 需要认证（任何已认证用户）
+Handler secured = SecuredHandler.authenticated(inner);
+
+// 需要特定权限
+Handler secured = SecuredHandler.require(inner, Permission.of("write:users"));</code></pre>
+
+  <h2>SecurityMiddleware</h2>
+  <p>中间件将认证和授权连接到请求管道。它实现 <code>RouteContributor</code> 和 <code>LifecycleParticipant</code>：</p>
+  <pre><code>SecurityMiddleware middleware = SecurityMiddleware.create(
+    Authentication.bearer("Bearer", "secret", Principal.of("admin")),
+    Authorization.allowAll());
+
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/health", healthHandler)
+    .contributing(List.of(middleware))
+    .build();</code></pre>
+
+  <h3>中间件做什么</h3>
+  <ol>
+    <li>从请求中提取 <code>Authorization</code> 头部</li>
+    <li>创建 <code>Credential</code>（如果不存在则为 <code>null</code>）</li>
+    <li>调用 <code>Authentication.authenticate(credential)</code></li>
+    <li>如果为 <code>Failure</code>，返回 401 Unauthorized</li>
+    <li>如果为 <code>Authenticated</code> 且处理程序需要权限，调用 <code>Authorization.authorize()</code></li>
+    <li>如果授权拒绝，返回 403 Forbidden</li>
+    <li>创建 <code>SecurityContext</code> 并将其传递给处理程序</li>
+  </ol>
+
+  <h2>会话管理</h2>
+  <p><code>SessionStore</code> 提供内存会话管理。会话以随机令牌为键，在配置的持续时间后过期。</p>
+
+  <h3>创建会话</h3>
+  <pre><code>SessionStore store = SessionStore.standard();
+
+// 成功登录后：
+SessionStore.Session session = store.create(
+    Principal.of("alice"),
+    Duration.ofHours(24));
+
+// 将令牌返回给客户端（例如，在 Set-Cookie 头部中）
+String token = session.token().value();</code></pre>
+
+  <h3>查找会话</h3>
+  <pre><code>Optional&lt;SessionStore.Session&gt; session = store.lookup(token);
+if (session.isPresent()) {
+    Principal principal = session.get().principal();
+    // 会话有效且未过期
+} else {
+    // 令牌未知或已过期
+}</code></pre>
+
+  <h3>使会话无效（注销）</h3>
+  <pre><code>boolean removed = store.invalidate(token);</code></pre>
+
+  <h3>轮换会话</h3>
+  <p>轮换为同一主体创建新令牌，使旧令牌无效。在密码更改或权限提升后使用：</p>
+  <pre><code>Optional&lt;SessionStore.Session&gt; newSession = store.rotate(oldToken, Duration.ofHours(24));</code></pre>
+
+  <h3>会话令牌</h3>
+  <p><code>SessionToken</code> 是一个 32 字节的随机值，编码为 URL 安全的 Base64。它携带过期时间，可以检查是否过期：</p>
+  <pre><code>SessionToken token = session.token();
+boolean expired = token.isExpired(Clock.systemUTC().instant());</code></pre>
+
+  <h2>密码哈希</h2>
+  <p><code>PasswordHasher</code> 使用 PBKDF2 和 HMAC-SHA-256。默认迭代次数为 600,000（OWASP 2023 推荐）。</p>
+
+  <h3>哈希密码</h3>
+  <pre><code>PasswordHasher hasher = PasswordHasher.standard();
+
+// 哈希密码以存储
+String hash = hasher.hash("user-password");
+// 格式：PBKDF2WithHmacSHA256$600000$&lt;base64-salt&gt;$&lt;base64-derived-key&gt;
+
+// 将哈希存储在数据库中
+userRepository.save(username, hash);</code></pre>
+
+  <h3>验证密码</h3>
+  <pre><code>// 检索存储的哈希
+String storedHash = userRepository.findHash(username);
+
+// 验证
+if (hasher.verify("user-password", storedHash)) {
+    // 密码匹配
+} else {
+    // 密码不匹配
+}</code></pre>
+
+  <h3>编码格式</h3>
+  <p>哈希是自描述的：<code>algorithm$iterations$salt$derivedKey</code>，全部 Base64 编码。这意味着：</p>
+  <ul>
+    <li>迭代次数存储在哈希中，因此你可以更改默认值而无效旧哈希。</li>
+    <li>格式错误的哈希被拒绝为验证失败，而不是异常。</li>
+    <li>原始密码永远不会存储、永远不会记录、永远不会返回。</li>
+  </ul>
+
+  <h3>测试友好的哈希</h3>
+  <p>对于测试，使用较低的迭代次数和固定的随机源：</p>
+  <pre><code>PasswordHasher testHasher = PasswordHasher.of(
+    1000, new SecureRandom(42));</code></pre>
+
+  <h2>完整示例：登录流程</h2>
+  <pre><code>// 1. 设置密码哈希
+PasswordHasher hasher = PasswordHasher.standard();
+
+// 2. 设置会话存储
+SessionStore sessionStore = SessionStore.standard();
+Duration sessionDuration = Duration.ofHours(24);
+
+// 3. 认证：从请求主体验证用户名/密码
+Authentication auth = (credential) -> {
+    if (credential == null) {
+        return AuthenticationResult.anonymous();
+    }
+    // 从 Basic 认证或自定义主体解析用户名:密码
+    String[] parts = decodeCredential(credential);
+    String username = parts[0];
+    String password = parts[1];
+
+    Optional&lt;String&gt; storedHash = userRepository.findHash(username);
+    if (storedHash.isPresent() &amp;&amp; hasher.verify(password, storedHash.get())) {
+        return AuthenticationResult.authenticated(Principal.of(username));
+    }
+    return AuthenticationResult.failure("invalid credentials");
+};
+
+// 4. 授权
+Authorization authz = Authorization.of(Map.of(
+    Principal.of("admin"), Set.of(
+        Permission.of("read:users"),
+        Permission.of("write:users"))));
+
+// 5. 创建中间件
+SecurityMiddleware middleware = SecurityMiddleware.create(auth, authz);
+
+// 6. 登录处理程序
+Handler login = (req, params) -> {
+    // 从请求主体解析用户名和密码
+    Map&lt;String, String&gt; body = parseJson(req.body());
+    String username = body.get("username");
+    String password = body.get("password");
+
+    Optional&lt;String&gt; storedHash = userRepository.findHash(username);
+    if (storedHash.isPresent() &amp;&amp; hasher.verify(password, storedHash.get())) {
+        SessionStore.Session session = sessionStore.create(
+            Principal.of(username), sessionDuration);
+        return new Response(200,
+            Headers.of("Content-Type", "application/json")
+                .with("Set-Cookie", "session=" + session.token().value()),
+            "{\"status\":\"ok\"}".getBytes());
+    }
+    return new Response(401,
+        Headers.of("Content-Type", "application/json"),
+        "{\"error\":\"invalid credentials\"}".getBytes());
+};
+
+// 7. 注册路由
+Router router = Router.builder()
+    .route(HttpMethod.POST, "/login", login)
+    .route(HttpMethod.DELETE, "/logout", logoutHandler)
+    .contributing(List.of(middleware))
+    .build();</code></pre>
+
+  <h2>最佳实践</h2>
+  <h3>认证</h3>
+  <ul>
+    <li>始终返回三种状态之一 — 永远不要为预期失败从 <code>authenticate()</code> 抛出异常。</li>
+    <li>对错误凭据使用 <code>Failure</code>，对缺失凭据使用 <code>Anonymous</code>。</li>
+    <li>永远不要记录原始凭据值。</li>
+  </ul>
+
+  <h3>授权</h3>
+  <ul>
+    <li>默认拒绝 — 未配置的设置不应静默允许。</li>
+    <li>使用描述性权限名称：<code>read:users</code>、<code>write:users</code>、<code>delete:users</code>。</li>
+    <li>匿名请求在调用授权之前被中间件拒绝。</li>
+  </ul>
+
+  <h3>会话</h3>
+  <ul>
+    <li>对敏感应用使用短会话持续时间（1-24 小时）。</li>
+    <li>在密码更改或权限提升后轮换会话。</li>
+    <li>会话仅在内存中 — 服务器重启会使所有会话无效。</li>
+    <li>对于分布式部署，使用外部会话存储（Redis、数据库）。</li>
+  </ul>
+
+  <h3>密码</h3>
+  <ul>
+    <li>始终使用 <code>PasswordHasher</code> — 永远不要存储明文密码。</li>
+    <li>在生产中使用默认迭代次数（600,000）。</li>
+    <li>仅在测试中使用较低的迭代次数（1,000）。</li>
+    <li>哈希格式是自描述的 — 你可以随时间更改迭代次数。</li>
+  </ul>
+
+  <h2>常见问题</h2>
+  <h3>"401 vs 403 混淆"</h3>
+  <p>401 表示"你未认证" — 客户端应提供凭据。403 表示"你已认证但未授权" — 客户端的身份没有所需的权限。对 401 使用 <code>Failure</code>，对 403 使用 <code>DENY</code>。</p>
+
+  <h3>"会话过期但令牌仍有效"</h3>
+  <p><code>SessionStore.lookup()</code> 自动检查过期。如果找到令牌但已过期，它会被移除并返回 <code>Optional.empty()</code>。不需要手动过期检查。</p>
+
+  <h3>"密码哈希验证很慢"</h3>
+  <p>这是有意的。带有 600,000 次迭代的 PBKDF2 设计为慢以抵抗暴力攻击。如果登录太慢，检查服务器是否有足够的 CPU 资源，而不是迭代次数。</p>
+
+  <h3>"SecurityContext 在我的 handler 中为 null"</h3>
+  <p><code>SecurityContext</code> 由中间件创建。确保中间件注册为 <code>RouteContributor</code>，处理程序用 <code>SecuredHandler</code> 包装。</p>
+
+  <div class="notes">
+    <p>下一步：<a href="data.html">数据模块</a> — 数据库访问、事务和模式迁移。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 安全 · 认证、授权、会话、密码哈希。</p></div>
+</footer>
+</body>
+</html>

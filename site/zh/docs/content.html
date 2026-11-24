@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>静态内容 — BareZen</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<header>
+  <div class="band">
+    <a class="brand" href="../index.html">Bare<span>Zen</span></a>
+    <nav>
+      <a href="quick-start.html">快速开始</a>
+      <a href="core.html">核心</a>
+      <a href="web.html">Web</a>
+      <a href="http-jdk.html">JDK HTTP</a>
+      <a href="http-servlet.html">Servlet</a>
+      <a href="plugins.html">插件</a>
+      <a href="security.html">安全</a>
+      <a href="data.html">数据</a>
+      <a href="content.html" aria-current="page">内容</a>
+      <a href="testkit.html">TestKit</a>
+      <a href="tutorial.html">教程</a>
+      <a href="api-reference.html">API</a>
+      <a href="faq.html">常见问题</a>
+      <a class="lang" hreflang="en" href="../../docs/content.html">EN</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <h1>静态内容</h1>
+  <p class="lede">barezen-content 提供 StaticContent — 磁盘上的一个文件作为一条路由提供，支持 ETag 和条件 GET（304）。</p>
+
+  <h2>模块概览</h2>
+  <p><code>barezen-content</code> 模块提供一个类：<code>StaticContent</code>。它为磁盘上的一个文件创建 <code>Handler</code>。处理程序按请求读取文件，从内容字节计算 ETag，并向已拥有当前版本的客户端回答 304。</p>
+
+  <p>设计决策：</p>
+  <ul>
+    <li><strong>每个文件一个处理程序。</strong> 路由器没有通配符或前缀匹配，所以静态文件被枚举 — 每个资产一条路由。</li>
+    <li><strong>ETag 来自内容，而不是时钟。</strong> 字节的 SHA-256 哈希仅在表示更改时更改，使其在重启和机器之间正确。</li>
+    <li><strong>整个文件在内存中。</strong> 适用于样式表、favicon 和文档页面。不适用于大文件（视频、下载）。</li>
+    <li><strong>缺失文件返回 404。</strong> 没有堆栈跟踪，没有目录列表。</li>
+  </ul>
+
+  <h2>基本用法</h2>
+  <p>为单个文件创建处理程序。内容类型从文件扩展名推断：</p>
+  <pre><code>import com.barezen.content.StaticContent;
+import java.nio.file.Path;
+
+Handler cssHandler = StaticContent.file(Path.of("public/styles.css"));
+Handler jsHandler = StaticContent.file(Path.of("public/app.js"));
+Handler imgHandler = StaticContent.file(Path.of("public/logo.png"));</code></pre>
+
+  <h2>注册路由</h2>
+  <p>将每个静态文件注册为路由。因为路由器匹配精确路径，你为每个文件注册一条路由：</p>
+  <pre><code>Router router = Router.builder()
+    .route(HttpMethod.GET, "/styles.css",
+        StaticContent.file(Path.of("public/styles.css")))
+    .route(HttpMethod.GET, "/app.js",
+        StaticContent.file(Path.of("public/app.js")))
+    .route(HttpMethod.GET, "/logo.png",
+        StaticContent.file(Path.of("public/logo.png")))
+    .build();</code></pre>
+
+  <h3>HEAD 支持</h3>
+  <p>如果表示的长度应该对使用 HEAD 询问的客户端可知，在 GET 和 HEAD 上注册相同的处理程序：</p>
+  <pre><code>Handler cssHandler = StaticContent.file(Path.of("public/styles.css"));
+
+Router router = Router.builder()
+    .route(HttpMethod.GET, "/styles.css", cssHandler)
+    .route(HttpMethod.HEAD, "/styles.css", cssHandler)
+    .build();</code></pre>
+
+  <h2>自定义内容类型</h2>
+  <p>通过显式提供内容类型来覆盖推断的内容类型：</p>
+  <pre><code>// 将 .json 文件作为 application/manifest+json 提供
+Handler manifest = StaticContent.file(
+    Path.of("public/manifest.json"),
+    "application/manifest+json");
+
+// 使用自定义字符集提供 .html 文件
+Handler page = StaticContent.file(
+    Path.of("public/index.html"),
+    "text/html; charset=utf-8");</code></pre>
+
+  <h2>支持的 MIME 类型</h2>
+  <p><code>StaticContent.contentTypeOf()</code> 使用固定表（不依赖平台）将文件扩展名映射到 MIME 类型：</p>
+  <table>
+    <tr><th>扩展名</th><th>Content-Type</th></tr>
+    <tr><td><code>.html</code>, <code>.htm</code></td><td><code>text/html; charset=utf-8</code></td></tr>
+    <tr><td><code>.css</code></td><td><code>text/css; charset=utf-8</code></td></tr>
+    <tr><td><code>.js</code>, <code>.mjs</code></td><td><code>text/javascript; charset=utf-8</code></td></tr>
+    <tr><td><code>.json</code>, <code>.map</code></td><td><code>application/json</code></td></tr>
+    <tr><td><code>.txt</code>, <code>.md</code></td><td><code>text/plain; charset=utf-8</code></td></tr>
+    <tr><td><code>.xml</code></td><td><code>application/xml</code></td></tr>
+    <tr><td><code>.svg</code></td><td><code>image/svg+xml</code></td></tr>
+    <tr><td><code>.png</code></td><td><code>image/png</code></td></tr>
+    <tr><td><code>.jpg</code>, <code>.jpeg</code></td><td><code>image/jpeg</code></td></tr>
+    <tr><td><code>.gif</code></td><td><code>image/gif</code></td></tr>
+    <tr><td><code>.webp</code></td><td><code>image/webp</code></td></tr>
+    <tr><td><code>.ico</code></td><td><code>image/x-icon</code></td></tr>
+    <tr><td><code>.woff</code></td><td><code>font/woff</code></td></tr>
+    <tr><td><code>.woff2</code></td><td><code>font/woff2</code></td></tr>
+    <tr><td><code>.wasm</code></td><td><code>application/wasm</code></td></tr>
+    <tr><td><code>.pdf</code></td><td><code>application/pdf</code></td></tr>
+    <tr><td>未知</td><td><code>application/octet-stream</code></td></tr>
+  </table>
+
+  <h2>ETag 和条件 GET</h2>
+  <p>处理程序使用 SHA-256 从文件内容计算强 ETag（前 8 个字节，十六进制编码，带引号）。当客户端使用匹配的 ETag 发送 <code>If-None-Match</code> 时，处理程序返回 <code>304 Not Modified</code>，不带主体。</p>
+
+  <h3>工作原理</h3>
+  <ol>
+    <li>客户端请求 <code>GET /styles.css</code></li>
+    <li>服务器以 <code>200 OK</code>、主体和 <code>ETag: "a1b2c3d4e5f60708"</code> 响应</li>
+    <li>稍后，客户端使用 <code>If-None-Match: "a1b2c3d4e5f60708"</code> 请求 <code>GET /styles.css</code></li>
+    <li>服务器读取文件，计算相同的 ETag，返回 <code>304 Not Modified</code>，不带主体</li>
+  </ol>
+
+  <h3>ETag 格式</h3>
+  <p>ETag 是一个强标签：内容 SHA-256 哈希的前 8 个字节，十六进制编码，用双引号括起来。例如：<code>"a1b2c3d4e5f60708"</code>。这提供 2^64 个值 — 对于一个部署提供的文件集无冲突。</p>
+
+  <h3>If-None-Match 处理</h3>
+  <p>处理程序支持 RFC 9110 定义的三种形状：</p>
+  <ul>
+    <li><strong>通配符。</strong> <code>If-None-Match: *</code> 匹配任何 ETag。</li>
+    <li><strong>逗号分隔列表。</strong> <code>If-None-Match: "abc", "def"</code> 如果任何标签匹配则匹配。</li>
+    <li><strong>弱标签。</strong> <code>If-None-Match: W/"abc"</code> 对于条件 GET 与 <code>"abc"</code> 相同处理。</li>
+  </ul>
+
+  <h2>错误处理</h2>
+  <h3>构建时文件未找到</h3>
+  <p>如果文件在构建时不存在或不是常规文件，<code>StaticContent.file()</code> 抛出 <code>IllegalArgumentException</code>：</p>
+  <pre><code>// 如果文件不存在则抛出 IllegalArgumentException
+Handler handler = StaticContent.file(Path.of("public/missing.css"));</code></pre>
+
+  <h3>请求时文件消失</h3>
+  <p>如果文件在构建时存在但在请求到达之前被删除，处理程序返回 <code>404 Not Found</code> — 与适配器用于其自身 404 的相同简单答案。不泄漏路径，不暴露堆栈跟踪。</p>
+
+  <h3>空白内容类型</h3>
+  <p>空白内容类型在构建时被拒绝。没有类型的字节流是浏览器猜测，框架拒绝成为那个浏览器。</p>
+
+  <h2>动态资产注册</h2>
+  <p>对于资产目录，在启动时枚举它们：</p>
+  <pre><code>Path assetsDir = Path.of("public");
+Router.Builder builder = Router.builder();
+
+try (DirectoryStream&lt;Path&gt; stream = Files.newDirectoryStream(assetsDir)) {
+    for (Path file : stream) {
+        if (Files.isRegularFile(file)) {
+            String name = file.getFileName().toString();
+            String path = "/" + name;
+            builder.route(HttpMethod.GET, path, StaticContent.file(file));
+        }
+    }
+}
+Router router = builder.build();</code></pre>
+
+  <h2>此模块不做的事情</h2>
+  <ul>
+    <li><strong>无目录列表。</strong> 目录会泄漏部署的布局。</li>
+    <li><strong>无流式传输。</strong> 整个文件被读入内存。对于大文件，编写自定义处理程序。</li>
+    <li><strong>无 Last-Modified 头部。</strong> 只使用 ETag。基于时钟的验证器会使输出不可测试。</li>
+    <li><strong>无缓存头部。</strong> 处理程序不设置 <code>Cache-Control</code>。如果需要缓存控制，添加中间件或包装处理程序。</li>
+  </ul>
+
+  <h2>最佳实践</h2>
+  <ul>
+    <li>在启动时注册静态文件，而不是每请求 — 处理程序是无状态且可重用的。</li>
+    <li>使用绝对路径或相对于工作目录的路径，而不是类路径资源。</li>
+    <li>在生产中，考虑使用反向代理（Nginx、Caddy）提供静态文件 — 它更快且支持范围请求。</li>
+    <li>在 GET 路由旁边注册 HEAD 路由，用于客户端可能在下载前检查大小的资产。</li>
+  </ul>
+
+  <h2>常见问题</h2>
+  <h3>"no regular file at /path/to/file"</h3>
+  <p>文件在构建时不存在或是一个目录。检查路径并确保在构建路由器之前文件存在。</p>
+
+  <h3>"the content type must not be blank"</h3>
+  <p>你传递了一个空白字符串作为内容类型。提供有效的 MIME 类型或让框架从扩展名推断它。</p>
+
+  <h3>存在文件的 404</h3>
+  <p>文件在处理程序创建后被删除或移动。处理程序按请求重新读取文件，所以缺失的文件返回 404。检查文件路径和权限。</p>
+
+  <div class="notes">
+    <p>下一步：<a href="testkit.html">TestKit</a> — 使用 TestServer、TestHttpClient 和 Assertions 进行集成测试。</p>
+  </div>
+</main>
+<footer>
+  <div class="band"><p>BareZen · 静态内容 · 每个文件一条路由、ETag、条件 GET。</p></div>
+</footer>
+</body>
+</html>
