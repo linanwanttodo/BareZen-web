@@ -8,7 +8,7 @@
 
 完成本章后，你应能沿着一次真实请求讲清完整链路：服务器接受连接并创建 exchange，bridge 读取原始 target、Headers 和有界 body，dispatcher 查询 Router，Handler 返回 Response，bridge 按状态与原始方法 token 决定长度和 body 字节，最外层 finally 关闭 exchange。你也应能解释 404 与 405 的信息来源、413 为什么先于完整 body 读取、HEAD 为什么“无 body 但有 representation length”，以及停止服务器时哪些资源属于适配器。
 
-本章不是 HTTP 全功能实现，也不把 JDK 包装成 Spring。没有 Servlet Filter 链、中间件 DSL、响应流、HTTP/2 配置、访问日志或自动条件请求。当前响应始终是完整 `byte[]`，当前 Router 仍是线性扫描，`OPTIONS *` 在当前 JDK 上不可达。TLS 是 `326c25a` 后来加入的能力：两个 keystore 配置键、一个包内 `Tls` 类，公开适配器表面并未因此增长。
+本章不是 HTTP 全功能实现，也不把 JDK 包装成 Spring。没有 Servlet Filter 链、中间件 DSL、响应流、HTTP/2 配置、访问日志或自动条件请求。当前响应始终是完整 `byte[]`，当前 Router 仍是线性扫描，`OPTIONS *` 在当前 JDK 上不可达。TLS 是 `326c25a` 后来加入的能力：两个 keystore 配置键、一个包内 `Tls` 类，公开适配器表面并未因此增长；它只解析一次，没有证书轮换、mTLS 或可配置协议/cipher 策略。
 
 ## 涉及 ADR
 

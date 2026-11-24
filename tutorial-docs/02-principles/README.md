@@ -39,6 +39,19 @@
 | `50cd3cc`：支持在 Servlet 容器内运行路由 | http-servlet 加入，验证第二个适配器方向 | 不是用 Servlet 替换 JDK 实现 |
 | `68e0c67`、`743ae96`：首批插件与 TestKit | plugins 和 testkit 分别成为真实产物 | 不是提前创建空 aggregator |
 | `4c9feda`：字节码版本校验进入构建与 CI | 三个模块测试、全树脚本和 CI 步骤共同证明 major 61 | 不是再次声明一遍 release 17 |
+| `78fe473`：以独立能力提供同步事件总线 | core 增加 EventBus、Subscription、EventHandler 与同步实现；不携带生命周期或协作者上下文 | 不是让插件、DI 或 HTTP 共享一个全局事件线程池 |
+
+## 旁支：EventBus 为什么只承诺同步分发
+
+模块图不仅规定谁能依赖谁，也决定哪些能力可以被独立理解。`EventBus` 就是在这一原则下加入 core 的独立能力，真实入口是 `78fe473`。它的公开表面只有 `create()`、`subscribe(Class<E>, EventHandler<E>)` 与 `publish(Object)`，subscribe 返回可取消的 `Subscription`；见 [EventBus.java:53](../../framework/barezen-core/src/main/java/com/barezen/core/event/EventBus.java#L53)。它不知道 Plugin、Configuration、ServiceAssembly 或 HTTP，也没有 start、stop、close，因为队列、执行器和生命周期一旦加入，事件发布者就会依赖另一个资源的停止顺序。
+
+实现只做一次精确类型查找。[SynchronousEventBus.java:52](../../framework/barezen-core/src/main/java/com/barezen/core/event/SynchronousEventBus.java#L52) 使用 `event.getClass()` 作为 key：订阅 `UserCreated` 不会接收其子类，也不会接收实现了共同接口的另一种事件。没有监听者时 publish 正常返回。这个选择让一次发布的候选集合完全由类型名决定，避免隐式向整棵继承树 fan-out；应用需要多种事件时，就显式订阅多次。
+
+分发发生在调用 publish 的线程上，并按同一事件类型的注册顺序执行。第一个 handler 抛出的异常会原样向外传播，后面的 handler 不再执行；总线不捕获、不包装、不记录，也不提供重试或死信。同步意味着调用者能直接观察成本、副作用和失败，代价是慢 handler 会延长发布调用，异常处理策略必须由应用在发布边界决定。把异常吞掉再继续似乎更“健壮”，却会让不同订阅者看到不完整的业务事实，也无法判断发布是否成功。
+
+并发安全来自 `ConcurrentHashMap` 与 `CopyOnWriteArrayList`，不是给所有 handler 加锁。一次 publish 遍历该类型的快照；publish 中途新增订阅从下一次发布生效，取消也不会中断已经开始的快照。两个并发 publish 不会互相串行，所以 handler 自己必须线程安全。嵌套 publish 被允许，但没有环检测；递归发布形成环时由应用负责终止，总线不能猜测哪条业务链应当被截断。
+
+`EventBusTest` 因此同时固定精确匹配、同步线程、注册顺序、首次失败、取消边界、嵌套发布、并发 publish/subscribe/cancel 和小公开表面。它没有证明消息持久化、跨进程投递、背压、重放、监控或异步顺序，因为这些能力根本不属于当前类型。把 EventBus 放进本章，是为了说明“独立能力”不是少写几个模块，而是连线程、失败、取消和生命周期都保持单一所有者。
 
 本章的检查点已于 2026-11-24 实际执行。`mvn -pl framework/barezen-core -am test` 的指定测试合计 38 项通过；全树 `scripts/check-class-major.sh` 检查 646 个现有 class，全部为 major 61。646 是当时的实测数量，不是常量。完整交付顺序仍是先声明检查，再 `clean verify`，最后检查刚生成的产物；文档写作没有改动用户 WIP，也没有用全仓 clean 干扰它。
 

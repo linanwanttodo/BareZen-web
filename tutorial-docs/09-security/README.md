@@ -6,7 +6,7 @@
 
 本章的建造顺序来自三个可以逐个检出的提交。`7d913bf` 一次加入十二个生产类，已经包含密码摘要、不透明会话、三态认证、权限决策与 Handler 装饰器；它不是先做一个登录页再补安全，而是先确定边界和拒绝语义。`f315e21` 增加十四个测试与架构文件，把“允许、匿名、失败、拒绝、组件损坏”变成可执行矩阵。`86bb626` 才把五条决定写进 ADR，并记录 99 项测试、98.96% 覆盖率与十四次变异探针。这个顺序提醒读者：文档不是替代测试的事后说明，测试也不是注释的另一种排版。
 
-最终形态可以概括为 `Credential → AuthenticationResult → SecurityContext → Authorization.Decision → delegate`。密码和会话是两条可以独立使用的领域能力，并不会自动接入中间件；应用需要编写 `Authentication` 把它们接到 `Authorization` 头。模块只依赖 `barezen-web`，适配器仅以 test scope 进入，所以同一装饰器理论上可以换一个适配器继续工作。它不是完整身份平台：没有用户表、注册、找回密码、CSRF、OAuth2/OIDC、分布式会话、自动锁定或注解安全。
+最终形态可以概括为 `Credential → AuthenticationResult → SecurityContext → Authorization.Decision → delegate`。密码和会话是两条可以独立使用的领域能力，并不会自动接入中间件；应用需要编写 `Authentication` 把它们接到 `Authorization` 头。模块只依赖 `barezen-web`，适配器仅以 test scope 进入，所以同一装饰器理论上可以换一个适配器继续工作。它不是完整身份平台：没有注册、找回密码、CSRF、OAuth2/OIDC、分布式会话、自动锁定或注解安全。这里说的是 `barezen-security` 的模块边界；后来的 `barezen-plugins` 已经提供 H2 用户仓库，不能把“安全模块不拥有 JDBC”误写成“整个仓库没有用户存储”。
 
 完成本章后，你应能解释 PBKDF2 为什么需要随机盐和自描述迭代数，能设计一个查找后立即撤销的会话，能区分“没有有效身份”与“身份有效但无权”，还能证明拒绝路径上的调用次数为零。你也要能指出本实现的真实边界：默认拒绝只对已经包装的路由生效；会话不是 JWT，也不跨进程；TLS 属于 JDK 适配器而不是这个模块；有些 ADR 的概括比当前代码的异常处理更乐观，必须回到代码判断。
 
@@ -50,7 +50,7 @@ git log --oneline --all -- framework/barezen-security
 
 你应能用 `Authentication` 自定义凭证验证，用 `Authorization.of(Map<Principal, Set<Permission>>)` 表达显式授权，用 `Permission.ANY` 表示“任意已认证主体可经过此路由”，或给四参数 `wrap` 传入业务权限。你应能从路由表看出哪些路线公开、哪些被包装，因为不存在自动扫描后的隐式保护。你应能让 `SecuredHandler` 接收当前请求的身份，同时禁止 `ThreadLocal`、静态可变身份、环境变量后门和日志依赖。
 
-你还应能陈述未实现事项：中间件只读取 `Authorization` 头，不自动读 Cookie；会话存储不会自动被中间件调用；没有 `WWW-Authenticate` 挑战；失败原因不会由当前中间件写日志或响应；没有密码强度、登录限流或用户存储；路由参数不是身份通道。忘记包装不会触发 401，而是路由继续公开，这是显式装饰器必须靠代码审查和测试守住的责任。
+你还应能陈述未实现事项：中间件只读取 `Authorization` 头，不自动读 Cookie；会话存储不会自动被中间件调用；没有 `WWW-Authenticate` 挑战；失败原因不会由当前中间件写日志或响应；没有密码强度与登录限流；用户存储位于 plugins 的 H2 示例仓库，不在 security 模块，也不具备完整账户管理；路由参数不是身份通道。忘记包装不会触发 401，而是路由继续公开，这是显式装饰器必须靠代码审查和测试守住的责任。
 
 ## 不这样设计会坏掉什么
 

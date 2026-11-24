@@ -83,7 +83,7 @@ AuthenticationResult authenticate(Credential credential);
 
 `maybePrincipal()` 只在认证成功时有值；`isAuthenticated()` 只对成功状态返回 true。`Failure.reason` 是应用选择的诊断文本，不能包含凭据，也不会被中间件发送到客户端。
 
-需要注意，“提供错误凭据”和“没有提供凭据”在当前中间件中都返回 401。三态的价值是让认证实现保留原因、让调用方能区分状态，而不是让 wire 暴露不同失败细节。`AuthPlugin` 对未知或过期 session token 也选择返回 `anonymous()`，同样得到 401。
+需要注意，“提供错误凭据”和“没有提供凭据”在当前中间件中都返回 401。三态的价值是让认证实现保留原因、让调用方能区分状态，而不是让 wire 暴露不同失败细节。但当前 `AuthPlugin` 并未完整保留这条契约：scheme 不匹配、未知或过期 session token 都返回 `anonymous()`，不是 `failure(reason)`；中间件仍会以 401 拒绝，因此这不是越权，却会让依赖三态做诊断的调用方失去“提供了但无效”的区分。需要该区分的应用应提供自己的 `Authentication` 实现，或先修正插件并补充对应测试。
 
 如果 `Authentication` 或 `Authorization` 抛出 `RuntimeException`，中间件返回固定正文 `Internal Server Error` 的 500，业务 Handler 不执行。**当前实现不会自动记录它捕获的异常**；需要堆栈时，应在组件内部选择安全日志点记录，并确保日志不含密码、凭据值或 token。不要为了诊断把异常细节拼进 HTTP 响应。
 
@@ -203,6 +203,10 @@ AuthenticationResult returning = auth.authenticate(new Credential("Bearer", toke
 
 `issueSession(username, password)` 把用户名和密码保持为两个参数，避免把 `username:password` 拼接进单值 `Credential` 后产生冒号解析错误。未知用户与错误密码都返回空，应用不应向客户端区分两者。返回请求只查 session token，不再验证密码。
 
+相同的空返回值不等于相同的耗时。当前 `UserRepository.verifyPassword` 先执行 `find(username)`，未知用户会短路，只有已存在用户才调用 PBKDF2 验证，因此两条登录失败路径的成本不同。现有测试只固定返回值，没有做时间统计或恒定时间证明。若账户枚举 timing 属于威胁模型，应用需要在认证边界额外设计统一成本、虚拟密码验证或外部恒定时间查询策略，不能仅凭“都返回 empty”宣称已经消除 side channel。
+
+`UserRepository` 是 `barezen-plugins` 中的 H2 示例实现，不是数据库无关的完整用户平台。`grant` 使用 H2 的 `MERGE ... KEY` 语法；权限表没有指向用户表的外键，因此可以向不存在的用户名授权。`permissionsOf` 虽然使用有序 SQL，却通过 `Set.copyOf` 返回集合，调用方不能依赖迭代顺序。用户删除、停用、改名、改密、权限撤销、用户名规范化与并发建表协调均未提供；多数据库适配与版本化用户 schema 也未证明。
+
 签发 token 后如何交付由应用决定：可以使用 `Authorization: Bearer ...`，也可以设置 cookie。若选择 cookie，`HttpOnly`、`Secure`、`SameSite`、作用域以及 CSRF 防护都需要应用或部署层明确处理；框架没有内置 Cookie 会话绑定或 CSRF 组件。
 
 ## 8. 401、403 与 500 的固定响应
@@ -228,6 +232,8 @@ TLS 不属于 `barezen-security`，而属于 JDK 适配器。两个配置键是�
 没有 path 或 path 为空白时，适配器保持明文 HTTP。path 存在但没有密码或密码为空时，构造适配器失败；文件不存在、密码错误或 keystore 无法读取，也在构造时失败，不会先占用端口再在启动时意外降级。
 
 适配器使用 JDK 默认 keystore 类型与默认 TLS 参数，不提供 mTLS、协议白名单、cipher suite 选择、自动证书续期或 HTTP 到 HTTPS 的重定向。`Request` 不携带 scheme 或 `isSecure()`，因此 Handler 不能根据契约判断当前是否加密。TLS 只保护传输，不替代认证、授权或会话撤销。
+
+TLS 配置只在适配器构造时解析一次，不监听 keystore 文件变化，也没有证书或私钥轮换流程。密码以 `String` 保存在配置快照中；加载时转为 `char[]` 后没有显式清零，因此“启动日志不打印密码”只证明日志边界，不证明秘密已从内存中擦除。现有真实套接字测试覆盖有效证书、默认不信任自签名证书、明文误入 TLS 端口、错误或缺失密码与日志脱敏，但没有覆盖私钥不可用、证书过期、链损坏、不支持的 keystore 类型或 ALPN/HTTP 2 协商。
 
 ## 10. 运行与验证
 

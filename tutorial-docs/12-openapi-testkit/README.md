@@ -60,7 +60,7 @@
 
 ## 诚实的边界
 
-当前 OpenAPI 输出固定为 3.0.3 JSON，只有 `application/json` 一种媒体类型，schema 子集没有 `oneOf`、discriminator、vendor extension，也没有 YAML、HTML 或 Swagger UI。它不读取 Router，不校验完整 3.0.3 外部语法，更不会证明文档与实际 handler 行为永远一致；应用仍需为这份声明写测试。
+当前 OpenAPI 输出固定为 3.0.3 JSON，只有 `application/json` 一种媒体类型，schema 子集没有 `oneOf`、discriminator、vendor extension，也没有 YAML、HTML 或 Swagger UI。它不读取 Router，不校验完整 3.0.3 外部语法，更不会证明文档与实际 handler 行为永远一致；应用仍需为这份声明写测试。`OpenApiPlugin` 是装配期、非线程安全的 mutable collector，公开 `clear()` 可清空状态；不可变 operation 快照只防止快照被修改，不提供并发读写安全，也不建立 Router 与 metadata 的自动一致性。
 
 TestKit 只包装 JDK adapter，没有 fake server、HTTP/2、WebSocket、SSE、multipart 或 Testcontainers。它的 JSON reader 是包内实现，只服务于断言，不是可公开依赖的 JSON 库；点分路径无法访问自身含点的 key。`TestHttpClient` 可接受绝对 URL，因此它也不是只能访问本机的安全沙箱。数据库 fixture 只执行调用者给出的单条 reset SQL，不关闭传入的 `DataSource`，不提供事务清理或并发迁移管理。
 
