@@ -45,6 +45,7 @@ mvn verify
 
 ## 文档
 
+- 框架建造教程：[tutorial-docs/README.md](tutorial-docs/README.md)
 - 项目定位与适用边界：[docs/POSITIONING.md](docs/POSITIONING.md)
 - HTTP 契约与 Handler 指南：[docs/guide/web-handlers.md](docs/guide/web-handlers.md)
 - 安全认证与会话指南：[docs/guide/security.md](docs/guide/security.md)
