@@ -45,7 +45,13 @@ mvn verify
 
 ## 文档
 
+- 项目定位与适用边界：[docs/POSITIONING.md](docs/POSITIONING.md)
+- HTTP 契约与 Handler 指南：[docs/guide/web-handlers.md](docs/guide/web-handlers.md)
+- 安全认证与会话指南：[docs/guide/security.md](docs/guide/security.md)
+- 数据访问与事务指南：[docs/guide/data.md](docs/guide/data.md)
+- 配置解析与显式装配指南：[docs/guide/configuration-assembly.md](docs/guide/configuration-assembly.md)
 - 架构决策记录：[docs/adr/README.md](docs/adr/README.md)
+- 全部 ADR 中文索引：[docs/adr-index-zh.md](docs/adr-index-zh.md)
 - 插件编写指南：[docs/guide/authoring-a-plugin.md](docs/guide/authoring-a-plugin.md)
 - TestKit 快速开始：[docs/testkit/quick-start.md](docs/testkit/quick-start.md)
 - 示例说明：[docs/examples/README.md](docs/examples/README.md)
