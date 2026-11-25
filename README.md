@@ -11,7 +11,7 @@ BareZen-web 是一个轻量、模块化、插件化的 Java Web 框架，包名 
 - 不依赖 Spring，核心编译依赖仅 SLF4J API
 - HTTP 契约不绑定具体服务器：内置 JDK HttpServer 适配器，也可通过 Servlet 桥接嵌入 Tomcat、Jetty 等容器
 - 插件 SPI 与 ServiceLoader 发现，路由可以由插件在装配阶段贡献
-- 安全模块：PBKDF2-HMAC-SHA256 密码哈希、可撤销的不透明会话、401 与 403 边界
+- 安全模块：PBKDF2-HMAC-SHA256 密码哈希、可撤销的不透明会话、401 与 403 边界、浏览器响应安全头装饰器
 - 数据模块：`Database(DataSource)`、显式事务、版本化迁移，不绑定 JDBC 驱动
 - OpenAPI 文档生成、静态内容服务、基于密钥库的 TLS、TestKit 集成测试工具
 - 8 个可运行示例，仅使用公开 API

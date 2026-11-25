@@ -18,9 +18,8 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Map;import com.barezen.web.Headers;
+import java.util.Map;
 import com.barezen.web.HttpMethod;
-import com.barezen.web.Request;
 import com.barezen.web.Router;
 import java.io.IOException;
 import java.util.List;
@@ -273,6 +272,7 @@ class ConsoleTest {
           assertThat(policy).as(address + " states a policy").contains("script-src 'self'");
           assertThat(policy).as(address + " allows no inline script").doesNotContain("unsafe-inline");
           Assertions.assertThat(page).headerIs("X-Content-Type-Options", "nosniff");
+          Assertions.assertThat(page).headerIs("Referrer-Policy", "no-referrer");
           Assertions.assertThat(console.server.client().head(address)).statusIs(200);
         }
       }

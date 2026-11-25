@@ -222,7 +222,17 @@ AuthenticationResult returning = auth.authenticate(new Credential("Bearer", toke
 
 当前 401 不自动添加 `WWW-Authenticate`，这些固定响应也不添加 `Content-Type`。认证失败原因、权限细节和异常堆栈不会出现在响应正文中。应用若需要 challenge header 或更丰富的错误体，应显式设计，不能依赖中间件当前未提供的行为。
 
-## 9. HTTPS 由 keystore 配置决定
+## 9. 浏览器响应安全头由装饰器添加
+
+`SecurityHeaders.of(delegate, contentSecurityPolicy)` 返回一个普通 `Handler`：先调用 delegate，再补齐响应头。CSP 必须由应用显式提供，因为允许哪些脚本、样式、连接源和 frame 是页面策略，不是框架能替所有应用决定的统一值。
+
+```java
+Handler page = SecurityHeaders.of(StaticContent.file(Path.of("index.html")), "default-src 'self'");
+```
+
+装饰器只补缺失字段：应用已经写出的 `Content-Security-Policy`、`X-Content-Type-Options` 或 `Referrer-Policy` 不会被覆盖或重复添加。默认补上的后两者分别是 `nosniff` 与 `no-referrer`；状态码、正文和已有头部保持不变。它不自动添加 HSTS，因为是否启用 HTTPS、包括哪些子域属于部署决策；也不替代 CSP，`nosniff` 只阻止 MIME 嗅探，不能限制脚本执行。
+
+## 10. HTTPS 由 keystore 配置决定
 
 TLS 不属于 `barezen-security`，而属于 JDK 适配器。两个配置键是：
 
@@ -235,7 +245,7 @@ TLS 不属于 `barezen-security`，而属于 JDK 适配器。两个配置键是�
 
 TLS 配置只在适配器构造时解析一次，不监听 keystore 文件变化，也没有证书或私钥轮换流程。密码以 `String` 保存在配置快照中；加载时转为 `char[]` 后没有显式清零，因此“启动日志不打印密码”只证明日志边界，不证明秘密已从内存中擦除。现有真实套接字测试覆盖有效证书、默认不信任自签名证书、明文误入 TLS 端口、错误或缺失密码与日志脱敏，但没有覆盖私钥不可用、证书过期、链损坏、不支持的 keystore 类型或 ALPN/HTTP 2 协商。
 
-## 10. 运行与验证
+## 11. 运行与验证
 
 在仓库根目录运行安全模块测试：
 
@@ -250,7 +260,7 @@ mvn -o -B -ntp -pl examples -am \
   -Dtest=SecurityExampleTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
-[SecurityExampleTest.java](../../examples/src/test/java/com/barezen/examples/security/SecurityExampleTest.java) 覆盖公开路由、缺失 token、正确 token、有效身份但权限不足以及错误 token。`SecurityMiddlewareTest` 还覆盖安全组件抛异常、`SecuredHandler` 上下文交付和 keep-alive 请求间的身份隔离；`SessionStoreTest` 覆盖过期边界、撤销与轮换；`PasswordHasherTest` 覆盖编码格式、随机盐、错误密码和损坏 hash。
+[SecurityExampleTest.java](../../examples/src/test/java/com/barezen/examples/security/SecurityExampleTest.java) 覆盖公开路由、缺失 token、正确 token、有效身份但权限不足以及错误 token。`SecurityMiddlewareTest` 还覆盖安全组件抛异常、`SecuredHandler` 上下文交付和 keep-alive 请求间的身份隔离；`SessionStoreTest` 覆盖过期边界、撤销与轮换；`PasswordHasherTest` 覆盖编码格式、随机盐、错误密码和损坏 hash；`SecurityHeadersTest` 覆盖响应头补齐、已有策略保留和参数拒绝。
 
 部署前的检查清单：
 
