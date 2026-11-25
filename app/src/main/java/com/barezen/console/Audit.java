@@ -21,13 +21,17 @@ import java.util.Map;
  *
  * <p>Two rules the class keeps visibly. The clock arrives in the constructor rather than being read at the call site
  * (ADR-0013's assembly-time discipline applied to a bean: a test can hand this a fixed instant), and the trail is
- * bounded — fifty events, oldest dropped — because an unbounded list fed by every request is a memory leak with a
- * nice API. Reads take a snapshot, so a browser polling the feed never sees a half-updated list.
+ * bounded — fifty events, oldest dropped, each subject at most 256 characters — because an unbounded list or subject
+ * fed by every request is a memory leak with a nice API. Reads take a snapshot, so a browser polling the feed never
+ * sees a half-updated list.
  */
 public final class Audit {
 
   /** What the trail keeps: enough for a page to show, small enough to hold forever in a demo. */
   private static final int LIMIT = 50;
+
+  /** Maximum subject text per entry, so request-sized input cannot dominate the trail. */
+  private static final int SUBJECT_LIMIT = 256;
 
   private final EventBus bus;
   private final Deque<Entry> trail = new ArrayDeque<>();
@@ -62,11 +66,15 @@ public final class Audit {
   /** Append one stamped entry, keeping the newest fifty. */
   private void record(String kind, String subject, Instant at) {
     synchronized (trail) {
-      trail.addLast(new Entry(kind, subject, at));
+      trail.addLast(new Entry(kind, abbreviate(subject), at));
       if (trail.size() > LIMIT) {
         trail.removeFirst();
       }
     }
+  }
+
+  private static String abbreviate(String subject) {
+    return subject.length() <= SUBJECT_LIMIT ? subject : subject.substring(0, SUBJECT_LIMIT - 3) + "...";
   }
 
   private static String describe(Recorded event) {

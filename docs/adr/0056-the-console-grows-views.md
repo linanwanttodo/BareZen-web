@@ -68,7 +68,8 @@ plainly as a `DataSource` is.**
    concrete event class, and publishes onto it from the handlers that own those events — including the plugin's, which
    publishes from inside a route it contributed itself. Two facts that this had to be written down for: the bus routes on
    the event's exact runtime type, so subscribing to an interface receives nothing; and a bounded trail (fifty entries,
-   oldest dropped) is a decision the application makes, not something the framework offers.
+   oldest dropped) is a decision the application makes, not something the framework offers. The current implementation
+   also caps each subject at 256 characters so request-sized input cannot dominate that bounded trail.
 7. **The audit trail cannot see refusals, and does not pretend to.** `SecurityMiddleware` answers 403 before any handler
    runs, so the application never learns a refusal happened and the trail holds no "denied" entries. A first draft of
    this phase had a `recordRefusal(...)` helper for exactly that — dead code that could never be called, and an event
