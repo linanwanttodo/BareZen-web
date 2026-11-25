@@ -97,7 +97,8 @@ checks them.**
 - Deployability, checked the way the host does it rather than the way a route table does: the folder served under a
   subpath by a plain static server, all 12 pages fetched and **all 124 link targets answering 200**, `/site/zh/` resolving
   through the directory index, and `/site/docs/plugins` (no extension) returning 404 — the cost decision 2 names.
-- `StaticFileExampleTest` — 5 tests over a real socket, including the GET-only-route 405 that decision 5 records.
+- `StaticFileExampleTest` — 5 tests over a real socket in this phase, including the GET-only-route 405 that decision 5
+  records. The current example has a sixth test for the classpath-resource route added on 2026-11-25.
 - Full reactor after this phase: `mvn -o -B -ntp clean verify` — **BUILD SUCCESS in 10:44, 1209 tests, 0 failures,
   1 skipped, 9 coverage gates met**, `check-jdk-baseline.sh` and `check-class-major.sh` both exit 0.
 

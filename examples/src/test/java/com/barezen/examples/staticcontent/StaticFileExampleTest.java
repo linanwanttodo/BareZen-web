@@ -29,6 +29,16 @@ final class StaticFileExampleTest {
   }
 
   @Test
+  void aPackagedClasspathResourceIsRoutedThroughThePublicApi() throws IOException {
+    try (TestServer server = TestServer.start(StaticFileExample.router(StaticFileExample.workspace()))) {
+      Assertions.assertThat(server.client().get("/classpath.txt")).statusIs(200)
+          .headerIs("Content-Type", "text/plain; charset=utf-8")
+          .bodyIs("hello from the example classpath\n");
+      Assertions.assertThat(server.client().head("/classpath.txt")).statusIs(200);
+    }
+  }
+
+  @Test
   void aReloadWithTheTagIsABodyFreeThreeOhFour() throws IOException {
     try (TestServer server = TestServer.start(StaticFileExample.router(StaticFileExample.workspace()))) {
       TestResponse first = server.client().get("/notes.txt");

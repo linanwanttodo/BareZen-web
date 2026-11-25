@@ -2,6 +2,7 @@ package com.barezen.examples.staticcontent;
 
 import com.barezen.content.StaticContent;
 import com.barezen.http.jdk.JdkHttpServerAdapter;
+import com.barezen.web.Handler;
 import com.barezen.web.HttpMethod;
 import com.barezen.web.Router;
 
@@ -51,6 +52,9 @@ public final class StaticFileExample {
         builder.route(HttpMethod.HEAD, address, StaticContent.file(file));
       }
     }
+    Handler packaged = StaticContent.resource(StaticFileExample.class.getClassLoader(), "static-content/hello.txt");
+    builder.route(HttpMethod.GET, "/classpath.txt", packaged);
+    builder.route(HttpMethod.HEAD, "/classpath.txt", packaged);
     return builder.build();
   }
 

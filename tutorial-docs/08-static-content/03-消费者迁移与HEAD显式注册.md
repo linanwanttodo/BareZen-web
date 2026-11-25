@@ -41,9 +41,11 @@ try (Stream<Path> files = Files.list(directory)) {
 
 这里用 try-with-resources 关闭目录流，排序让路由表可重复，过滤避免把子目录当文件。它没有递归，也没有把完整磁盘路径放进 URL。两次 StaticContent.file 调用都返回读取同一文件的 Handler；可以先创建一个 Handler 再注册两个方法，行为等价，当前源码选择直白的两行。
 
+目录枚举之后，示例还用 `StaticContent.resource(StaticFileExample.class.getClassLoader(), "static-content/hello.txt")` 注册 `/classpath.txt` 的 GET 与 HEAD。资源来自 examples jar，不是临时目录；这条路由让 classpath API 也有 shipped consumer，而不是只有模块内部测试。
+
 main 在 `127.0.0.1:0` 启动真实 adapter，端口由操作系统分配。第一次 GET 读取 ETag，第二次携带相同 If-None-Match，第三次发送 HEAD，最后请求未注册路径。每一步打印实际观察，而不是只写“静态服务器已启动”。server.stop 放在 finally，客户端 InterruptedException 被保留为 cause 后转为 IllegalStateException。它不是长期运行服务，而是可重复执行的教学程序。
 
-GET-only 反例写在 [StaticFileExampleTest.java:63](../../examples/src/test/java/com/barezen/examples/staticcontent/StaticFileExampleTest.java#L63)：
+GET-only 反例写在 [StaticFileExampleTest.java:73](../../examples/src/test/java/com/barezen/examples/staticcontent/StaticFileExampleTest.java#L73)：
 
 ```java
 Router getOnly = Router.builder()
@@ -71,7 +73,7 @@ try (TestServer server = TestServer.start(getOnly)) {
 
 ## 怎么确认这一步没造错
 
-运行示例的 5 个真实套接字测试：
+运行示例的 6 个真实套接字测试：
 
 ```bash
 mvn -o -B -ntp -pl examples -am test \
@@ -79,7 +81,7 @@ mvn -o -B -ntp -pl examples -am test \
   -Dtest=StaticFileExampleTest
 ```
 
-本次实跑 5 项，0 失败、0 错误。测试分别验证每个平铺文件以自己的名称注册、相同 ETag 的 reload 返回无正文无长度的 304、HEAD 返回表示长度但不发送正文、GET-only 返回 405、未注册地址返回 404 且错误方法返回 405。TestServer 使用真实端口，不是直接调用 Handler 的替代品。
+本次实跑 6 项，0 失败、0 错误。测试分别验证每个平铺文件以自己的名称注册、classpath 资源通过公开 API 提供正文与 HEAD、相同 ETag 的 reload 返回无正文无长度的 304、HEAD 返回表示长度但不发送正文、GET-only 返回 405、未注册地址返回 404 且错误方法返回 405。TestServer 使用真实端口，不是直接调用 Handler 的替代品。
 
 直接执行示例可以观察最终输出。仓库根目录先构建测试产物，然后使用 examples README 记录的 classpath 方式；下面增加 `$PWD` 是为了避免相对 classpath 的歧义：
 

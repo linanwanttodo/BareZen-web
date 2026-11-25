@@ -50,7 +50,7 @@ endpoint. The recorded output of the eight runs:
 | `database.DatabaseExample` | one migration applied, two rows after a committed transaction, a rolled-back insert leaves the count at 2 |
 | `plugins.PluginExample` | announced on the classpath `[reports]`, assembled order `[user, openapi, auth, reports]`, startup order `[user, openapi, auth, reports]`, the table `Router[GET /health, GET /reports/status]` with the second route contributed by the discovered plugin, a login authenticates as `ada`, a bad password issues no session |
 | `openapi.OpenApiExample` | a 1201-byte document, served `200 application/json` at `/openapi.json` |
-| `staticcontent.StaticFileExample` | `GET /notes.txt -> 200, 44 bytes, ETag "ec185bc08f4786af"`, reload with that tag `-> 304, 0 bytes, Content-Length (absent)`, `HEAD -> 200` stating `Content-Length 44` and receiving 0 bytes, an unregistered path `-> 404, body "Not Found"` |
+| `staticcontent.StaticFileExample` | disk files show `200`, `304` and `HEAD` framing; `GET /classpath.txt -> 200, body "hello from the example classpath"` proves a packaged resource through the public API; an unregistered path `-> 404, body "Not Found"` |
 
 ## What each example demonstrates
 
@@ -82,7 +82,9 @@ endpoint. The recorded output of the eight runs:
   file, an `ETag` computed from the bytes, and the three framing answers measured over a socket (200 with a length, 304
   with neither body nor length, HEAD stating a length it does not send). It also demonstrates the trap ADR-0054 records:
   `HEAD` is a route an application registers, not a `GET` the framework folds in, so a GET-only file answers 405.
-  This program is `barezen-content`'s consumer in shipped code (ADR-0051, ADR-0054).
+  It also registers `StaticContent.resource(...)` for a resource packaged in the examples jar, so both supported
+  content sources have a runnable public-API consumer. This program is `barezen-content`'s consumer in shipped code
+  (ADR-0051, ADR-0054).
 
 ## Reading order
 
