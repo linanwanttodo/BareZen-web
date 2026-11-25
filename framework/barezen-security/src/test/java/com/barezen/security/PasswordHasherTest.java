@@ -88,6 +88,14 @@ class PasswordHasherTest {
     }
 
     @Test
+    @DisplayName("rejects a non-positive iteration count without invoking PBKDF2")
+    void rejectsNonPositiveIterations() {
+      String encoded = HASHER.hash("pw");
+      assertThat(HASHER.verify("pw", encoded.replace("$1000$", "$0$"))).isFalse();
+      assertThat(HASHER.verify("pw", encoded.replace("$1000$", "$-1$"))).isFalse();
+    }
+
+    @Test
     @DisplayName("rejects corrupted salt or derived key: undecodable or wrong-length Base64")
     void rejectsCorruptedMaterial() {
       String encoded = HASHER.hash("pw");

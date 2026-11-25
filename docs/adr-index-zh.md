@@ -294,7 +294,7 @@ sealed `AuthenticationResult` 区分 `Authenticated`、`Failure` 和 `Anonymous`
 
 会话 token 由 32 字节安全随机数生成并 Base64url 编码，服务端保存状态以支持撤销和轮换。
 领域对象不知道 HTTP 头或 cookie，时钟和随机源可以注入，便于测试过期行为。
-会话不跨 JVM 重启或多实例共享，当前实现还须注意惰性清理、`rotate()` 不校验过期及 `size()` 不等于有效会话数。
+会话不跨 JVM 重启或多实例共享。过期记录在查找或轮换时删除，`rotate()` 不会续期过期 token；`size()` 仍不等于有效会话数。
 
 [原文](adr/0036-sessions-are-opaque-and-revocable.md)
 

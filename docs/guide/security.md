@@ -151,7 +151,7 @@ boolean correct = hasher.verify("hunter2", storedHash);
 boolean wrong = hasher.verify("wrong", storedHash);
 ```
 
-同一个密码两次哈希会得到不同结果。验证使用 `MessageDigest.isEqual` 比较派生结果；格式错误、算法不受支持、Base64 材料损坏或长度不符时返回 `false`。null 密码或 null hash 属于调用错误，会抛异常。
+同一个密码两次哈希会得到不同结果。验证使用 `MessageDigest.isEqual` 比较派生结果；格式错误、算法不受支持、非正迭代次数、Base64 材料损坏或长度不符时返回 `false`。null 密码或 null hash 属于调用错误，会抛异常。
 
 `PasswordHasher.of(iterations, random)` 为测试提供低迭代和可控随机源，不适合降低生产强度。空密码也会被哈希；最小长度、泄露密码检查、登录限流和失败锁定是注册与登录策略，不是 hasher 的职责。
 
@@ -177,10 +177,10 @@ token 是 32 字节随机数经 Base64url 无填充编码得到的字符串，�
 - `create(principal, duration)` 创建会话，duration 必须为正。
 - `lookup(value)` 返回未过期会话；未知或已过期返回空。过期记录在查找时删除。
 - `invalidate(value)` 立即删除记录；存在返回 true，不存在返回 false。
-- `rotate(value, duration)` 删除旧记录并为同一 principal 创建新 token；旧 token 不存在时返回空。
+- `rotate(value, duration)` 删除旧记录；旧 token 不存在或已过期时返回空，未过期时才为同一 principal 创建新 token。
 - `SessionToken.isExpired(now)` 在 `expiresAt <= now` 时为 true。
 
-过期清理是惰性的：只对经过 `lookup` 的记录生效，`size()` 也可能包含尚未被查找的过期记录。`rotate` 本身不检查旧 token 是否过期；需要拒绝过期 token 的登录或刷新流程，应先 `lookup`，不要把 rotate 当作有效期验证。
+过期清理是惰性的：只对经过 `lookup` 的记录生效，`size()` 也可能包含尚未被查找的过期记录。`rotate` 现在也会检查到期时间：它删除过期记录并返回空，不会把过期 token 续成新会话。
 
 `SessionToken.toString()` 只输出过期时间，不输出 token 值。存储不持久化，进程重启后全部失效，也不提供分布式共享、容量上限或刷新令牌。多实例部署需要另行设计共享存储与撤销语义。
 
@@ -259,6 +259,6 @@ mvn -o -B -ntp -pl examples -am \
 - 生产 secret 不写入源码、示例、日志或异常消息。
 - 登录失败不区分未知用户与错误密码。
 - 退出登录和权限紧急撤销都调用 `SessionStore.invalidate`。
-- 会话过期由 `lookup` 验证，轮换前先检查有效性。
+- 会话过期由 `lookup` 验证；`rotate` 也会拒绝并清除过期 token。
 - 浏览器会话明确设计 Cookie 属性与 CSRF 防护。
 - 公网部署启用 TLS，并独立处理证书续期和加密策略。

@@ -124,6 +124,18 @@ class SessionStoreTest {
   }
 
   @Test
+  @DisplayName("rotate() refuses an expired token instead of extending it")
+  void rotateExpired() {
+    MutableClock clock = new MutableClock(T0);
+    SessionStore store = storeAt(clock);
+    SessionStore.Session expired = store.create(ADA, Duration.ofMinutes(30));
+    clock.advance(Duration.ofMinutes(30));
+
+    assertThat(store.rotate(expired.token().value(), Duration.ofMinutes(30))).isEmpty();
+    assertThat(store.size()).isZero();
+  }
+
+  @Test
   @DisplayName("rotate() of an unknown token finds nothing and creates nothing")
   void rotateUnknown() {
     SessionStore store = storeAt(new MutableClock(T0));

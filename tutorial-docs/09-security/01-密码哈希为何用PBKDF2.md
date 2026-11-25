@@ -43,13 +43,13 @@ return ALGORITHM + "$" + iterations + "$"
     + Base64.getEncoder().encodeToString(derived);
 ```
 
-最后实现 `verify(String, String)`。先按四个字段拆分，核对算法、解析次数、解码盐与期望密钥，再检查长度。只有这些结构检查通过，才使用哈希内记录的次数重新派生；比较使用 `MessageDigest.isEqual`，不要用字符串 `equals` 暴露前缀比较的时序差异。解析失败返回 `false`，而不是把损坏记录的内容拼进异常。真正的派生调用位于 [PasswordHasher.java:134](../../framework/barezen-security/src/main/java/com/barezen/security/PasswordHasher.java#L134)，使用 `PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH * 8)`。
+最后实现 `verify(String, String)`。先按四个字段拆分，核对算法、解析次数并拒绝非正数，再解码盐与期望密钥、检查长度。只有这些结构检查通过，才使用哈希内记录的次数重新派生；比较使用 `MessageDigest.isEqual`，不要用字符串 `equals` 暴露前缀比较的时序差异。解析失败返回 `false`，而不是把损坏记录的内容拼进异常。真正的派生调用位于 [PasswordHasher.java:137](../../framework/barezen-security/src/main/java/com/barezen/security/PasswordHasher.java#L137)，使用 `PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH * 8)`。
 
 ```java
 if (parts.length != 4 || !ALGORITHM.equals(parts[0])) {
   return false;
 }
-// 解析次数与 Base64；字段长度不是 16/32 时返回 false。
+// 解析次数与 Base64；次数非正或字段长度不是 16/32 时返回 false。
 byte[] actual = derive(password, salt, iterations);
 return MessageDigest.isEqual(actual, expected);
 ```
@@ -61,21 +61,21 @@ return MessageDigest.isEqual(actual, expected);
 1. **错误：`MessageDigest.getInstance("SHA-256").digest(password)` 当密码哈希。** 正确：使用 `PBKDF2WithHmacSHA256` 与高迭代次数。普通摘要是文档完整性工具，不是慢口令派生函数。
 2. **错误：所有用户共用一个固定盐。** 正确：每次 `hash` 都从 `SecureRandom` 获取新盐，并把它和结果一起保存；测试里的固定盐只能出现在 `of(...)` 的测试随机源中。
 3. **错误：验证时使用 `standard()` 的当前迭代数。** 正确：从 `encodedHash` 的第二段读取次数，否则旧记录无法跨版本验证。
-4. **错误：哈希解析失败直接抛异常，或在异常消息中附上编码值。** 正确：普通结构错误返回 `false`，内部算法缺失才作为服务端故障抛出；任何消息都不携带密码、盐或完整摘要。
+4. **错误：哈希解析失败直接抛异常，或让零/负迭代次数进入 `PBEKeySpec`。** 正确：普通结构错误与非正次数都返回 `false`，内部算法缺失才作为服务端故障抛出；任何消息都不携带密码、盐或完整摘要。
 5. **错误：把 `of(1, random)` 作为方便的生产快捷方式。** 正确：生产使用 `standard()`，低次数只服务测试；同时把空密码与最小长度留给注册策略，避免哈希器承担相互冲突的职责。
 
 ## 怎么确认这一步没造错
 
-运行已经存在的十五项哈希测试，覆盖格式、随机盐、正确与错误密码、损坏字段、跨迭代数验证、构造拒绝和脱敏：
+运行十六项哈希测试，覆盖格式、随机盐、正确与错误密码、损坏字段、非正迭代、跨迭代数验证、构造拒绝和脱敏：
 
 ```bash
 mvn -o -B -ntp -pl framework/barezen-security -am test \
   -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PasswordHasherTest
 ```
 
-预期 `Tests run: 15, Failures: 0, Errors: 0, Skipped: 0`，最终 `BUILD SUCCESS`。本章编写时实际执行通过；`PasswordHasherTest$Hash` 为 3 项、`$Verify` 为 8 项、`$Construction` 为 4 项。上游 `ClassMajorContractTest` 会额外报告 `unique-majors=[61]`，说明安全产物仍符合字节码 17 基线，而不是绑定构建机 JDK。
+预期 `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0`，最终 `BUILD SUCCESS`；`PasswordHasherTest$Hash` 为 3 项、`$Verify` 为 9 项、`$Construction` 为 4 项。上游 `ClassMajorContractTest` 会额外报告 `unique-majors=[61]`，说明安全产物仍符合字节码 17 基线，而不是绑定构建机 JDK。
 
-测试通过不等于每个恶意编码都安全。可以进一步审查 `verify`：非数字次数会返回 false，但可解析的零或负数会进入 `PBEKeySpec`，当前代码没有像构造器那样先检查它；这属于尚未覆盖的输入边界，不能根据 ADR 的概括宣称“任何 malformed hash 都绝不抛异常”。本章只写文档，不修改该实现。
+测试通过不等于每个恶意编码都安全。当前 `verify` 会拒绝非数字、零和负数的迭代字段，避免它们进入 `PBEKeySpec` 后抛出 `IllegalArgumentException`。这修复了损坏记录的异常路径，但没有为迭代次数设置上限，也没有消除账户枚举 timing；这两类边界仍需独立威胁建模与验证。
 
 ## 此刻的代码长什么样
 

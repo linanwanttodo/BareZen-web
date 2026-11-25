@@ -15,7 +15,7 @@
 - [ADR-0033：安全是 Handler 装饰器，上下文作为参数到达](../../docs/adr/0033-security-is-a-handler-decorator.md)：冻结的 `Handler.handle(Request, Map)` 不增加安全参数，安全模块用 `wrap` 返回一个 Handler。需要身份的业务对象额外实现 `SecuredHandler`，由中间件调用三参数方法；普通 Handler 原样运行。模块只依赖 Web 契约，生产代码不依赖适配器、core 或 JDBC。
 - [ADR-0034：认证有三态并携带拒绝原因](../../docs/adr/0034-authentication-has-three-states.md)：`Authenticated`、`Failure`、`Anonymous` 不能压成布尔值或可空 Principal，否则“未提供”与“提供了但错误”会消失。sealed 层级让新增状态成为所有消费者的编译期检查，拒绝原因属于应用诊断而不是线上回显。
 - [ADR-0035：密码哈希采用自描述的 PBKDF2-HMAC-SHA256](../../docs/adr/0035-password-hashing-pbkdf2.md)：默认六十万次迭代、十六字节随机盐、三十二字节派生密钥，并让哈希自己记录算法与次数。这样升级次数不必让旧哈希失效，同时不引入 bcrypt 或 Argon2 依赖；PBKDF2 对 GPU/ASIC 较弱这一代价也被明确记录。
-- [ADR-0036：会话是不透明、服务端且可撤销的](../../docs/adr/0036-sessions-are-opaque-and-revocable.md)：三十二字节随机值只作为 `ConcurrentHashMap` 的键，Principal 与过期时间留在服务端。撤销是删除记录，轮换是先删除旧值再签发新值，因此不需要 JWT 撤销名单；代价是单 JVM 状态与无容量上限。
+- [ADR-0036：会话是不透明、服务端且可撤销的](../../docs/adr/0036-sessions-are-opaque-and-revocable.md)：三十二字节随机值只作为 `ConcurrentHashMap` 的键，Principal 与过期时间留在服务端。撤销是删除记录，轮换先删除旧值，未过期时才签发新值，因此不需要 JWT 撤销名单；代价是单 JVM 状态与无容量上限。
 - [ADR-0037：401/403/500 的边界与默认拒绝](../../docs/adr/0037-status-codes-and-default-deny.md)：未认证或认证失败是 401，已认证但策略拒绝是 403，安全组件抛 `RuntimeException` 是 500。三种拒绝都不调用业务 Handler；三参数包装询问 `Permission.ANY`，四参数包装询问路由明确命名的权限。
 - [ADR-0050：TLS 通过 keystore 配置开启，不增加适配器公开 API](../../docs/adr/0050-tls-is-named-by-a-keystore-not-flagged-on.md)：`barezen-http-jdk` 从既有配置快照读取 keystore 路径与密码，构造时决定明文或 HTTPS。没有路径就是明文，有路径缺密码则启动失败，坏 keystore 也在绑定端口前失败；协议、证书续期和 mTLS 不在范围内。本章只把它列为传输边界，不把 TLS 测试冒充安全模块测试。
 
@@ -42,7 +42,7 @@ git log --oneline --all -- framework/barezen-security
 2. [不透明会话与可撤销性](02-不透明会话与可撤销性.md)：把随机令牌与服务端记录分开，用注入 Clock 验证过期、撤销和轮换。
 3. [认证三态与 401/403 边界](03-认证三态与401-403边界.md)：建立 sealed 结果、默认拒绝权限表，逐项确定状态、状态码和业务调用次数。
 4. [安全作为处理器装饰器](04-安全作为处理器装饰器.md)：保持 HTTP 契约不变，提取凭证、执行两道决策，并用 `SecuredHandler` 传递请求级上下文。
-5. [检查点：拒绝路径全覆盖](05-检查点-拒绝路径全覆盖.md)：运行 99 项模块测试、5 项示例测试与真实 main，记录尚未覆盖的边界。
+5. [检查点：拒绝路径全覆盖](05-检查点-拒绝路径全覆盖.md)：运行 101 项模块测试、5 项示例测试与真实 main，记录尚未覆盖的边界。
 
 ## 本章完成后的能力清单
 

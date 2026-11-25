@@ -116,6 +116,9 @@ public final class PasswordHasher {
     } catch (NumberFormatException e) {
       return false;
     }
+    if (iterations <= 0) {
+      return false;
+    }
     byte[] salt;
     byte[] expected;
     try {

@@ -115,12 +115,15 @@ public final class SessionStore {
    *
    * @param value the token value to rotate, never null
    * @param duration how long the new session is valid, must be positive
-   * @return the new session, or empty when the old token was not found
+   * @return the new session, or empty when the old token was not found or was expired
    */
   public Optional<Session> rotate(String value, Duration duration) {
     Objects.requireNonNull(value, "the token value to rotate; without one there is nothing to rotate");
     Session old = sessions.remove(value);
     if (old == null) {
+      return Optional.empty();
+    }
+    if (old.token().isExpired(clock.instant())) {
       return Optional.empty();
     }
     return Optional.of(create(old.principal(), duration));
