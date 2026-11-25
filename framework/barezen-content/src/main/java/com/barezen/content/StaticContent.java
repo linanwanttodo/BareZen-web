@@ -5,6 +5,7 @@ import com.barezen.web.Headers;
 import com.barezen.web.Request;
 import com.barezen.web.Response;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,7 +15,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * One file on disk, served as one route: the bytes, a type, an {@code ETag}, and a conditional GET that answers 304.
+ * One disk file or classpath resource, served as one route: bytes, a type, an {@code ETag}, and a conditional GET.
  *
  * <p><b>One handler per file, and why there is no directory route.</b> {@link com.barezen.Router} answers
  * «method plus raw path, to a handler» and its patterns are a literal segment or exactly {@code {name}} capturing one
@@ -93,6 +94,45 @@ public final class StaticContent {
           + " should not have to discover");
     }
     return new FileHandler(file.toAbsolutePath().normalize(), contentType);
+  }
+
+  /** A handler for one classpath resource, typed by its name. */
+  public static Handler resource(ClassLoader loader, String name) {
+    return resource(loader, name, contentTypeOf(name));
+  }
+
+  /** A handler for one classpath resource with an explicitly stated content type. */
+  public static Handler resource(ClassLoader loader, String name, String contentType) {
+    Objects.requireNonNull(loader, "the class loader; without one there is no classpath to read");
+    Objects.requireNonNull(name, "the classpath resource name; without one there is no resource to serve");
+    Objects.requireNonNull(contentType, "the content type; a byte stream with no type makes the browser guess");
+    checkResourceName(name);
+    if (contentType.isBlank()) {
+      throw new IllegalArgumentException("the content type must not be blank");
+    }
+    return new ResourceHandler(readResource(loader, name), contentType);
+  }
+
+  private static void checkResourceName(String name) {
+    if (name.isBlank() || name.startsWith("/") || name.contains("\\")) {
+      throw new IllegalArgumentException("a classpath resource name must be relative and use '/' separators");
+    }
+    for (String segment : name.split("/", -1)) {
+      if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) {
+        throw new IllegalArgumentException("a classpath resource name must not contain empty, '.' or '..' segments");
+      }
+    }
+  }
+
+  private static byte[] readResource(ClassLoader loader, String name) {
+    try (InputStream input = loader.getResourceAsStream(name)) {
+      if (input == null) {
+        throw new IllegalArgumentException("no classpath resource named " + name);
+      }
+      return input.readAllBytes();
+    } catch (IOException unreadable) {
+      throw new IllegalStateException("classpath resource " + name + " could not be read", unreadable);
+    }
   }
 
   /**
@@ -182,14 +222,34 @@ public final class StaticContent {
         // application owns, not on the socket (ADR-0023 §2).
         return NOT_FOUND;
       }
-      String etag = etagOf(content);
-      if (matches(request.headers().first("If-None-Match").orElse(null), etag)) {
-        // No body, and no length stated: ADR-0029 D1 keeps a 304 free of Content-Length, and Response refuses a body
-        // for the status anyway. The ETag travels because a validator has to survive the answer it validated.
-        return new Response(304, Headers.of("ETag", etag), null);
-      }
-      return new Response(200, Headers.of("Content-Type", contentType).with("ETag", etag), content);
+      return respond(content, contentType, request);
     }
+  }
+
+  private static final class ResourceHandler implements Handler {
+
+    private final byte[] content;
+    private final String contentType;
+
+    ResourceHandler(byte[] content, String contentType) {
+      this.content = content;
+      this.contentType = contentType;
+    }
+
+    @Override
+    public Response handle(Request request, java.util.Map<String, String> parameters) {
+      return respond(content, contentType, request);
+    }
+  }
+
+  private static Response respond(byte[] content, String contentType, Request request) {
+    String etag = etagOf(content);
+    if (matches(request.headers().first("If-None-Match").orElse(null), etag)) {
+      // No body, and no length stated: ADR-0029 D1 keeps a 304 free of Content-Length, and Response refuses a body
+      // for the status anyway. The ETag travels because a validator has to survive the answer it validated.
+      return new Response(304, Headers.of("ETag", etag), null);
+    }
+    return new Response(200, Headers.of("Content-Type", contentType).with("ETag", etag), content);
   }
 
   /**

@@ -143,8 +143,8 @@ a site.
   and CSRF protection as part of that same decision rather than a later patch.
 - **Deployment into somebody else's container** reopens ADR-0049's servlet integration with a real application to test it
   against, which is the case the 3.3 phase could only test with an embedded Tomcat.
-- **Packaging the console as a jar** reopens ADR-0051's classpath-resource deferral, since the page is read from the
-  classes directory today.
+- **Packaging the console as a jar** can now consume ADR-0051's `StaticContent.resource(...)`; the console still reads
+  its external `web/` directory today, so packaging remains an application change rather than a framework deferral.
 
 ## Related Decisions
 

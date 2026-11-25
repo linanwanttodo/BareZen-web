@@ -14,9 +14,9 @@
   <artifactId>barezen-content</artifactId>
   <name>BareZen Static Content</name>
   <description>
-    Serving a file that already exists on disk through the web contract: one Handler per route, an ETag derived from
-    the bytes it would send, and a conditional GET that answers 304 without a body. Depends on the web contract, never
-    on an adapter, and names no directory walk, no wildcard route and no cache policy the router has no way to express.
+    Serving one explicitly selected disk file or classpath resource through the web contract: one Handler per route,
+    an ETag derived from the bytes, and a conditional GET that answers 304 without a body. Depends on the web contract,
+    never on an adapter, and names no directory walk, wildcard route or cache policy.
   </description>
 
   <dependencies>

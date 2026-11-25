@@ -4,7 +4,7 @@
 
 前七章已经能装配对象、匹配路由并把 Response 写到真实套接字，但仍不能正确回答一个浏览器最常见的问题：这个样式表或页面现在是什么内容，我上次保存的副本还能用吗？本章增加 `barezen-content`，但它不是把目录整个暴露给网络，而是把“一个磁盘文件”变成“一个普通 Handler”。路由、认证、生命周期与响应分帧仍由前几章的组件负责。
 
-最终形状很窄：应用在装配时选择文件，调用 `StaticContent.file(path)` 得到 Handler，再为 GET 和 HEAD 注册路由。每次请求读取当前字节、计算 ETag；`If-None-Match` 匹配就返回只有 ETag 的 304，否则返回 200、类型、ETag 与完整字节。Content-Length 不由 Handler 声明，adapter 从实际要写的字节派生；304 没有长度，HEAD 有表示长度但不发送正文。
+最终形状很窄：应用在装配时选择文件，调用 `StaticContent.file(path)` 得到 Handler，再为 GET 和 HEAD 注册路由。每次请求读取当前字节、计算 ETag；`If-None-Match` 匹配就返回只有 ETag 的 304，否则返回 200、类型、ETag 与完整字节。需要把资源打进 jar 时，使用 `StaticContent.resource(classLoader, name)`；它在装配时校验并冻结资源字节。Content-Length 不由 Handler 声明，adapter 从实际要写的字节派生；304 没有长度，HEAD 有表示长度但不发送正文。
 
 时间线上有两个不能混淆的消费者。`326c25a` 引入静态内容模块，最初服务于当时的文档站；`9aeb03e` 又把文档站改为 GitHub Pages 直接托管的纯文件目录，并把消费者移到 `examples/staticcontent/StaticFileExample`。所以当前源码中，site 不是 Maven 模块，StaticContent 也不会替 Pages 生成 ETag。教程讲实现，也讲这个决定为什么改变了部署方式。
 
@@ -30,7 +30,7 @@
 | 提交 | 真实变化 | 阅读重点 |
 | --- | --- | --- |
 | `de55b51` | 记录 ADR-0028 与 ADR-0029 | 在静态消费者出现前，304 无长度与 HEAD 精确 token 规则已经写下 |
-| `326c25a` | 新增 content 模块、StaticContent、22 个行为测试、6 条架构规则和字节码测试 | 同一提交也含 TLS，但本章只追静态文件切片 |
+| `326c25a` | 新增 content 模块、StaticContent、18 个行为测试、6 条架构规则和字节码测试 | 同一提交也含 TLS，但本章只追静态文件切片 |
 | `9aeb03e` | 删除 site/pom、Site 与 SiteTest，新增 StaticFileExample 及 5 个测试 | 部署目标改变了，消费者也必须改变；HEAD 405 在真实使用中暴露 |
 
 用提交切片阅读，避免只从最终文件猜测功能为何存在：
@@ -48,7 +48,7 @@ git show 9aeb03e -- examples/src/main/java/com/barezen/examples/staticcontent/St
 
 ## 本章完成后的能力清单
 
-你应能从 `barezen-content/pom.xml` 看出，生产编译依赖只有 `barezen-web`，JDK adapter 只以 test scope 进入套接字验证。StaticContent 是唯一公开顶层类型，FileHandler 是私有嵌套类；应用不能通过子类偷偷改变读取策略，只能选择重载参数或编写自己的 Handler。
+你应能从 `barezen-content/pom.xml` 看出，生产编译依赖只有 `barezen-web`，JDK adapter 只以 test scope 进入套接字验证。StaticContent 是唯一公开顶层类型，FileHandler 与 ResourceHandler 都是私有嵌套类；应用不能通过子类偷偷改变读取策略，只能选择重载参数或编写自己的 Handler。
 
 你应能列出构造时拒绝与请求时回答：不存在、目录、空类型在装配时失败；装配后文件被删除或不可读则返回纯文本 404。前者是部署错误，后者是资源当前不可用。两者都不把文件系统路径回给客户端。
 

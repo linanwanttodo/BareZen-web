@@ -418,7 +418,7 @@ Servlet API 为 provided scope，Tomcat 只在测试中出现；容器先行拒�
 
 `StaticContent.file(...)` 要求已存在的普通文件，应用为每个文件显式注册 GET 与 HEAD 路由。
 ETag 来自内容 SHA-256 的前八字节，304 实测后仍不声明 `Content-Length`，文件按请求完整读入内存。
-没有通配路由、目录列表、range、缓存策略或流式大文件，也不会从请求接受文件路径。
+没有通配路由、目录列表、range、缓存策略或流式大文件，也不会从请求接受文件路径。2026-11-25 补充 `resource(ClassLoader, name)`：显式加载并冻结 classpath 资源，仍保持一资源一路由与相同 ETag/304 规则。
 
 [原文](adr/0051-static-content-is-one-handler-per-file.md)
 

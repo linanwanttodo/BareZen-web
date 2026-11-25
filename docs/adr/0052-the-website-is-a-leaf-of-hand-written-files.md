@@ -77,10 +77,9 @@ audit exists to catch.
 - The site's five framework dependencies are `barezen-web`, `barezen-http-jdk`, `barezen-content`, `barezen-plugins`
   (for the document) and — at test scope — `barezen-testkit`. It takes no container, no JSON library and no template
   engine, because `ApiDocument`'s emitter and `StaticContent`'s type table are the framework's own.
-- **Two limitations are recorded rather than fixed.** (i) The site is served from the classes directory, not from a jar:
-  `StaticContent` needs a `Path`, and classpath-resource serving is a named deferral in ADR-0051. A packaged site would
-  need that decision first, not an ad-hoc copy-to-temp-dir hack in the leaf. (ii) The pages restate the repository's
-  guide prose, so a change to `docs/guide/authoring-a-plugin.md` does not automatically change
+- **One limitation is recorded rather than fixed.** The site is served from the classes directory, not from a jar.
+  ADR-0051's classpath-resource deferral was fulfilled on 2026-11-25 by `StaticContent.resource(...)`, but this leaf
+  still restates the repository's guide prose, so a change to `docs/guide/authoring-a-plugin.md` does not automatically change
   `/docs/plugins`; the mitigation is that both are in one commit's diff, and the alternative was a converter that would
   have made the drift invisible rather than visible.
 - `README`'s Frontend row moves from NON-GOAL to a named consumer, with the rule that produced the shape: no framework
@@ -115,8 +114,8 @@ binary asset, dark mode, a jar-packaged site, and any framework capability intro
 
 ## Reopening trigger
 
-- **A packaged site** opens ADR-0051's classpath-resource deferral; the trigger is a deployment that cannot ship a
-  directory beside the classes.
+- **A packaged site** can now use ADR-0051's `StaticContent.resource(...)`; packaging the site itself remains outside
+  this record because the current deployment is GitHub Pages.
 - **A second consumer of the plugin mechanism** — the reason the site did not use it — opens when a feature team wants
   endpoints in a jar; that is 3.1/3.2's path and needs no change here.
 - **Documentation prose in two places** opens the "single source, generated site" question again, and it should be

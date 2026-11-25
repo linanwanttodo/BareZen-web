@@ -11,10 +11,14 @@ import com.barezen.web.Response;
 import com.barezen.web.Router;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -173,6 +177,76 @@ class StaticContentTest {
       assertThat(handler.handle(request(HttpMethod.GET, "/x", Map.of()), Map.of()).status()).isEqualTo(200);
       assertThat(handler.handle(request(HttpMethod.GET, "/x", Map.of("If-None-Match", "  ")), Map.of()).status())
           .isEqualTo(200);
+    }
+  }
+
+  @Nested
+  @DisplayName("a classpath resource")
+  class ClasspathResources {
+
+    private static final String RESOURCE = "static-content/hello.txt";
+
+    @Test
+    void servesTheNamedResourceWithTypeTagAndConditionalGet() throws Exception {
+      Handler handler = StaticContent.resource(StaticContent.class.getClassLoader(), RESOURCE);
+      Response response = handler.handle(request(HttpMethod.GET, "/hello.txt", Map.of()), Map.of());
+
+      assertThat(response.status()).isEqualTo(200);
+      assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("hello from the classpath\n");
+      assertThat(response.headers().first("Content-Type")).contains("text/plain; charset=utf-8");
+      String etag = response.headers().first("ETag").orElseThrow();
+      assertThat(handler.handle(request(HttpMethod.GET, "/hello.txt", Map.of("If-None-Match", etag)), Map.of())
+          .status()).isEqualTo(304);
+    }
+
+    @Test
+    void servesTheNamedResourceFromARealJar(@TempDir Path directory) throws Exception {
+      Path jar = directory.resolve("resources.jar");
+      byte[] expected = "hello from a jar\n".getBytes(StandardCharsets.UTF_8);
+      try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(jar))) {
+        output.putNextEntry(new JarEntry(RESOURCE));
+        output.write(expected);
+        output.closeEntry();
+      }
+      try (URLClassLoader loader = new URLClassLoader(new URL[] {jar.toUri().toURL()}, null)) {
+        Handler handler = StaticContent.resource(loader, RESOURCE);
+
+        Response response = handler.handle(request(HttpMethod.GET, "/hello.txt", Map.of()), Map.of());
+
+        assertThat(response.status()).isEqualTo(200);
+        assertThat(response.body()).isEqualTo(expected);
+      }
+    }
+
+    @Test
+    void aStatedTypeOverrulesTheResourceExtension() throws Exception {
+      Handler handler = StaticContent.resource(StaticContent.class.getClassLoader(), RESOURCE,
+          "application/custom");
+
+      assertThat(handler.handle(request(HttpMethod.GET, "/hello", Map.of()), Map.of())
+          .headers().first("Content-Type")).contains("application/custom");
+    }
+
+    @Test
+    void aMissingResourceIsAMisassemblyRatherThanADelayedFourOhFour() {
+      assertThatThrownBy(() -> StaticContent.resource(StaticContent.class.getClassLoader(), "static-content/missing.txt"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("no classpath resource");
+    }
+
+    @Test
+    void refusesNullBlankAbsoluteAndTraversalNames() {
+      ClassLoader loader = StaticContent.class.getClassLoader();
+      assertThatThrownBy(() -> StaticContent.resource(null, RESOURCE)).isInstanceOf(NullPointerException.class);
+      assertThatThrownBy(() -> StaticContent.resource(loader, null)).isInstanceOf(NullPointerException.class);
+      assertThatThrownBy(() -> StaticContent.resource(loader, " ")).isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> StaticContent.resource(loader, "/" + RESOURCE)).isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> StaticContent.resource(loader, "static-content/../hello.txt"))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> StaticContent.resource(loader, "static-content//hello.txt"))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> StaticContent.resource(loader, "static-content\\hello.txt"))
+          .isInstanceOf(IllegalArgumentException.class);
     }
   }
 

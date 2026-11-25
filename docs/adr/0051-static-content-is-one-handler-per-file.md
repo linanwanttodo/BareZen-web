@@ -166,11 +166,20 @@ matrix that survives it) and this phase does not invent a streaming body to dodg
   all nine coverage gates met; `check-jdk-baseline.sh` and `check-class-major.sh` exit 0 at `checked=606 unique-majors=[61]`.
   This is the phase that added the content module and TLS, and the reactor grew from 10 to 11 modules.
 
+## Amendment (2026-11-25): classpath resources
+
+The jar-packaging trigger is now met by `StaticContent.resource(ClassLoader, name)` and its explicit-content-type
+overload. The loader and resource name are assembly inputs; names must be relative and contain no empty, `.` or `..`
+segments. Missing resources fail assembly, while read failures keep their cause in `IllegalStateException`. Classpath
+bytes are read once and frozen because a jar resource is not a live deployment file; the existing ETag, conditional
+GET, MIME table and one-route-per-resource rules are shared with `file(...)`. No classpath scanning, directory route,
+request-supplied resource name or remote loader was added.
+
 ## Non-goals
 
 Wildcard or prefix routes, directory listing, `Last-Modified`/`If-Modified-Since`, `Cache-Control` or any CDN policy,
-range requests, compression, streaming a large file, classpath resources, directory scanning, and a static handler that
-takes a path from the request.
+range requests, compression, streaming a large file, classpath scanning, and a static handler that takes a path from
+the request.
 
 ## Reopening trigger
 

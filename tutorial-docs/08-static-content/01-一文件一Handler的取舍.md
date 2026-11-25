@@ -24,7 +24,7 @@ HTTP 契约、路由器和 adapter 已经能够处理普通响应，但“从磁
 
 ## 动手
 
-公开表面只有三个静态方法，核心构造如下：
+本步最初公开三个磁盘文件方法，核心构造如下：
 
 ```java
 public static Handler file(Path file) {
@@ -44,7 +44,7 @@ public static Handler file(Path file, String contentType) {
 }
 ```
 
-这里省略了实际源码的长错误消息，但校验顺序与 [StaticContent.java:67](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L67)、[StaticContent.java:83](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L83) 一致。保存绝对规范化路径，避免进程工作目录后来变化；FileHandler 的字段是 final，实例不在请求间保存可变状态。contentTypeOf 的完整固定表在 [StaticContent.java:108](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L108)。
+这里省略了实际源码的长错误消息，但校验顺序与 [StaticContent.java:68](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L68)、[StaticContent.java:84](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L84) 一致。保存绝对规范化路径，避免进程工作目录后来变化；FileHandler 的字段是 final，实例不在请求间保存可变状态。contentTypeOf 的完整固定表在 [StaticContent.java:148](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L148)。
 
 应用侧注册就是两行，不需要新生命周期接口：
 
@@ -57,6 +57,8 @@ Router router = Router.builder()
 ```
 
 HEAD 为什么必须写两次路由，下一步会用 `9aeb03e` 的真实失败说明。Handler 本身不读取 method，只按调用者注册的入口执行；是否抑制正文由 adapter 决定。
+
+当前公共 API 还包含 `resource(ClassLoader, name)` 与带显式类型的重载。资源名必须是相对路径，拒绝空段、`.`、`..`、反斜杠和绝对名；类加载器也由调用方显式传入，不隐式使用线程上下文加载器。与磁盘文件按请求读取不同，classpath 资源在装配时读取并冻结字节，因为 jar 内资源不会在运行期被业务代码改写。缺失资源在装配时失败，读取异常保留为 `IllegalStateException`，不会在请求期变成延迟 404。
 
 请求期核心只是“读当前字节，失败返回固定 404”：
 
@@ -71,13 +73,13 @@ return new Response(200,
     Headers.of("Content-Type", contentType).with("ETag", etagOf(content)), content);
 ```
 
-这是 [StaticContent.java:175](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L175) 的教学摘录，条件请求分支留到下一步。文件不在构造时读入，因此编辑内容无需重启；每次请求重新读取也意味着本实现没有缓存，更不会在多个请求之间复用过期 byte[]。
+这是 [StaticContent.java:215](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L215) 的教学摘录，条件请求分支留到下一步。文件不在构造时读入，因此编辑内容无需重启；每次请求重新读取也意味着本实现没有缓存，更不会在多个请求之间复用过期 byte[]。
 
 ## 常见的第一次写错
 
 - **错误：** 在 Router 增加 `/assets/*`，再让一个 Handler 接收路径参数。**正确：** 应用枚举文件，每个文件注册字面路由，请求路径不进入文件系统。
 - **错误：** 把 StaticContent 放进 web 或 adapter。**正确：** web 保持纯契约，能读磁盘的 capability 单独依赖 web。
-- **错误：** 构造时缓存文件字节。**正确：** 只固定 Path 与类型，每次请求读当前内容。
+- **错误：** 构造时缓存磁盘文件字节，或把 classpath 资源也说成每次请求重读。**正确：** `file(...)` 每次请求读取当前内容；`resource(...)` 在装配时冻结不可变资源字节。
 - **错误：** 文件不存在也创建 Handler，等客户端得到 404。**正确：** 装配时拒绝；运行后消失才返回 404。
 - **错误：** 404 写“找不到 /srv/app/site.css”。**正确：** 只返回 `Not Found`，不在客户端回显部署布局。
 - **错误：** 使用主机 MIME 探测。**正确：** 固定表推断，未知类型为 binary，特殊类型由应用显式传入。
@@ -90,10 +92,10 @@ return new Response(200,
 ```bash
 mvn -o -B -ntp -pl framework/barezen-content -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  '-Dtest=StaticContentTest$Serving,StaticContentTest$Types,StaticContentTest$Refusals'
+  '-Dtest=StaticContentTest$Serving,StaticContentTest$Types,StaticContentTest$Refusals,StaticContentTest$ClasspathResources'
 ```
 
-本次实跑 11 项，0 失败、0 错误。Serving 5 项验证字节、推断类型、显式类型、修改后标签变化、相同内容相同标签与文件消失后的 404；Types 2 项逐项检查 21 个扩展映射及未知名称；Refusals 4 项检查目录、不存在路径、空类型和 null。标签算法本身下一步展开，这里已经能看到“修改文件后再次调用同一 Handler 会得到不同标签”，从而杀死构造期缓存。
+本次实跑 16 项，0 失败、0 错误。Serving 5 项验证字节、推断类型、显式类型、修改后标签变化、相同内容相同标签与文件消失后的 404；Types 2 项逐项检查 21 个扩展映射及未知名称；Refusals 4 项检查目录、不存在路径、空类型和 null；ClasspathResources 5 项验证资源字节、真实 jar、ETag/304、显式类型、缺失资源和非法名称。标签算法本身下一步展开，这里已经能看到“修改文件后再次调用同一 Handler 会得到不同标签”，从而杀死构造期缓存。
 
 再运行模块门禁：
 

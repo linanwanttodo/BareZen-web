@@ -138,8 +138,8 @@ for the sake of a second language.
 
 - **A third language**, or any language whose pages cannot be maintained in the same commit as the English ones,
   reopens the generation question with a concrete cost attached instead of a hypothetical one.
-- **A `Vary`-capable or classpath-serving `StaticContent`** (ADR-0051's deferrals) reopens option A — at which point
-  negotiation becomes a decision that can be made correctly rather than approximately.
+- **A `Vary`-capable `StaticContent`** reopens option A. Classpath serving was added on 2026-11-25, but it does not
+  reopen this decision by itself because the documentation site remains a flat GitHub Pages deployment.
 - **The prose drifting from the code** on either side reopens the "single source" question in ADR-0052.
 
 ## Related Decisions
