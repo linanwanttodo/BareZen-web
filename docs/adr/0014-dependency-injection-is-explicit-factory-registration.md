@@ -77,7 +77,8 @@ ServiceAssembly assembly = ServiceAssembly.builder()
    runs in reverse creation order, and because a dependency is always created before the object that needs it,
    that is precisely "a dependent is released before what it depends on". Two owners releasing one object is how
    double release happens, which is why a `LifecycleParticipant` is registered as an instance: the orchestrator
-   owns its `stop()`.
+   owns its `stop()`. Amended on 2026-11-25: release attempts collect both `Exception` and `Error`, so one failed
+   `close()` cannot skip the remaining owned objects or replace a factory failure during failed-build cleanup.
 9. **The orchestrator stays the only lifecycle engine.** DI builds participants and hands them over; it has no
    `initialize`, `start`, `stop`, `abort`, `refresh` or state machine, and it does not implement
    `LifecycleParticipant`. The chain is `Configuration → application assembly → DI → application services →

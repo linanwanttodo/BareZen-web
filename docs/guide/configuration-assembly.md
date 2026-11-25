@@ -327,9 +327,9 @@ factory 参数 `services` 是临时解析视图：
 | `factory` 创建但不实现 `AutoCloseable` | 无自动 close | 注册到 orchestrator 后由 orchestrator 驱动 |
 | 普通非参与者资源 | 按创建所有权处理 | 不适用 |
 
-`ServiceAssembly.close()` 按创建逆序关闭自己创建的 `AutoCloseable`。一个关闭抛出 `Exception` 时不会跳过后续对象；首个失败作为 `AssemblyException` 的 cause，其余失败作为 suppressed 保留。重复 close 不会重复释放。
+`ServiceAssembly.close()` 按创建逆序关闭自己创建的 `AutoCloseable`。一个关闭抛出 `Exception` 或 `Error` 时不会跳过后续对象；首个失败作为 `AssemblyException` 的 cause，其余失败作为 suppressed 保留。重复 close 不会重复释放。
 
-这个“继续尝试”的承诺不覆盖 `Error`：`releaseAll` 只捕获 `Exception`，若 `close()` 抛 `Error`，剩余对象不会被释放。failed build 的清理同理，该 Error 还会中断原构建失败的 suppressed 汇总流程。assembly 也没有关闭超时，factory 在返回对象前取得的资源无法由 owned 列表回收。成功 close 后实例表不会清空，`require()`/`find()` 仍可能返回已经关闭的对象；当前测试没有把 close 后的查询定义为受支持行为，应用必须在关闭后停止使用 assembly。
+这个“继续尝试”的承诺覆盖 `Exception` 与 `Error`：`releaseAll` 逐个收集两者，failed build 的清理也不会用 close 的 `Error` 替换原 factory 异常。assembly 没有关闭超时，factory 在返回对象前取得的资源无法由 owned 列表回收。成功 close 后实例表不会清空，`require()`/`find()` 仍可能返回已经关闭的对象；当前测试没有把 close 后的查询定义为受支持行为，应用必须在关闭后停止使用 assembly。
 
 `build()` 失败时，assembly 会先逆序关闭已经创建的对象，再把构建失败抛给调用方。调用方注册的 `instance` 不会被关闭。清理失败不会替换真正的构建失败，而是附加到失败上。
 

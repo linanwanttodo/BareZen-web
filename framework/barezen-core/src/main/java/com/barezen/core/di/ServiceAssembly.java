@@ -102,7 +102,7 @@ public final class ServiceAssembly implements Services, AutoCloseable {
    * place that knows both (ADR-0015).
    *
    * <p>Best effort, in the shape the lifecycle engine uses for shutdown: every instance is attempted even if one
-   * throws, and the failures are reported together once the rest have been tried.
+   * throws {@code Exception} or {@code Error}, and the failures are reported together once the rest have been tried.
    *
    * @throws AssemblyException if any instance failed to close; the first failure is the cause and the remainder
    *     are attached as suppressed
@@ -113,7 +113,7 @@ public final class ServiceAssembly implements Services, AutoCloseable {
       return;
     }
     closed = true;
-    List<Exception> failures = releaseAll(owned);
+    List<Throwable> failures = releaseAll(owned);
     if (!failures.isEmpty()) {
       throw aggregate(failures);
     }
@@ -126,13 +126,13 @@ public final class ServiceAssembly implements Services, AutoCloseable {
    *
    * @return the failures, in the order they happened
    */
-  private static List<Exception> releaseAll(List<Object> created) {
-    List<Exception> failures = new ArrayList<>();
+  private static List<Throwable> releaseAll(List<Object> created) {
+    List<Throwable> failures = new ArrayList<>();
     for (int i = created.size() - 1; i >= 0; i--) {
       if (created.get(i) instanceof AutoCloseable closeable) {
         try {
           closeable.close();
-        } catch (Exception e) {
+        } catch (Exception | Error e) {
           failures.add(e);
         }
       }
@@ -141,7 +141,7 @@ public final class ServiceAssembly implements Services, AutoCloseable {
   }
 
   /** One exception carrying the whole set: the first as the cause, the rest as suppressed. */
-  private static AssemblyException aggregate(List<Exception> failures) {
+  private static AssemblyException aggregate(List<Throwable> failures) {
     AssemblyException failure = new AssemblyException(
         failures.size() + " instance(s) created by this assembly failed to close", failures.get(0));
     for (int i = 1; i < failures.size(); i++) {
@@ -232,7 +232,7 @@ public final class ServiceAssembly implements Services, AutoCloseable {
       try {
         resolution.createEverything();
       } catch (RuntimeException | Error failure) {
-        List<Exception> cleanupFailures = ServiceAssembly.releaseAll(resolution.owned());
+        List<Throwable> cleanupFailures = ServiceAssembly.releaseAll(resolution.owned());
         if (!cleanupFailures.isEmpty()) {
           AssemblyException cleanup = ServiceAssembly.aggregate(cleanupFailures);
           cleanup.addSuppressed(failure);

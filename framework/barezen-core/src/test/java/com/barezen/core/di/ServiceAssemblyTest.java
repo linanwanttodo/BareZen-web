@@ -366,6 +366,37 @@ class ServiceAssemblyTest {
     }
 
     @Test
+    @DisplayName("an Error during failed-build cleanup does not replace the factory failure or skip cleanup")
+    void aCleanupErrorIsReportedAlongsideTheBuildFailure() {
+      AssertionError original = new AssertionError("cannot build the session");
+
+      Throwable thrown;
+      try {
+        ServiceAssembly.builder()
+            .factory(Resource.class, services -> new Resource("behind it"))
+            .factory(AutoCloseable.class, services -> (AutoCloseable) () -> {
+              throw new AssertionError("pool will not drain");
+            })
+            .factory(Statement.class, services -> {
+              throw original;
+            })
+            .build();
+        throw new AssertionError("expected the build to fail");
+      } catch (Throwable failure) {
+        thrown = failure;
+      }
+
+      assertThat(thrown).isSameAs(original);
+      assertThat(thrown.getSuppressed()).hasSize(1);
+      Throwable cleanup = thrown.getSuppressed()[0];
+      assertThat(cleanup).isInstanceOf(AssemblyException.class)
+          .hasMessageContaining("1 instance(s)")
+          .hasCauseInstanceOf(AssertionError.class);
+      assertThat(cleanup.getSuppressed()).containsExactly(original);
+      assertThat(events).containsExactly("create behind it", "close behind it");
+    }
+
+    @Test
     @DisplayName("a release failure during a failed build is attached and does not replace the real failure")
     void aCleanupFailureIsReportedAlongsideTheBuildFailure() {
       IllegalStateException original = new IllegalStateException("cannot build the session");
@@ -533,6 +564,26 @@ class ServiceAssemblyTest {
           .isInstanceOf(AssemblyException.class)
           .hasMessageContaining("failed to close")
           .hasCauseInstanceOf(IllegalStateException.class);
+
+      assertThat(events).containsExactly("close behind it");
+    }
+
+    @Test
+    @DisplayName("an Error during release does not skip the remaining objects")
+    void everyOwnedInstanceIsAttemptedEvenWhenOneThrowsError() {
+      AutoCloseable broken = () -> {
+        throw new AssertionError("will not drain");
+      };
+      ServiceAssembly assembly = ServiceAssembly.builder()
+          .factory(Resource.class, services -> new Resource("behind it"))
+          .factory(AutoCloseable.class, services -> broken)
+          .build();
+      events.clear();
+
+      assertThatThrownBy(assembly::close)
+          .isInstanceOf(AssemblyException.class)
+          .hasMessageContaining("failed to close")
+          .hasCauseInstanceOf(AssertionError.class);
 
       assertThat(events).containsExactly("close behind it");
     }
