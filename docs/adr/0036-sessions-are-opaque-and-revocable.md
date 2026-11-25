@@ -79,12 +79,14 @@ credential half). The value is random, not sequential, so a captured token revea
 ## Testing
 
 `SessionTokenTest` (5): expiry arithmetic against a fixed clock, the expiry boundary (at the instant it *is* expired),
-refusal of zero/negative duration and null clock, `toString` hiding the value. `SessionStoreTest` (13): create/lookup
+refusal of zero/negative duration and null clock, `toString` hiding the value. `SessionStoreTest` (14): create/lookup
 round trip, 64-token uniqueness, unknown-token empty, expired-not-found *and* retired (size drops), the expiry
 boundary, invalidate idempotence, rotate-replaces-and-kills-the-old, rotate-of-expired returning empty without
-creating a replacement, rotate-of-unknown, clear, the null/argument refusals, `standard()` on the system clock, and
-the `Session` record's null refusals. Mutations SM9 (expired session stays in the map) and SM10 (rotate copies
-instead of replacing) each killed by a single named test, restored byte-identical.
+creating a replacement, a failed rotation preserving the original session, rotate-of-unknown, clear, the null/argument
+refusals, `standard()` on the system clock, and the `Session` record's null refusals. The current rotation creates the
+replacement before conditionally removing the old key; it is failure-safe but still not a linearizable two-key
+operation. Mutations SM9 (expired session stays in the map) and SM10 (rotate copies instead of replacing) each killed
+by a single named test, restored byte-identical.
 
 ## Non-goals
 

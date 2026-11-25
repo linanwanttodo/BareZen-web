@@ -111,7 +111,7 @@ public final class SessionStore {
   }
 
   /**
-   * Rotate a session: invalidate the old token and create a new one for the same principal.
+   * Rotate a session: create a new token for the same principal, then conditionally invalidate the old one.
    *
    * @param value the token value to rotate, never null
    * @param duration how long the new session is valid, must be positive
@@ -119,14 +119,20 @@ public final class SessionStore {
    */
   public Optional<Session> rotate(String value, Duration duration) {
     Objects.requireNonNull(value, "the token value to rotate; without one there is nothing to rotate");
-    Session old = sessions.remove(value);
+    Session old = sessions.get(value);
     if (old == null) {
       return Optional.empty();
     }
     if (old.token().isExpired(clock.instant())) {
+      sessions.remove(value, old);
       return Optional.empty();
     }
-    return Optional.of(create(old.principal(), duration));
+    Session rotated = create(old.principal(), duration);
+    if (!sessions.remove(value, old)) {
+      sessions.remove(rotated.token().value(), rotated);
+      return Optional.empty();
+    }
+    return Optional.of(rotated);
   }
 
   /**

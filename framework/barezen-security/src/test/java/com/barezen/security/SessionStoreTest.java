@@ -3,6 +3,7 @@ package com.barezen.security;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -133,6 +134,29 @@ class SessionStoreTest {
 
     assertThat(store.rotate(expired.token().value(), Duration.ofMinutes(30))).isEmpty();
     assertThat(store.size()).isZero();
+  }
+
+  @Test
+  @DisplayName("a failed rotation keeps the original session instead of losing it")
+  void failedRotationKeepsOriginal() {
+    SecureRandom failing = new SecureRandom(new byte[32]) {
+      private int calls;
+
+      @Override
+      public void nextBytes(byte[] bytes) {
+        if (++calls > 1) {
+          throw new IllegalStateException("random source failed");
+        }
+        super.nextBytes(bytes);
+      }
+    };
+    SessionStore store = SessionStore.of(new MutableClock(T0), failing);
+    SessionStore.Session original = store.create(ADA, Duration.ofMinutes(30));
+
+    assertThatThrownBy(() -> store.rotate(original.token().value(), Duration.ofMinutes(30)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(store.lookup(original.token().value())).contains(original);
+    assertThat(store.size()).isEqualTo(1);
   }
 
   @Test

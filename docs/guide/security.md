@@ -177,7 +177,7 @@ token 是 32 字节随机数经 Base64url 无填充编码得到的字符串，�
 - `create(principal, duration)` 创建会话，duration 必须为正。
 - `lookup(value)` 返回未过期会话；未知或已过期返回空。过期记录在查找时删除。
 - `invalidate(value)` 立即删除记录；存在返回 true，不存在返回 false。
-- `rotate(value, duration)` 删除旧记录；旧 token 不存在或已过期时返回空，未过期时才为同一 principal 创建新 token。
+- `rotate(value, duration)` 先为同一 principal 创建新 token，再条件删除旧记录；旧 token 不存在或已过期时返回空。创建失败时旧会话保留，并发轮换失败时多余的新会话会被清理。
 - `SessionToken.isExpired(now)` 在 `expiresAt <= now` 时为 true。
 
 过期清理是惰性的：只对经过 `lookup` 的记录生效，`size()` 也可能包含尚未被查找的过期记录。`rotate` 现在也会检查到期时间：它删除过期记录并返回空，不会把过期 token 续成新会话。
