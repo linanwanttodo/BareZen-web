@@ -74,7 +74,14 @@ public final class Audit {
   }
 
   private static String abbreviate(String subject) {
-    return subject.length() <= SUBJECT_LIMIT ? subject : subject.substring(0, SUBJECT_LIMIT - 3) + "...";
+    if (subject.length() <= SUBJECT_LIMIT) {
+      return subject;
+    }
+    int end = SUBJECT_LIMIT - 3;
+    if (Character.isHighSurrogate(subject.charAt(end - 1)) && Character.isLowSurrogate(subject.charAt(end))) {
+      end--;
+    }
+    return subject.substring(0, end) + "...";
   }
 
   private static String describe(Recorded event) {
