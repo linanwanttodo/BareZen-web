@@ -12,7 +12,10 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -156,6 +159,47 @@ class SessionStoreTest {
     assertThatThrownBy(() -> store.rotate(original.token().value(), Duration.ofMinutes(30)))
         .isInstanceOf(IllegalStateException.class);
     assertThat(store.lookup(original.token().value())).contains(original);
+    assertThat(store.size()).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("concurrent rotations leave exactly one winner and one stored session")
+  void concurrentRotationsLeaveOneWinner() throws InterruptedException {
+    MutableClock clock = new MutableClock(T0);
+    SessionStore store = storeAt(clock);
+    SessionStore.Session original = store.create(ADA, Duration.ofMinutes(30));
+    CountDownLatch start = new CountDownLatch(1);
+    AtomicReference<Optional<SessionStore.Session>> first = new AtomicReference<>();
+    AtomicReference<Optional<SessionStore.Session>> second = new AtomicReference<>();
+    Thread left = new Thread(() -> {
+      try {
+        start.await();
+        first.set(store.rotate(original.token().value(), Duration.ofMinutes(30)));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    });
+    Thread right = new Thread(() -> {
+      try {
+        start.await();
+        second.set(store.rotate(original.token().value(), Duration.ofMinutes(30)));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    });
+
+    left.start();
+    right.start();
+    start.countDown();
+    left.join();
+    right.join();
+
+    Optional<SessionStore.Session> one = first.get();
+    Optional<SessionStore.Session> two = second.get();
+    assertThat((one.isPresent() ? 1 : 0) + (two.isPresent() ? 1 : 0)).isEqualTo(1);
+    SessionStore.Session winner = (one.isPresent() ? one : two).orElseThrow();
+    assertThat(store.lookup(original.token().value())).isEmpty();
+    assertThat(store.lookup(winner.token().value())).contains(winner);
     assertThat(store.size()).isEqualTo(1);
   }
 
