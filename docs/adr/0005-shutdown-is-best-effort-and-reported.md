@@ -16,7 +16,9 @@ where a thrown exception is printed by the default handler and otherwise discard
 
 `stop()` calls `stop()` on every entered participant in reverse order, catching `RuntimeException` and `Error`
 from each, logging it, and collecting it as a `ShutdownFailure(id, cause)`. The method itself never throws; the
-outcome is returned as a `ShutdownReport` and cached, so repeated calls return the same report.
+outcome is returned as a `ShutdownReport` and cached, so repeated calls return the same report. Amended on
+2026-11-25: removing the JVM shutdown hook is also best effort. The JVM may refuse removal once shutdown is in
+progress; that failure is logged and cannot skip participant or thread-provider cleanup.
 
 ## Consequences
 

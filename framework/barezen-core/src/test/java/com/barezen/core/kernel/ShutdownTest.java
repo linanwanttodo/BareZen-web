@@ -3,9 +3,13 @@ package com.barezen.core.kernel;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.barezen.core.concurrent.ThreadPolicy;
+import com.barezen.core.concurrent.ThreadProvider;
 import com.barezen.core.runtime.RuntimeCapabilities;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -92,6 +96,62 @@ class ShutdownTest {
     app.stop();
     assertThat(registry.removedCount()).isEqualTo(1);
     assertThat(events).containsExactly("a.initialize", "a.start", "a.stop");
+  }
+
+  @Test
+  @DisplayName("a hook removal failure during JVM shutdown cannot skip participant or provider cleanup")
+  void hookRemovalFailureDoesNotInterruptShutdown() {
+    List<String> events = new ArrayList<>();
+    AtomicBoolean providerShutDown = new AtomicBoolean();
+    ThreadProvider observing = new ThreadProvider() {
+      @Override
+      public Kind kind() {
+        return Kind.PLATFORM;
+      }
+
+      @Override
+      public String name() {
+        return "observing";
+      }
+
+      @Override
+      public boolean preferred() {
+        return true;
+      }
+
+      @Override
+      public ExecutorService newBoundedExecutor(int maxConcurrency, String namePrefix) {
+        return Executors.newFixedThreadPool(maxConcurrency);
+      }
+
+      @Override
+      public ExecutorService newUnboundedExecutor(String namePrefix) {
+        return Executors.newCachedThreadPool();
+      }
+
+      @Override
+      public void close() {
+        providerShutDown.set(true);
+        events.add("provider.close");
+      }
+    };
+    CapturingShutdownHookRegistry registry = new CapturingShutdownHookRegistry(
+        new IllegalStateException("shutdown in progress"));
+    LifecycleOrchestrator app = LifecycleOrchestrator.builder()
+        .threads(observing)
+        .runtimeCapabilities(new RuntimeCapabilities(17, false, "test"))
+        .shutdownHookRegistry(registry)
+        .register("a", new RecordingParticipant("a", events))
+        .build();
+    app.start();
+    events.clear();
+
+    ShutdownReport report = app.stop();
+
+    assertThat(report.clean()).isTrue();
+    assertThat(app.state()).isEqualTo(ApplicationState.STOPPED);
+    assertThat(events).containsExactly("a.stop", "provider.close");
+    assertThat(providerShutDown).isTrue();
   }
 
   @Test

@@ -6,7 +6,7 @@
 
 检查点不是再写一套新代码，而是运行仓库已经存在的 LifecycleOrchestratorTest、LifecycleRollbackTest 和 ShutdownTest，并解释每组断言为什么存在。只有这样，下一章加入 HTTP 契约时，生命周期行为仍然是稳定的底座，而不是随适配器变化而漂移的约定。
 
-本章也明确测试的边界。26 项绿色测试证明当前参与者生命周期行为，包括启动失败回滚后关闭 ThreadProvider；它不自动证明任意业务资源释放成功。源码事实、测试覆盖和文档承诺三者必须分别陈述。
+本章也明确测试的边界。27 项绿色测试证明当前参与者生命周期行为，包括启动失败回滚后关闭 ThreadProvider，以及 JVM 关闭期间 hook 移除失败不中断清理；它不自动证明任意业务资源释放成功。源码事实、测试覆盖和文档承诺三者必须分别陈述。
 
 ## 先想清楚再写
 
@@ -24,7 +24,7 @@ hook 测试使用 CapturingShutdownHookRegistry 记录 add/remove 并手动 fire
 
 - [LifecycleOrchestratorTest.java](../../framework/barezen-core/src/test/java/com/barezen/core/kernel/LifecycleOrchestratorTest.java)：11 项，覆盖两阶段顺序、状态、幂等、并发、重入和提供者关闭顺序。
 - [LifecycleRollbackTest.java](../../framework/barezen-core/src/test/java/com/barezen/core/kernel/LifecycleRollbackTest.java)：8 项，覆盖 abort/stop 选择、互斥、原始异常、多失败回滚与启动失败关闭 provider。
-- [ShutdownTest.java](../../framework/barezen-core/src/test/java/com/barezen/core/kernel/ShutdownTest.java)：7 项，覆盖最佳努力停机、报告、hook 安装/移除/触发与失败启动。
+- [ShutdownTest.java](../../framework/barezen-core/src/test/java/com/barezen/core/kernel/ShutdownTest.java)：8 项，覆盖最佳努力停机、报告、hook 安装/移除/触发、移除失败继续清理与失败启动不安装。
 - [RecordingParticipant.java](../../framework/barezen-core/src/test/java/com/barezen/core/kernel/RecordingParticipant.java)：共享事件日志和失败注入，只存在于测试源码。
 - [ShutdownHookRegistry.java](../../framework/barezen-core/src/main/java/com/barezen/core/kernel/ShutdownHookRegistry.java)：包私有替换点，避免单元测试操作真实测试 JVM 的 hook。
 - [LifecycleOrchestrator.java:160](../../framework/barezen-core/src/main/java/com/barezen/core/kernel/LifecycleOrchestrator.java#L160)：正常 stop 的实际入口与线程提供者关闭位置。
@@ -45,12 +45,13 @@ hook 测试使用 CapturingShutdownHookRegistry 记录 add/remove 并手动 fire
 | 清理失败不覆盖启动原因 | 是，cause 与 rollbackFailures |
 | 正常停止关闭 owned ThreadProvider | 是，观察者实现 |
 | 启动失败关闭 owned ThreadProvider | 是，回滚后 provider.close 且 stop 不重复 |
+| hook 移除失败不中断停机 | 是，参与者与 provider 仍按顺序释放 |
 | 任意业务 stop 都真正释放资源 | 否，框架只能尝试并报告 |
 | 多实例共享生命周期状态 | 否，orchestrator 是单实例状态机 |
 
-读检查点结果时还要把“测试总数”和“测试类 XML 数量”分开。JUnit 嵌套类会在 Surefire 中形成独立 XML，外层类文件可能显示零项；必须按类名前缀聚合，才能得到这里的 11、8、7。若某个类没有运行，应先看 `-Dtest` 是否连嵌套类一起选中，再检查 XML 中的 failures 与 errors，不能把“文件存在”当成“断言执行”。反过来，总数正确也不代表每个行为都被覆盖，上一表列出的“否”仍然是源码审阅后留下的边界。
+读检查点结果时还要把“测试总数”和“测试类 XML 数量”分开。JUnit 嵌套类会在 Surefire 中形成独立 XML，外层类文件可能显示零项；必须按类名前缀聚合，才能得到这里的 11、8、8。若某个类没有运行，应先看 `-Dtest` 是否连嵌套类一起选中，再检查 XML 中的 failures 与 errors，不能把“文件存在”当成“断言执行”。反过来，总数正确也不代表每个行为都被覆盖，上一表列出的“否”仍然是源码审阅后留下的边界。
 
-失败诊断也应从事件序列开始。顺序不符时，先找到第一个偏离预期的事件，再判断是实现重复回调、注册顺序变化，还是清理阶段选错；不要只把异常消息复制到问题描述。停机报告非 clean 时，要逐个查看 participant id 与 cause，并确认后续参与者仍被尝试。26 项全部通过证明的是这些可重复场景，而不是任意线程交错、任意业务资源或所有宿主停机策略。
+失败诊断也应从事件序列开始。顺序不符时，先找到第一个偏离预期的事件，再判断是实现重复回调、注册顺序变化，还是清理阶段选错；不要只把异常消息复制到问题描述。停机报告非 clean 时，要逐个查看 participant id 与 cause，并确认后续参与者仍被尝试。27 项全部通过证明的是这些可重复场景，而不是任意线程交错、任意业务资源或所有宿主停机策略。
 
 对新增断言还应做反向检查：在隔离实验中故意把 releaseEntered 的 removeLast 改成 removeFirst，观察逆序测试是否变红；故意把 initialize 失败改成 stop，观察 abort 互斥测试是否变红。不要在当前仓库或用户 WIP 上做破坏性修改；这里说明的是验证方法，不是本章实际执行过的破坏实验。
 
@@ -69,7 +70,7 @@ mvn -o -B -ntp -pl framework/barezen-core -am test \
 本章写作时实际输出：
 
 ```text
-Tests run: 26, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 27, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -79,11 +80,11 @@ BUILD SUCCESS
 | --- | ---: | --- |
 | LifecycleOrchestratorTest | 11 | 两阶段顺序、六态转换、并发 start、重入 stop、provider 最后关闭 |
 | LifecycleRollbackTest | 8 | initialize abort、start stop、互斥、entered 清空、原始异常与 suppressed、启动失败关闭 provider |
-| ShutdownTest | 7 | 所有参与者均尝试、stop 报告、hook 生命周期与失败启动不安装 |
-| 合计 | 26 | 0 failures，0 errors |
+| ShutdownTest | 8 | 所有参与者均尝试、stop 报告、hook 生命周期、hook 移除失败继续清理与失败启动不安装 |
+| 合计 | 27 | 0 failures，0 errors |
 
-如果只想验证顺序与回滚，可去掉 ShutdownTest；但第 3 章交付应以完整 26 项为准。后续改动若导致失败，先读具体断言和事件序列，不要把失败统称为“生命周期不稳定”。已知其他模块的 JDK 差异问题不应通过修改本模块源码来掩盖，也不影响本章单独运行。
+如果只想验证顺序与回滚，可去掉 ShutdownTest；但第 3 章交付应以完整 27 项为准。后续改动若导致失败，先读具体断言和事件序列，不要把失败统称为“生命周期不稳定”。已知其他模块的 JDK 差异问题不应通过修改本模块源码来掩盖，也不影响本章单独运行。
 
 ## 此刻的代码长什么样
 
-第 3 章完成：你有六态状态机、固定注册顺序、两阶段全局启动、参与者级失败回滚、正常停机报告和一套 26 项通过的检查点。下一章开始定义 HTTP 契约，先让 Request、Response 与 Headers 不依赖 JDK 或 Servlet，再把生命周期中的 HTTP 参与者接到真实适配器上。
+第 3 章完成：你有六态状态机、固定注册顺序、两阶段全局启动、参与者级失败回滚、正常停机报告和一套 27 项通过的检查点。下一章开始定义 HTTP 契约，先让 Request、Response 与 Headers 不依赖 JDK 或 Servlet，再把生命周期中的 HTTP 参与者接到真实适配器上。

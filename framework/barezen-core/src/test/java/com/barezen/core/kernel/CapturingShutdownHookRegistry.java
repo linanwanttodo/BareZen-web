@@ -14,6 +14,15 @@ class CapturingShutdownHookRegistry implements ShutdownHookRegistry {
 
   private final List<Hook> added = new ArrayList<>();
   private final List<Hook> removed = new ArrayList<>();
+  private final IllegalStateException removeFailure;
+
+  CapturingShutdownHookRegistry() {
+    this(null);
+  }
+
+  CapturingShutdownHookRegistry(IllegalStateException removeFailure) {
+    this.removeFailure = removeFailure;
+  }
 
   @Override
   public Thread add(String name, Runnable onShutdown) {
@@ -24,6 +33,9 @@ class CapturingShutdownHookRegistry implements ShutdownHookRegistry {
 
   @Override
   public void remove(Thread hook) {
+    if (removeFailure != null) {
+      throw removeFailure;
+    }
     added.stream().filter(h -> h.thread() == hook).findFirst().ifPresent(removed::add);
   }
 

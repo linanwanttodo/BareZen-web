@@ -282,8 +282,15 @@ public final class LifecycleOrchestrator implements AutoCloseable {
 
   private void removeShutdownHook() {
     if (shutdownHook != null) {
-      hookRegistry.remove(shutdownHook);
-      shutdownHook = null;
+      try {
+        hookRegistry.remove(shutdownHook);
+      } catch (RuntimeException | Error removalFailed) {
+        // The JVM refuses removeShutdownHook once shutdown is in progress. That is expected on the hook's own
+        // path and must not prevent participant cleanup or turn stop() into a throwing operation.
+        log.debug("shutdown hook could not be removed; continuing participant cleanup", removalFailed);
+      } finally {
+        shutdownHook = null;
+      }
     }
   }
 
