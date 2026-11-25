@@ -4,9 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.barezen.core.concurrent.ThreadPolicy;
+import com.barezen.core.concurrent.ThreadProvider;
 import com.barezen.core.runtime.RuntimeCapabilities;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -65,6 +69,59 @@ class LifecycleRollbackTest {
         "a.start", "b.start", "c.stop", "b.stop", "a.stop");
     // c was initialized but never started: stop() must still release it, and nothing gets abort().
     assertThat(events).doesNotContain("b.abort", "c.abort");
+  }
+
+  @Test
+  @DisplayName("startup failure closes the thread provider after participant rollback")
+  void startupFailureClosesThreadProviderAfterRollback() {
+    List<String> events = new ArrayList<>();
+    AtomicBoolean providerShutDown = new AtomicBoolean();
+    ThreadProvider observing = new ThreadProvider() {
+      @Override
+      public Kind kind() {
+        return Kind.PLATFORM;
+      }
+
+      @Override
+      public String name() {
+        return "observing";
+      }
+
+      @Override
+      public boolean preferred() {
+        return true;
+      }
+
+      @Override
+      public ExecutorService newBoundedExecutor(int maxConcurrency, String namePrefix) {
+        return Executors.newFixedThreadPool(maxConcurrency);
+      }
+
+      @Override
+      public ExecutorService newUnboundedExecutor(String namePrefix) {
+        return Executors.newCachedThreadPool();
+      }
+
+      @Override
+      public void close() {
+        providerShutDown.set(true);
+        events.add("provider.close");
+      }
+    };
+    LifecycleOrchestrator app = builder()
+        .threads(observing)
+        .register("a", new RecordingParticipant("a", events))
+        .register("b", new RecordingParticipant("b", events).failingStart())
+        .build();
+
+    assertThatThrownBy(app::start).isInstanceOf(StartupException.class);
+
+    assertThat(events).containsExactly(
+        "a.initialize", "b.initialize", "a.start", "b.start", "b.stop", "a.stop", "provider.close");
+    assertThat(providerShutDown).isTrue();
+    app.stop();
+    assertThat(events).containsExactly(
+        "a.initialize", "b.initialize", "a.start", "b.start", "b.stop", "a.stop", "provider.close");
   }
 
   @Test

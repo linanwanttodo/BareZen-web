@@ -41,7 +41,7 @@
 
 你应能解释为什么没有 INITIALIZED 状态，为什么 initialize 中不能绑定对外端口，为什么注册顺序比 priority 数字更可靠。你应能根据一次启动失败准确说出每个参与者会收到 stop 还是 abort，为什么失败参与者后面的对象根本不会进入回滚集合，以及为什么 stop 必须能处理“只 initialize、从未 start”的对象。
 
-你还应能区分三种结果：StartupException 表示启动失败且参与者回滚已尝试；ShutdownReport 表示正常停机有清理噪声；LifecycleException 表示状态转换不合法。最后，你知道当前 start 失败分支释放参与者，但没有调用 threads.close()，FAILED 上的 stop 也不再次关闭提供者，因此不能把参与者回滚保证扩大成所有线程资源都已关闭的承诺。
+你还应能区分三种结果：StartupException 表示启动失败且参与者回滚已尝试；ShutdownReport 表示正常停机有清理噪声；LifecycleException 表示状态转换不合法。启动失败时，orchestrator 先逆序释放参与者，再关闭 ThreadProvider；FAILED 上的 stop 只返回缓存报告，不会重复关闭。
 
 ## 不这样设计会坏掉什么
 

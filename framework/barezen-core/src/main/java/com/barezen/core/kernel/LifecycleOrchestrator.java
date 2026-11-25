@@ -134,6 +134,7 @@ public final class LifecycleOrchestrator implements AutoCloseable {
           rollbackFailures.add(0, new ShutdownFailure(failure.participantId(), failure.abortFailure()));
         }
         lastReport = new ShutdownReport(rollbackFailures);
+        threads.close();
         state = ApplicationState.FAILED;
         throw new StartupException(failure.participantId(), failure.phase(), failure.cause(),
             rollbackFailures);

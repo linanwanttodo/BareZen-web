@@ -18,7 +18,9 @@ cleanup error replaced it.
    `stop()` in reverse order. The participant whose `initialize()` threw receives `abort()` **instead**, because
    at that moment it is in a half-built state that its own `stop()` was never written to handle.
 2. After a failed `start()` the entered set is empty and the state is `FAILED`. There is nothing left for the
-   caller to release, so calling `stop()` afterwards is legal and a no-op.
+   caller to release, so calling `stop()` afterwards is legal and a no-op. Amended on 2026-11-25: the owned
+   `ThreadProvider` is closed after participant rollback and before `FAILED` is published, so startup failure no
+   longer leaves its executors open.
 3. The reported exception is `StartupException` carrying the original cause, the failed participant id and the
    phase (`INITIALIZE` or `START`). Rollback failures never replace it: they are attached as suppressed
    exceptions and exposed through `rollbackFailures()`, and the state is still `FAILED`.
