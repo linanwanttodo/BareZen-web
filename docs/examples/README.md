@@ -50,7 +50,7 @@ endpoint. The recorded output of the eight runs:
 | `database.DatabaseExample` | one migration applied, two rows after a committed transaction, a rolled-back insert leaves the count at 2 |
 | `plugins.PluginExample` | announced on the classpath `[reports]`, assembled order `[user, openapi, auth, reports]`, startup order `[user, openapi, auth, reports]`, the table `Router[GET /health, GET /reports/status]` with the second route contributed by the discovered plugin, a login authenticates as `ada`, a bad password issues no session |
 | `openapi.OpenApiExample` | a 1201-byte document, served `200 application/json` at `/openapi.json` |
-| `staticcontent.StaticFileExample` | disk files show `200`, `304` and `HEAD` framing; `GET /classpath.txt -> 200, body "hello from the example classpath"` proves a packaged resource through the public API; an unregistered path `-> 404, body "Not Found"` |
+| `staticcontent.StaticFileExample` | disk files show `200`, `304` and `HEAD` framing; `GET /classpath.txt -> 200, body "hello from the example classpath\n"` proves a packaged resource through the public API; an unregistered path `-> 404, body "Not Found"` |
 
 ## What each example demonstrates
 
