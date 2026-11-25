@@ -66,16 +66,16 @@ return MessageDigest.isEqual(actual, expected);
 
 ## 怎么确认这一步没造错
 
-运行十六项哈希测试，覆盖格式、随机盐、正确与错误密码、损坏字段、非正迭代、跨迭代数验证、构造拒绝和脱敏：
+运行十七项哈希测试，覆盖格式、随机盐、正确与错误密码、损坏字段、非正与过高迭代、跨迭代数验证、构造拒绝和脱敏：
 
 ```bash
 mvn -o -B -ntp -pl framework/barezen-security -am test \
   -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PasswordHasherTest
 ```
 
-预期 `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0`，最终 `BUILD SUCCESS`；`PasswordHasherTest$Hash` 为 3 项、`$Verify` 为 9 项、`$Construction` 为 4 项。上游 `ClassMajorContractTest` 会额外报告 `unique-majors=[61]`，说明安全产物仍符合字节码 17 基线，而不是绑定构建机 JDK。
+预期 `Tests run: 17, Failures: 0, Errors: 0, Skipped: 0`，最终 `BUILD SUCCESS`；`PasswordHasherTest$Hash` 为 3 项、`$Verify` 为 10 项、`$Construction` 为 4 项。上游 `ClassMajorContractTest` 会额外报告 `unique-majors=[61]`，说明安全产物仍符合字节码 17 基线，而不是绑定构建机 JDK。
 
-测试通过不等于每个恶意编码都安全。当前 `verify` 会拒绝非数字、零和负数的迭代字段，避免它们进入 `PBEKeySpec` 后抛出 `IllegalArgumentException`。这修复了损坏记录的异常路径，但没有为迭代次数设置上限，也没有消除账户枚举 timing；这两类边界仍需独立威胁建模与验证。
+测试通过不等于每个恶意编码都安全。当前 `verify` 会拒绝非数字、零、负数以及超过 2,000,000 次的迭代字段：前三种避免 `PBEKeySpec` 异常，过高次数避免损坏记录把一次登录变成无界 CPU 工作。账户枚举 timing 仍需独立威胁建模与验证，迭代上限不能替代它。
 
 ## 此刻的代码长什么样
 

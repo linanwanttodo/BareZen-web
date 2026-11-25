@@ -96,6 +96,13 @@ class PasswordHasherTest {
     }
 
     @Test
+    @DisplayName("rejects an excessive iteration count without starting an unbounded derivation")
+    void rejectsExcessiveIterations() {
+      String encoded = HASHER.hash("pw");
+      assertThat(HASHER.verify("pw", encoded.replace("$1000$", "$2147483647$"))).isFalse();
+    }
+
+    @Test
     @DisplayName("rejects corrupted salt or derived key: undecodable or wrong-length Base64")
     void rejectsCorruptedMaterial() {
       String encoded = HASHER.hash("pw");
@@ -131,6 +138,7 @@ class PasswordHasherTest {
     void refusesWeakIterations() {
       assertThatIllegalArgumentException().isThrownBy(() -> PasswordHasher.of(0, new SecureRandom()));
       assertThatIllegalArgumentException().isThrownBy(() -> PasswordHasher.of(-1, new SecureRandom()));
+      assertThatIllegalArgumentException().isThrownBy(() -> PasswordHasher.of(2_000_001, new SecureRandom()));
     }
 
     @Test

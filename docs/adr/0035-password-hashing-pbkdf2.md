@@ -45,7 +45,9 @@ password, and a wrong password is not a server error. Comparison uses `MessageDi
 the JVM), so the verification path does not leak how many leading bytes matched.
 
 `standard()` gives the secure default; `of(iterations, random)` exists so tests can run fast (1,000 iterations) and
-deterministically, and refuses a non-positive count (mutation SM11 guards this). The class is `final` — it is a
+deterministically, and refuses a non-positive count (mutation SM11 guards this). Amended on 2026-11-25 with a
+2,000,000-iteration ceiling: construction refuses a larger count and verification rejects a larger stored count before
+derivation, so a corrupted record cannot turn one login into unbounded CPU work. The class is `final` — it is a
 concrete safe default, not an extension point; an application that wants Argon2 implements `Authentication` against
 its own store rather than subclassing this one.
 
@@ -66,10 +68,11 @@ policy is a registration concern, not a hashing concern.
 
 ## Testing
 
-`PasswordHasherTest` (15 tests across three @Nested groups): format and field lengths, salt uniqueness across two
+`PasswordHasherTest` (15 tests in this phase; 17 current): format and field lengths, salt uniqueness across two
 hashes of the same password, accept-right/reject-wrong, malformed/unknown-algorithm/corrupt-iterations/corrupt-salt-or-
 key all verify false without throwing, cross-hashers verification at different iteration counts, null and
-non-positive-iteration refusals, `standard()` = 600,000, and `toString` disclosure. Mutations SM11 (iterations `<=0`
+non-positive-iteration refusals, `standard()` = 600,000, and `toString` disclosure. The current suite also rejects an
+excessive stored count before derivation and refuses an excessive construction count. Mutations SM11 (iterations `<=0`
 → `<0`) and SM12 (no salt randomness) each killed by a single named test, restored byte-identical.
 
 ## Non-goals

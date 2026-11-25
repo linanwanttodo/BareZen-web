@@ -42,6 +42,9 @@ public final class PasswordHasher {
   /** Derived key length in bytes: 32 bytes = 256 bits, the HMAC-SHA-256 output size. */
   static final int KEY_LENGTH = 32;
 
+  /** Maximum accepted work factor: high enough for future increases, bounded enough to reject corrupted records. */
+  static final int MAX_ITERATIONS = 2_000_000;
+
   private final int iterations;
   private final SecureRandom random;
 
@@ -70,6 +73,10 @@ public final class PasswordHasher {
     if (iterations <= 0) {
       throw new IllegalArgumentException(
           "iterations must be positive; a zero or negative count makes the hash deterministic and fast");
+    }
+    if (iterations > MAX_ITERATIONS) {
+      throw new IllegalArgumentException("iterations must not exceed " + MAX_ITERATIONS
+          + "; a larger count lets a corrupted record turn password verification into unbounded work");
     }
     Objects.requireNonNull(random, "the random source; a password hasher with no randomness is a digest");
     return new PasswordHasher(iterations, random);
@@ -116,7 +123,7 @@ public final class PasswordHasher {
     } catch (NumberFormatException e) {
       return false;
     }
-    if (iterations <= 0) {
+    if (iterations <= 0 || iterations > MAX_ITERATIONS) {
       return false;
     }
     byte[] salt;

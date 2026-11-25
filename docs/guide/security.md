@@ -141,7 +141,7 @@ final class ReportHandler implements Handler, SecuredHandler {
 - 16 字节 `SecureRandom` 盐；
 - 32 字节派生密钥；
 - 编码格式为 `algorithm$iterations$base64Salt$base64Key`；
-- `verify` 从已存储的编码值读取迭代次数，而不是强制使用当前 hasher 实例的设置。
+- `verify` 从已存储的编码值读取迭代次数，而不是强制使用当前 hasher 实例的设置；超过 2,000,000 次的损坏记录直接返回 `false`，`of(...)` 也拒绝该上限。
 
 ```java
 PasswordHasher hasher = PasswordHasher.standard();
