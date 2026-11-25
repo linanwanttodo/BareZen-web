@@ -1,7 +1,6 @@
 package com.barezen.http.jdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.barezen.core.config.Configuration;
@@ -214,12 +213,13 @@ class JdkTlsSemanticsTest {
     }
 
     @Test
-    void anEmptyPathIsNoPathRatherThanAnUnopenableFile() {
+    void anExplicitBlankPathFailsConstructionInsteadOfSilentlyServingPlaintext() {
       Configuration blank = Configuration.inMemory(Map.of(Tls.KEYSTORE_PATH.name(), "  "));
 
-      // Absent means plaintext, and a blank value is absent: the alternative is a deployment believing it enabled TLS.
-      assertThatCode(() -> Tls.from(blank)).doesNotThrowAnyException();
-      assertThat(Tls.from(blank)).isNull();
+      assertThatThrownBy(() -> Tls.from(blank))
+          .isInstanceOf(ConfigurationException.class)
+          .hasMessageContaining(Tls.KEYSTORE_PATH.name())
+          .hasMessageContaining("blank");
     }
   }
 

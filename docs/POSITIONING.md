@@ -93,7 +93,7 @@ BareZen 的价值不只在“能启动一个服务”，更在它把常见框架
 - 过期记录在查询或轮换时删除；`size()` 不等于“仍有效的会话数”，`rotate` 不会续期过期 token。
 - 默认中间件从 `Authorization` 读取 Bearer 凭据；scheme 忽略大小写，token 值精确匹配。没有现成的 Cookie 凭据来源、CSRF 防护、OAuth/OIDC 流程或完整账户系统。`barezen-plugins` 有 H2 用户仓库，但它不是数据库无关的账户管理平台。
 - 已认证但无权限是 403；当前中间件把匿名和认证失败都回答为 401，安全组件抛出运行时异常时回答 500，但不会自动记录该异常。`AuthPlugin` 保留三态：null credential 为匿名，无效 scheme、未知或过期 token 为 Failure；wire 仍统一返回 401。
-- JDK TLS 只在构造时解析，空白 path 会回到明文；没有证书轮换、mTLS、协议/cipher 配置或 HTTP/2 协商策略。日志脱敏不等于密码已从配置快照或临时字符数组中擦除。
+- JDK TLS 只在构造时解析；未配置 path 时保持明文，显式空白 path 会失败而不是静默降级。没有证书轮换、mTLS、协议/cipher 配置或 HTTP/2 协商策略。日志脱敏不等于密码已从配置快照或临时字符数组中擦除。
 
 ### 数据与配置
 

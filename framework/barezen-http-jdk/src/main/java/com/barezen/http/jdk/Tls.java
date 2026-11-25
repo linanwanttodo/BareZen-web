@@ -21,7 +21,8 @@ import javax.net.ssl.SSLContext;
  *
  * <p>Two keys decide everything: a keystore path and its password. Absent path means the adapter serves plaintext, which
  * is the behaviour every deployment had before this class existed and every deployment keeps unless it opts in — a
- * capability turned on by presence, not a flag that can be set to {@code maybe}. Present path with no password is a
+ * capability turned on by presence, not a flag that can be set to {@code maybe}. An explicitly blank path is a
+ * misassembly and fails construction rather than silently downgrading to plaintext. Present path with no password is a
  * misassembly and fails construction, naming both keys; that pair is refused rather than guessed because a keystore
  * opened with a wrong password fails in the same opaque way as one opened with no password, and the difference between
  * "you did not write the key" and "you wrote the wrong one" is the only thing an operator can act on.
@@ -71,16 +72,21 @@ final class Tls {
    * Resolves the snapshot into either a TLS endpoint or no TLS at all.
    *
    * @param configuration the resolved snapshot, never null
-   * @return the configured endpoint, or null when no keystore is named — plaintext serving, unchanged from before this
-   *     class existed
-   * @throws ConfigurationException if a keystore is named without a password, or cannot be opened with the one supplied
+   * @return the configured endpoint, or null when no keystore key is present — plaintext serving, unchanged from before
+   *     this class existed
+   * @throws ConfigurationException if the path is explicitly blank, a keystore is named without a password, or the
+   *     keystore cannot be opened with the one supplied
    */
   static Tls from(Configuration configuration) {
     Objects.requireNonNull(configuration, "the configuration to read the TLS keys from; with none there is nothing"
         + " to resolve");
     Optional<String> path = configuration.get(KEYSTORE_PATH);
-    if (path.isEmpty() || path.get().isBlank()) {
+    if (path.isEmpty()) {
       return null;
+    }
+    if (path.get().isBlank()) {
+      throw new ConfigurationException("\"" + KEYSTORE_PATH.name() + " is present but blank. Omit the key to serve"
+          + " plaintext; an explicit blank value is a misassembly, not a request to downgrade TLS");
     }
     Optional<String> password = configuration.get(KEYSTORE_PASSWORD);
     if (password.isEmpty() || password.get().isEmpty()) {

@@ -104,14 +104,15 @@ construction, naming both keys.
   this keystore; `isRunning()`/`port()` behave as they do in plaintext; a client trusting the system CAs is refused; a
   plaintext request to the TLS port gets no readable answer; the startup log says `HTTPS`, names the keystore and never
   the password; a 404 over TLS is the contract's own bytes, naming no path. Unconfigured (2): the adapter still serves
-  plaintext on the same constructor; a blank path reads as no path. Refusals (4): a keystore without a password names
-  both keys; a wrong password names the file and not the secret; a missing file fails construction; the failure lands at
-  construction so no port was spent.
+  plaintext on the same constructor; an explicitly blank path fails construction. Refusals (4): a keystore without a
+  password names both keys; a wrong password names the file and not the secret; a missing file fails construction; the
+  failure lands at construction so no port was spent. Amended on 2026-11-25: blank is no longer treated as absent,
+  because an explicit empty value must not silently downgrade TLS.
 - Keystores are generated per test by the running JDK's own `keytool` (`-storetype PKCS12`, `SAN=dns:localhost,ip:127.0.0.1`,
   one day of validity) in a `@TempDir`, so no keystore and no password is ever committed.
 - **Mutations**, each killed against this test class, each file md5-restored: T1 ignore the keystore key (6 failures + 2
-  errors), T2 accept a keystore with no password (1), T3 echo the password in the refusal (1), T4 treat a blank path as
-  configured (1).
+  errors), T2 accept a keystore with no password (1), T3 echo the password in the refusal (1), T4 accept a blank path as
+  plaintext (1).
 - Existing adapter suites unchanged and green: 200 http-jdk tests plus this class's 12.
 - JDK: this build runs on Maven's JDK 24 with `release 17` (ADR-0049's correction); the emitted major is asserted inside
   the build.
