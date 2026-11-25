@@ -110,8 +110,8 @@ public final class ReportsPlugin implements Plugin, RouteContributor {
    * {@code GET /api/reports} with the filters this application understands.
    *
    * <p>Three parameters, each with a stated bound: {@code q} narrows title and body, {@code limit} defaults to twenty
-   * and is capped at one hundred rather than silently exceeded, {@code offset} pages forward. A malformed number is a
-   * 400 naming nothing but the status, because a server that guesses what a broken query meant becomes an undocumented
+   * and is capped at one hundred rather than silently exceeded, {@code offset} pages forward. A malformed number or
+   * percent escape is a 400 naming nothing but the status, because guessing what a broken query meant becomes an undocumented
    * API — and the query is the application's to interpret, which is exactly what ADR-0018 §4 leaves it (the router
    * routes on the path and nothing else).
    */
@@ -127,7 +127,7 @@ public final class ReportsPlugin implements Plugin, RouteContributor {
       Query query = Query.of(request.query());
       Query.Number limit = Query.read("limit", query.value("limit"), Query.DEFAULT_LIMIT, Query.MAX_LIMIT);
       Query.Number offset = Query.read("offset", query.value("offset"), 0, Integer.MAX_VALUE);
-      if (limit.refused() || offset.refused()) {
+      if (query.refused() || limit.refused() || offset.refused()) {
         return plain(400, "Bad Request");
       }
       String filter = query.value("q").orElse("");

@@ -108,7 +108,7 @@ public byte[] body()
 
 `query()` 返回 `Optional<String>`，而不是一个已经解析的 map。构造时允许 `null`；无 query 的 `/search` 得到 `Optional.empty()`，带空 query 的 `/search?` 得到 `Optional.of("")`。
 
-框架不拆分 `&`、`=`，也不把 `+` 转成空格。应用若需要表单或查询参数，应选择并记录自己的解析规则。不要把原始 query 字符串直接当作可信的键值来源。
+框架不拆分 `&`、`=`，也不把 `+` 转成空格。应用若需要表单或查询参数，应选择并记录自己的解析规则。不要把原始 query 字符串直接当作可信的键值来源；非法百分号转义应在应用输入边界返回 400，不能让它以 RuntimeException 变成 500。
 
 ### headers：可重复的字段集合
 

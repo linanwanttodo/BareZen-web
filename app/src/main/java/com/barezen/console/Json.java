@@ -72,23 +72,28 @@ final class Json {
    *
    * <p>A form rather than JSON because this is what an HTML page has always sent and because the framework has no JSON
    * parser to reach for — a login body parsed by hand would be the beginning of a document model this project does not
-   * have and has refused (ADR-0030's same reasoning about bodies). Percent-decoding is the JDK's, not a local guess.
+   * have and has refused (ADR-0030's same reasoning about bodies). Percent-decoding is the JDK's, not a local guess;
+   * malformed escapes return null so the caller can answer 400 instead of turning client input into a 500.
    */
   static String formValue(byte[] body, String name) {
     if (body == null || body.length == 0) {
       return null;
     }
     String text = new String(body, StandardCharsets.UTF_8);
-    for (String pair : text.split("&")) {
-      int separator = pair.indexOf('=');
-      if (separator < 0) {
-        continue;
+    try {
+      for (String pair : text.split("&")) {
+        int separator = pair.indexOf('=');
+        if (separator < 0) {
+          continue;
+        }
+        String key = URLDecoder.decode(pair.substring(0, separator), StandardCharsets.UTF_8);
+        if (key.equals(name)) {
+          return URLDecoder.decode(pair.substring(separator + 1), StandardCharsets.UTF_8);
+        }
       }
-      String key = URLDecoder.decode(pair.substring(0, separator), StandardCharsets.UTF_8);
-      if (key.equals(name)) {
-        return URLDecoder.decode(pair.substring(separator + 1), StandardCharsets.UTF_8);
-      }
+      return null;
+    } catch (IllegalArgumentException malformed) {
+      return null;
     }
-    return null;
   }
 }

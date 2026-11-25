@@ -12,8 +12,8 @@ import java.util.Optional;
  * <p>{@code Request.query()} is an {@link Optional} of the uninterpreted text, and absence is a different fact from an
  * empty string (ADR-0018 §4: a query is not a path, and a framework that decoded eagerly would decide for the
  * application what an absent {@code ?q} means). So a consumer that filters parses its own parameters, which is what this
- * is: the six lines that turn {@code q=ada&limit=5} into a map, plus the two defaults and the one refusal the reports
- * list needs.
+ * is: the small parser that turns {@code q=ada&limit=5} into a map, plus the two defaults and the refusals the reports
+ * list needs. Malformed percent escapes are a client-input refusal, not a server exception.
  */
 final class Query {
 
@@ -22,9 +22,11 @@ final class Query {
   static final int MAX_LIMIT = 100;
 
   private final Map<String, String> values;
+  private final boolean refused;
 
-  private Query(Map<String, String> values) {
+  private Query(Map<String, String> values, boolean refused) {
     this.values = values;
+    this.refused = refused;
   }
 
   /**
@@ -34,19 +36,27 @@ final class Query {
    */
   static Query of(Optional<String> raw) {
     Map<String, String> parsed = new LinkedHashMap<>();
-    // An absent query and an empty one arrive as different Optionals; both mean "no filters", and that is the only
-    // reading worth having, so they collapse here rather than in every handler.
-    raw.filter(text -> !text.isEmpty()).ifPresent(text -> {
-      for (String pair : text.split("&")) {
-        int separator = pair.indexOf('=');
-        if (separator > 0) {
-          parsed.put(decode(pair.substring(0, separator)), decode(pair.substring(separator + 1)));
-        } else if (!pair.isEmpty()) {
-          parsed.put(decode(pair), "");
+    try {
+      // An absent query and an empty one arrive as different Optionals; both mean "no filters", and that is the only
+      // reading worth having, so they collapse here rather than in every handler.
+      raw.filter(text -> !text.isEmpty()).ifPresent(text -> {
+        for (String pair : text.split("&")) {
+          int separator = pair.indexOf('=');
+          if (separator > 0) {
+            parsed.put(decode(pair.substring(0, separator)), decode(pair.substring(separator + 1)));
+          } else if (!pair.isEmpty()) {
+            parsed.put(decode(pair), "");
+          }
         }
-      }
-    });
-    return new Query(Map.copyOf(parsed));
+      });
+      return new Query(Map.copyOf(parsed), false);
+    } catch (IllegalArgumentException malformed) {
+      return new Query(Map.of(), true);
+    }
+  }
+
+  boolean refused() {
+    return refused;
   }
 
   private static String decode(String text) {

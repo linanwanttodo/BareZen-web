@@ -365,6 +365,17 @@ class ConsoleTest {
     }
 
     @Test
+    void malformedFormPercentEncodingIsAClientErrorRatherThanAServerFailure() throws IOException {
+      try (Running console = running()) {
+        String token = console.signIn("ada", "hunter2");
+        Assertions.assertThat(authorized(console, token, HttpMethod.POST, "/api/reports")
+            .body("title=%GG&body=x").send()).statusIs(400).bodyIs("Bad Request");
+        Assertions.assertThat(console.server.client().post("/api/sessions", "username=%GG&password=x"))
+            .statusIs(400).bodyIs("{\"error\":\"username and password are both required\"}");
+      }
+    }
+
+    @Test
     void oneRowIsReadableAndAnAbsentOneIsThePlainFourOhFour() throws IOException {
       try (Running console = running()) {
         String token = console.signIn("ada", "hunter2");
