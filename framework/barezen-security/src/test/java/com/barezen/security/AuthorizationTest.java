@@ -3,6 +3,8 @@ package com.barezen.security;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
@@ -49,6 +51,33 @@ class AuthorizationTest {
   void ofDeniesUnknownPrincipal() {
     Authorization authorization = Authorization.of(Map.of(ADA, Set.of(READ)));
     assertThat(authorization.authorize(new Principal("grace"), READ)).isEqualTo(Authorization.Decision.DENY);
+  }
+
+  @Test
+  @DisplayName("of() snapshots every permission set")
+  void ofSnapshotsEveryPermissionSet() {
+    Map<Principal, Set<Permission>> grants = new HashMap<>();
+    Set<Permission> held = new HashSet<>();
+    held.add(READ);
+    grants.put(ADA, held);
+    Authorization authorization = Authorization.of(grants);
+
+    held.clear();
+
+    assertThat(authorization.authorize(ADA, READ)).isEqualTo(Authorization.Decision.ALLOW);
+  }
+
+  @Test
+  @DisplayName("of() does not grant permissions added to the original set later")
+  void ofDoesNotGrantPermissionsAddedLater() {
+    Map<Principal, Set<Permission>> grants = new HashMap<>();
+    Set<Permission> held = new HashSet<>();
+    grants.put(ADA, held);
+    Authorization authorization = Authorization.of(grants);
+
+    held.add(WRITE);
+
+    assertThat(authorization.authorize(ADA, WRITE)).isEqualTo(Authorization.Decision.DENY);
   }
 
   @Test

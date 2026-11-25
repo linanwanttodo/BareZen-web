@@ -102,7 +102,7 @@ Authorization authorization = Authorization.of(Map.of(
         ada, Set.of(reportRead)));
 ```
 
-`Authorization.of(...)` 对未列出的身份或未授予的权限返回 `DENY`。`allowAll()` 和 `denyAll()` 是显式策略，不是推荐的生产默认。`UserPlugin` 对 `Permission.ANY` 直接允许，对命名权限查询用户权限表。
+`Authorization.of(...)` 对未列出的身份或未授予的权限返回 `DENY`。构造时同时复制 Map 和每个权限 Set，调用方事后增删原 Map 条目或修改原 Set，都不会改变已装配策略的授权答案。`allowAll()` 和 `denyAll()` 是显式策略，不是推荐的生产默认。`UserPlugin` 对 `Permission.ANY` 直接允许，对命名权限查询用户权限表。
 
 中间件只询问一次当前路由的权限；复杂条件、资源归属、数据范围和多权限组合应由应用自己的 `Authorization` 实现决定。不要在一个身份验证成功后，又在 Handler 里凭注释假定权限已经检查。
 

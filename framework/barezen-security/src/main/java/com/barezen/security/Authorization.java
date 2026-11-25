@@ -1,5 +1,6 @@
 package com.barezen.security;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -60,13 +61,17 @@ public interface Authorization {
    * An authorization backed by a fixed table of which permissions each principal holds.
    *
    * @param grants the grants, keyed by principal, never null; a principal absent from the table, or present without
-   *     the required permission, is denied. The table is copied, so later changes to the given map do not change the
-   *     authorization's answer
+   *     the required permission, is denied. The map and every permission set are copied, so later changes to either
+   *     do not change the authorization's answer
    * @return an authorization that allows exactly the permissions the table grants
    */
   static Authorization of(Map<Principal, Set<Permission>> grants) {
     Objects.requireNonNull(grants, "the grants table; without one there is nothing to authorize");
-    Map<Principal, Set<Permission>> table = Map.copyOf(grants);
+    Map<Principal, Set<Permission>> copied = new HashMap<>();
+    for (Map.Entry<Principal, Set<Permission>> grant : grants.entrySet()) {
+      copied.put(grant.getKey(), Set.copyOf(grant.getValue()));
+    }
+    Map<Principal, Set<Permission>> table = Map.copyOf(copied);
     return (principal, required) -> {
       Set<Permission> held = table.get(principal);
       return held != null && held.contains(required) ? Decision.ALLOW : Decision.DENY;

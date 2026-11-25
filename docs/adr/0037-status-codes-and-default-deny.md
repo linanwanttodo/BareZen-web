@@ -53,6 +53,10 @@ does not grant (both halves are tested); `Authorization.denyAll()` denies everyt
 authentication and nothing more", and the authentication half still refuses every anonymous and failed request with
 401.
 
+Amended on 2026-11-25: `Authorization.of(grants)` snapshots both the map and every permission set. Copying only the
+map leaves a mutable `Set` reachable from the caller, so adding a permission after assembly can turn a denial into an
+allow, and clearing one can revoke a grant without an explicit policy change. Separate tests pin both directions.
+
 The middleware always asks the policy exactly one question, and the question is the route's. `wrap(authentication,
 authorization, delegate)` asks `Permission.ANY` — "may this principal do anything here"; `allowAll()` answers yes,
 `denyAll()` answers no, and an `of(grants)` table answers by whether it lists the principal for `ANY`. A route that
