@@ -106,6 +106,17 @@ class AuthPluginTest {
     }
 
     @Test
+    @DisplayName("the bearer scheme is matched case-insensitively")
+    void schemeIsCaseInsensitive() {
+      SessionStore store = fixedStore(Instant.parse("2026-10-04T12:00:00Z"));
+      AuthPlugin plugin = new AuthPlugin(store, (u, p) -> true, "Bearer", Duration.ofMinutes(30));
+      String token = plugin.issueSession("ada", "x").orElseThrow().token().value();
+
+      assertThat(plugin.authenticate(new Credential("bearer", token)).isAuthenticated()).isTrue();
+      assertThat(plugin.authenticate(new Credential("BEARER", token)).isAuthenticated()).isTrue();
+    }
+
+    @Test
     @DisplayName("a wrong scheme, a null credential, and an unknown token are all anonymous")
     void unrecognizedIsAnonymous() {
       SessionStore store = fixedStore(Instant.now());

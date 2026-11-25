@@ -52,7 +52,7 @@ wrap(Authentication authentication, Authorization authorization,
 - 没有空格：按 scheme 为 `Bearer`、整个字段为值处理。
 - 有空格：在第一个空格处拆分；scheme 是前半段，值是剩余全部文本，值可以包含后续空格或为空。
 
-框架不读取 cookie、query 或表单来寻找凭据，也不自动做 Basic 解码。scheme 和值的比较是否忽略大小写，由 `Authentication` 实现决定；内置的 `Authentication.bearer(...)` 对两者都做精确、区分大小写的比较。
+框架不读取 cookie、query 或表单来寻找凭据，也不自动做 Basic 解码。scheme 和值的比较规则由 `Authentication` 实现决定；内置的 `Authentication.bearer(...)` 与 `AuthPlugin` 按 HTTP 规则忽略 scheme 大小写，但 token 值仍精确、区分大小写。
 
 ```java
 Authentication authentication = Authentication.bearer(

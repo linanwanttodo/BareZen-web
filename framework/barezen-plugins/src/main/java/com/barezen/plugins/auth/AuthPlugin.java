@@ -70,13 +70,14 @@ public final class AuthPlugin implements Plugin, Authentication {
   }
 
   /**
-   * A returning request is authenticated by its session token, never by a password. The token value is looked up;
-   * the opaque value carries nothing the framework trusts (ADR-0036), so an unknown or expired token is
+   * A returning request is authenticated by its session token, never by a password. The scheme is compared
+   * case-insensitively as HTTP requires, while the token value is looked up exactly. The opaque value carries nothing
+   * the framework trusts (ADR-0036), so an unknown or expired token is
    * {@link AuthenticationResult#anonymous()} — offered but not recognised, which the middleware answers 401 (ADR-0037).
    */
   @Override
   public AuthenticationResult authenticate(Credential credential) {
-    if (credential == null || !scheme.equals(credential.scheme())) {
+    if (credential == null || !scheme.equalsIgnoreCase(credential.scheme())) {
       return AuthenticationResult.anonymous();
     }
     return sessions.lookup(credential.value())

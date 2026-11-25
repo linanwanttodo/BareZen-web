@@ -399,6 +399,24 @@ class ConsoleTest {
   class Lifecycle {
 
     @Test
+    void aCaseVariedBearerSchemeAuthenticatesAndRotates() throws IOException {
+      try (Running console = running()) {
+        String token = console.signIn("ada", "hunter2");
+        Assertions.assertThat(console.server.client().request(HttpMethod.GET, "/api/session")
+            .header("Authorization", "bearer " + token).send()).statusIs(200);
+
+        TestResponse rotated = console.server.client().request(HttpMethod.POST, "/api/session/rotate")
+            .header("Authorization", "BEARER " + token).send();
+        String fresh = Running.tokenOf(rotated.bodyText());
+
+        assertThat(rotated.status()).isEqualTo(200);
+        assertThat(fresh).isNotEqualTo(token);
+        Assertions.assertThat(console.server.client().request(HttpMethod.GET, "/api/session")
+            .header("Authorization", "Bearer " + token).send()).statusIs(401);
+      }
+    }
+
+    @Test
     void rotationMakesTheOldTokenAnAnonymousCredential() throws IOException {
       try (Running console = running()) {
         String token = console.signIn("ada", "hunter2");

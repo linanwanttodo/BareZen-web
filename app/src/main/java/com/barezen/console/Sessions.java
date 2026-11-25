@@ -221,7 +221,8 @@ final class Sessions {
   private static Optional<String> token(Request request) {
     return request.headers().first("Authorization").map(value -> {
       String prefix = "Bearer ";
-      return value.startsWith(prefix) ? value.substring(prefix.length()) : value;
+      return value.regionMatches(true, 0, prefix, 0, prefix.length())
+          ? value.substring(prefix.length()) : value;
     });
   }
 

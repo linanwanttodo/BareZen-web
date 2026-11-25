@@ -36,10 +36,19 @@ class AuthenticationTest {
   }
 
   @Test
-  @DisplayName("bearer() fails a wrong scheme: comparison is exact and case-sensitive")
+  @DisplayName("bearer() matches the scheme case-insensitively while keeping the value exact")
+  void bearerSchemeIsCaseInsensitive() {
+    Authentication authentication = Authentication.bearer("Bearer", "s3cr3t", new Principal("ada"));
+    assertThat(authentication.authenticate(new Credential("bearer", "s3cr3t")).isAuthenticated()).isTrue();
+    assertThat(authentication.authenticate(new Credential("BEARER", "s3cr3t")).isAuthenticated()).isTrue();
+    assertThat(authentication.authenticate(new Credential("Bearer", "S3CR3T")).isAuthenticated()).isFalse();
+  }
+
+  @Test
+  @DisplayName("bearer() fails a different scheme")
   void bearerWrongScheme() {
     Authentication authentication = Authentication.bearer("Bearer", "s3cr3t", new Principal("ada"));
-    assertThat(authentication.authenticate(new Credential("bearer", "s3cr3t")).isAuthenticated()).isFalse();
+    assertThat(authentication.authenticate(new Credential("Basic", "s3cr3t")).isAuthenticated()).isFalse();
   }
 
   @Test

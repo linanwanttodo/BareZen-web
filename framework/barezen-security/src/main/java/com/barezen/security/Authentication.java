@@ -51,8 +51,8 @@ public interface Authentication {
   /**
    * An authentication that trusts one fixed principal for a matching credential value.
    *
-   * <p>Useful for tests and for the simplest possible bearer-token setup. The comparison is exact and case-sensitive,
-   * because a credential is not a password and does not get the tolerance a password gets.
+   * <p>Useful for tests and for the simplest possible bearer-token setup. The scheme is compared case-insensitively,
+   * as HTTP authentication schemes require; the credential value remains exact and case-sensitive.
    *
    * @param scheme the scheme to match, never null
    * @param value the value to match, never null
@@ -68,7 +68,7 @@ public interface Authentication {
       if (credential == null) {
         return AuthenticationResult.anonymous();
       }
-      if (credential.scheme().equals(scheme) && credential.value().equals(value)) {
+      if (credential.scheme().equalsIgnoreCase(scheme) && credential.value().equals(value)) {
         return AuthenticationResult.authenticated(principal);
       }
       return AuthenticationResult.failure("credential rejected");

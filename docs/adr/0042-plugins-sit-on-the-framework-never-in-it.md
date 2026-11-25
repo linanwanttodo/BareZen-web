@@ -114,7 +114,7 @@ Each rule was proven to bite by two temporary violating classes — `SpikeProbe`
 
 All green on this build:
 
-- `AuthPluginTest` 8, `UserPluginTest` 13, `OpenApiPluginTest` 11, `PluginCompositionTest` 10 (Stage 2.13-F: registration-as-gate 4, lifecycle 3, isolation 3), `BarezenPluginsArchitectureTest` 7 (spike-proven), `ClassMajorContractTest` 4 (major 61 on both JDKs).
+- `AuthPluginTest` 8 in this phase (9 current, after the 2026-11-25 scheme-case test), `UserPluginTest` 13, `OpenApiPluginTest` 11, `PluginCompositionTest` 10 (Stage 2.13-F: registration-as-gate 4, lifecycle 3, isolation 3), `BarezenPluginsArchitectureTest` 7 (spike-proven), `ClassMajorContractTest` 4 (major 61 on both JDKs).
 - Stage 2.13-G: 6 mutations (M1 duplicate-ID accepted, M2 dependency check bypassed, M3 skip registration, M4 stop skipped, M5 plugin exception swallowed, M6 plugin state leaked), each killed by a targeted run, each source restored byte-identical (sha256). GATE PASS.
 
 ## Non-goals

@@ -55,9 +55,10 @@ an attacker which half of a credential they got wrong.
 ## Testing
 
 `AuthenticationResultTest` (6 tests): each state's `isAuthenticated`/`maybePrincipal`, the anonymous singleton, and the
-null refusals. `AuthenticationTest` proves the three producers (anonymous, bearer match, bearer wrong-value) yield the
-three states, and that a wrong scheme yields Failure while a null credential yields Anonymous. Mutation SM7 (folding
-case in the bearer comparison) killed by this pair.
+null refusals. `AuthenticationTest` (7 tests) proves the three producers yield the three states, a different scheme
+yields Failure, and a null credential yields Anonymous. Amended on 2026-11-25: the authentication scheme is compared
+case-insensitively as HTTP requires, while the credential value remains exact and case-sensitive; the tests pin both
+halves of that rule.
 
 ## Non-goals
 
