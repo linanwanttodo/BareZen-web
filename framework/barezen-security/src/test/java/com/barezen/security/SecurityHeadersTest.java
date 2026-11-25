@@ -50,6 +50,18 @@ class SecurityHeadersTest {
   }
 
   @Test
+  @DisplayName("fills missing fields independently when only a case-varied CSP is already present")
+  void fillsMissingFieldsIndependently() {
+    Response original = new Response(200, Headers.of("content-security-policy", "default-src 'none'"), null);
+
+    Response stamped = SecurityHeaders.of((request, parameters) -> original, POLICY).handle(REQUEST, Map.of());
+
+    assertThat(stamped.headers().values("Content-Security-Policy")).containsExactly("default-src 'none'");
+    assertThat(stamped.headers().first("X-Content-Type-Options")).contains("nosniff");
+    assertThat(stamped.headers().first("Referrer-Policy")).contains("no-referrer");
+  }
+
+  @Test
   @DisplayName("refuses a missing delegate or blank policy at assembly")
   void refusesBadArguments() {
     assertThatNullPointerException().isThrownBy(() -> SecurityHeaders.of(null, POLICY));
