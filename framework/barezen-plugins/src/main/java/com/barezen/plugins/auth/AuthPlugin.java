@@ -71,18 +71,21 @@ public final class AuthPlugin implements Plugin, Authentication {
 
   /**
    * A returning request is authenticated by its session token, never by a password. The scheme is compared
-   * case-insensitively as HTTP requires, while the token value is looked up exactly. The opaque value carries nothing
-   * the framework trusts (ADR-0036), so an unknown or expired token is
-   * {@link AuthenticationResult#anonymous()} — offered but not recognised, which the middleware answers 401 (ADR-0037).
+   * case-insensitively as HTTP requires, while the token value is looked up exactly. A missing credential is
+   * anonymous; a wrong scheme, unknown token or expired token is an explicit failure. The opaque value carries
+   * nothing the framework trusts (ADR-0036), and the middleware answers both refusal states with the same 401.
    */
   @Override
   public AuthenticationResult authenticate(Credential credential) {
-    if (credential == null || !scheme.equalsIgnoreCase(credential.scheme())) {
+    if (credential == null) {
       return AuthenticationResult.anonymous();
+    }
+    if (!scheme.equalsIgnoreCase(credential.scheme())) {
+      return AuthenticationResult.failure("authentication scheme rejected");
     }
     return sessions.lookup(credential.value())
         .<AuthenticationResult>map(session -> AuthenticationResult.authenticated(session.principal()))
-        .orElseGet(AuthenticationResult::anonymous);
+        .orElseGet(() -> AuthenticationResult.failure("session rejected"));
   }
 
   /**

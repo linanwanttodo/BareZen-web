@@ -52,7 +52,7 @@ The ports `AuthPlugin`/`UserPlugin` implement — `Authentication`, `Authorizati
 
 `AuthPlugin` maps its two public verbs to the two HTTP questions:
 
-- `authenticate(Credential)` — the *returning request*: a bearer token looked up in `SessionStore`; never touches a password; wrong scheme / null / unknown / expired → `AuthenticationResult.anonymous()`.
+- `authenticate(Credential)` — the *returning request*: a bearer token looked up in `SessionStore`; never touches a password. Amended on 2026-11-25: null returns `anonymous()`, while a wrong scheme, unknown token or expired token returns `failure(reason)`; the middleware still answers both refusal states with the same fixed 401.
 - `issueSession(username, password)` — the *first login*, called by an application's login route: verifies the pair through `PasswordVerifier`, returns `Optional<SessionStore.Session>` (the opaque token *and* the principal). Unknown user and wrong password are indistinguishable empty results (ADR-0037; "the username exists" is free recon).
 
 The split is forced by `Credential`'s single-value shape (see Problem), and keeping it split means a password never travels through a type that could delimiter it. `tokenAuthenticates` proves the seam mechanically: issue through a plugin whose verifier accepts, then re-authenticate through a second plugin sharing the store whose verifier rejects everything — the token still authenticates, because `authenticate` never consults a password.

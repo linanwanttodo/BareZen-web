@@ -117,20 +117,20 @@ class AuthPluginTest {
     }
 
     @Test
-    @DisplayName("a wrong scheme, a null credential, and an unknown token are all anonymous")
-    void unrecognizedIsAnonymous() {
+    @DisplayName("a missing credential is anonymous while a wrong scheme or unknown token is a failure")
+    void missingIsAnonymousAndInvalidIsFailure() {
       SessionStore store = fixedStore(Instant.now());
       AuthPlugin plugin = new AuthPlugin(store, adaOnly(), "Bearer", Duration.ofMinutes(30));
 
       assertThat(plugin.authenticate(null)).isSameAs(AuthenticationResult.anonymous());
       assertThat(plugin.authenticate(new Credential("Basic", "anything")))
-          .isSameAs(AuthenticationResult.anonymous());
+          .isInstanceOf(AuthenticationResult.Failure.class);
       assertThat(plugin.authenticate(new Credential("Bearer", "not-a-real-token")))
-          .isSameAs(AuthenticationResult.anonymous());
+          .isInstanceOf(AuthenticationResult.Failure.class);
     }
 
     @Test
-    @DisplayName("an expired token is anonymous and is retired from the store on lookup")
+    @DisplayName("an expired token is a failure and is retired from the store on lookup")
     void expiryIsHonoured() {
       MutableClock clock = new MutableClock(Instant.parse("2026-10-04T12:00:00Z"));
       SessionStore store = SessionStore.of(clock, new SecureRandom());
@@ -139,8 +139,8 @@ class AuthPluginTest {
 
       clock.advance(Duration.ofMinutes(31));
       assertThat(plugin.authenticate(new Credential("Bearer", token)))
-          .as("past expiry the same token authenticates as nothing")
-          .isSameAs(AuthenticationResult.anonymous());
+          .as("past expiry the same token is an explicit authentication failure")
+          .isInstanceOf(AuthenticationResult.Failure.class);
       assertThat(store.size()).as("the expired session was removed, not just refused").isZero();
     }
 
@@ -153,7 +153,7 @@ class AuthPluginTest {
 
       store.invalidate(token);
       assertThat(plugin.authenticate(new Credential("Bearer", token)))
-          .isSameAs(AuthenticationResult.anonymous());
+          .isInstanceOf(AuthenticationResult.Failure.class);
     }
   }
 

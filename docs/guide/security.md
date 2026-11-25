@@ -83,7 +83,7 @@ AuthenticationResult authenticate(Credential credential);
 
 `maybePrincipal()` 只在认证成功时有值；`isAuthenticated()` 只对成功状态返回 true。`Failure.reason` 是应用选择的诊断文本，不能包含凭据，也不会被中间件发送到客户端。
 
-需要注意，“提供错误凭据”和“没有提供凭据”在当前中间件中都返回 401。三态的价值是让认证实现保留原因、让调用方能区分状态，而不是让 wire 暴露不同失败细节。但当前 `AuthPlugin` 并未完整保留这条契约：scheme 不匹配、未知或过期 session token 都返回 `anonymous()`，不是 `failure(reason)`；中间件仍会以 401 拒绝，因此这不是越权，却会让依赖三态做诊断的调用方失去“提供了但无效”的区分。需要该区分的应用应提供自己的 `Authentication` 实现，或先修正插件并补充对应测试。
+需要注意，“提供错误凭据”和“没有提供凭据”在当前中间件中都返回 401。三态的价值是让认证实现保留原因、让调用方能区分状态，而不是让 wire 暴露不同失败细节。`AuthPlugin` 现在完整保留该契约：null credential 返回 `anonymous()`，scheme 不匹配、未知或过期 session token 返回 `failure(reason)`；中间件仍以固定 401 拒绝两者。
 
 如果 `Authentication` 或 `Authorization` 抛出 `RuntimeException`，中间件返回固定正文 `Internal Server Error` 的 500，业务 Handler 不执行。**当前实现不会自动记录它捕获的异常**；需要堆栈时，应在组件内部选择安全日志点记录，并确保日志不含密码、凭据值或 token。不要为了诊断把异常细节拼进 HTTP 响应。
 
