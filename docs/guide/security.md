@@ -203,7 +203,7 @@ AuthenticationResult returning = auth.authenticate(new Credential("Bearer", toke
 
 `issueSession(username, password)` 把用户名和密码保持为两个参数，避免把 `username:password` 拼接进单值 `Credential` 后产生冒号解析错误。未知用户与错误密码都返回空，应用不应向客户端区分两者。返回请求只查 session token，不再验证密码。
 
-相同的空返回值不等于相同的耗时。当前 `UserRepository.verifyPassword` 先执行 `find(username)`，未知用户会短路，只有已存在用户才调用 PBKDF2 验证，因此两条登录失败路径的成本不同。现有测试只固定返回值，没有做时间统计或恒定时间证明。若账户枚举 timing 属于威胁模型，应用需要在认证边界额外设计统一成本、虚拟密码验证或外部恒定时间查询策略，不能仅凭“都返回 empty”宣称已经消除 side channel。
+相同的空返回值不等于相同的耗时。当前 `UserRepository` 在构造时生成一份虚拟哈希；未知用户仍会执行密码验证，只是随后强制返回 false，因此不会再完全跳过 PBKDF2。测试用计数替身证明两条路径都调用验证，但没有做时间统计或恒定时间证明。数据库查询、旧哈希迭代数差异与调度噪声仍可能形成 side channel；若账户枚举 timing 属于威胁模型，应用还应设计统一成本、限流或外部恒定时间查询策略，不能仅凭“都返回 empty”宣称已经消除它。
 
 `UserRepository` 是 `barezen-plugins` 中的 H2 示例实现，不是数据库无关的完整用户平台。`grant` 使用 H2 的 `MERGE ... KEY` 语法；权限表没有指向用户表的外键，因此可以向不存在的用户名授权。`permissionsOf` 虽然使用有序 SQL，却通过 `Set.copyOf` 返回集合，调用方不能依赖迭代顺序。用户删除、停用、改名、改密、权限撤销、用户名规范化与并发建表协调均未提供；多数据库适配与版本化用户 schema 也未证明。
 

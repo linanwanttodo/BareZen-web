@@ -26,6 +26,8 @@ public final class UserRepository {
 
   private final Database database;
   private final PasswordHashing hashing;
+  // Unknown accounts must still pay the real hash cost instead of revealing existence through a short-circuit.
+  private final String unknownUserHash;
 
   /**
    * The hash/verify operation this repository needs, behind a port so no test has to run 600,000 PBKDF2 iterations
@@ -44,6 +46,7 @@ public final class UserRepository {
   public UserRepository(Database database, PasswordHashing hashing) {
     this.database = Objects.requireNonNull(database, "database");
     this.hashing = Objects.requireNonNull(hashing, "hashing");
+    this.unknownUserHash = hashing.hash("barezen-unknown-user");
   }
 
   /**
@@ -77,7 +80,12 @@ public final class UserRepository {
   /** Verifies a password against the stored hash; false for an unknown user or a wrong password alike. */
   public boolean verifyPassword(String username, String password) {
     Optional<UserAccount> account = find(username);
-    return account.isPresent() && hashing.verify(password, account.get().passwordHash());
+    if (password == null) {
+      return false;
+    }
+    String encodedHash = account.map(UserAccount::passwordHash).orElse(unknownUserHash);
+    boolean matches = hashing.verify(password, encodedHash);
+    return account.isPresent() && matches;
   }
 
   /** Grants a permission to a user; idempotent, because the primary key covers the pair. */

@@ -10,6 +10,7 @@ import com.barezen.security.Authorization;
 import com.barezen.security.Permission;
 import com.barezen.security.Principal;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -83,6 +84,30 @@ class UserPluginTest {
       assertThat(users.verifyPassword("ada", "wrong")).isFalse();
       assertThat(users.verifyPassword("ghost", "hunter2")).isFalse();
       assertThat(users.verifyPassword(null, "x")).isFalse();
+    }
+
+    @Test
+    @DisplayName("an unknown user still invokes password verification and is rejected")
+    void unknownUserStillVerifiesPassword() {
+      AtomicInteger verifications = new AtomicInteger();
+      UserRepository.PasswordHashing counting = new UserRepository.PasswordHashing() {
+        @Override
+        public String hash(String password) {
+          return "fake$hash";
+        }
+
+        @Override
+        public boolean verify(String password, String encodedHash) {
+          verifications.incrementAndGet();
+          return "hunter2".equals(password);
+        }
+      };
+      UserRepository countingUsers = new UserRepository(database, counting);
+      countingUsers.create("ada", "hunter2");
+
+      assertThat(countingUsers.verifyPassword("ada", "hunter2")).isTrue();
+      assertThat(countingUsers.verifyPassword("ghost", "hunter2")).isFalse();
+      assertThat(verifications).hasValue(2);
     }
 
     @Test

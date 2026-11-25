@@ -105,7 +105,8 @@ Each rule was proven to bite by two temporary violating classes — `SpikeProbe`
 
 - Direction rule 1 means the framework cannot be bent to trust a specific plugin's principal; identity still flows through ADR-0033's three states, unchanged.
 - The `authenticate`/`issueSession` split keeps a plaintext password out of `Credential` entirely — no delimiter to get wrong, no field that could be logged by a `toString` built for bearer tokens.
-- Failed logins are uniform empties; a user row or hash is never touched on the reject path (tested).
+- Failed logins are uniform empties. No user row is written on the reject path; an unknown username is still
+  verified against a dummy hash so the password-hash step is not skipped (tested with a counting port).
 - Snapshots and `List.copyOf` returns mean no holder — a sibling plugin, a handler, a test — can mutate another's state through an accessor.
 - No static mutable state and no thread-local close the two leaks by which one request's identity reaches another.
 
