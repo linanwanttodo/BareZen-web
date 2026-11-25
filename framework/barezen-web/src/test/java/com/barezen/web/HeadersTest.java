@@ -160,6 +160,27 @@ class HeadersTest {
     }
 
     @Test
+    void refusesANameOutsideTheAsciiTokenGrammar() {
+      assertThatThrownBy(() -> Headers.of("X-é", "1"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("not an HTTP token");
+      assertThatThrownBy(() -> Headers.of("X-\u0080", "1"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("not an HTTP token");
+      assertThatThrownBy(() -> Headers.of("X-😀", "1"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("not an HTTP token");
+    }
+
+    @Test
+    void acceptsEveryAsciiTokenPunctuation() {
+      Headers headers = Headers.of("!#$%&'*+-.^_`|~", "1").with("X-2", "2");
+
+      assertThat(headers.names()).containsExactly("!#$%&'*+-.^_`|~", "X-2");
+      assertThat(headers.values("!#$%&'*+-.^_`|~")).containsExactly("1");
+    }
+
+    @Test
     void acceptsEveryNameAnApplicationActuallyUses() {
       assertThatCode(() -> Headers.of("Content-Type", "a")
           .with("X-Trace-Id", "b")

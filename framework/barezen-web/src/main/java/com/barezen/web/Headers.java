@@ -28,7 +28,7 @@ import java.util.Optional;
  *       {@code first} reads back {@code Optional.of("")}; a field that was never sent reads back
  *       {@code Optional.empty()}. Conflating them is how "no cursor" and "cursor at the start" become the same
  *       request;
- *   <li><b>a name is an HTTP token and a value holds no control characters.</b> This is the one place the contract
+ *   <li><b>a name is an ASCII HTTP token and a value holds no control characters.</b> This is the one place the contract
  *       refuses a value outright, and it is a security rule rather than tidiness: a header value is routinely built
  *       from request data — a file name in {@code Content-Disposition}, an echo of {@code Origin} — and a CR or LF in
  *       such a value starts a new response line. An application cannot accidentally get this wrong, which is what
@@ -80,7 +80,7 @@ public final class Headers {
   /**
    * One field with one value, which is what most call sites need.
    *
-   * @param name field name, an HTTP token, matched case-insensitively and kept as given
+   * @param name field name, an ASCII HTTP token, matched case-insensitively and kept as given
    * @param value field value, without control characters; empty is legal and means the field was sent with no value
    * @return an immutable instance holding exactly this field
    * @throws NullPointerException if {@code name} or {@code value} is null
@@ -97,7 +97,7 @@ public final class Headers {
    * <p>Calling this twice with the same name gives a field with two values, which is the repeated field HTTP means,
    * not a field that was set and then changed. To replace a value, build the headers from the fields you want.
    *
-   * @param name field name, an HTTP token, matched case-insensitively and kept as given
+   * @param name field name, an ASCII HTTP token, matched case-insensitively and kept as given
    * @param value field value, without control characters
    * @return a new immutable instance with this field appended
    * @throws NullPointerException if {@code name} or {@code value} is null
@@ -228,9 +228,9 @@ public final class Headers {
   }
 
   /**
-   * A field name is an RFC 9110 token: no whitespace, no control character, no separator. Enforcing the token grammar
-   * costs one loop and removes a family of bugs where a name built out of request data turns into a different field,
-   * into a field plus a value, or into a new line.
+   * A field name is an RFC 9110 token: visible ASCII only, with no whitespace, control character or separator. Enforcing
+   * the token grammar costs one loop and removes a family of bugs where a name built out of request data turns into a
+   * different field, into a field plus a value, or into a new line.
    */
   private static void checkName(String name) {
     if (name.isEmpty()) {
@@ -238,7 +238,7 @@ public final class Headers {
     }
     for (int index = 0; index < name.length(); index++) {
       char character = name.charAt(index);
-      if (character <= 0x20 || character == 0x7f || SEPARATORS.indexOf(character) >= 0) {
+      if (character <= 0x20 || character >= 0x7f || SEPARATORS.indexOf(character) >= 0) {
         throw new IllegalArgumentException("header name " + quoted(name) + " is not an HTTP token; "
             + offending(character, index, name)
             + ". A field name is matched case-insensitively against a fixed set of tokens, so anything that is not a"
