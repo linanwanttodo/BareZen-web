@@ -56,7 +56,7 @@ class HeadersTest {
 
       assertThat(headers.first("A")).isEmpty();
       assertThat(headers.first("X-Trace")).isEmpty();
-      assertThat(headers.values("Accept ")).isEmpty();
+      assertThat(headers.values("Accep")).isEmpty();
       // "X-Trace" must not read "X-Trace-Id": a prefix match would let one field answer for another.
       assertThat(headers.first("X-Trace-Id")).contains("long");
     }
@@ -236,6 +236,12 @@ class HeadersTest {
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("must not be blank");
       assertThatThrownBy(() -> Headers.of("A", "1").values(""))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not be blank");
+      assertThatThrownBy(() -> Headers.of("A", "1").first("   "))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not be blank");
+      assertThatThrownBy(() -> Headers.of("A", "1").values("   "))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("must not be blank");
       // Both readers refuse the same way. An empty name matches no field, so returning an empty list would report

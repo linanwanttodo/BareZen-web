@@ -127,7 +127,7 @@ public final class Headers {
    */
   public Optional<String> first(String name) {
     Objects.requireNonNull(name, "the header name to read; a null name matches nothing, so it asks for a guess");
-    if (name.isEmpty()) {
+    if (name.isBlank()) {
       throw new IllegalArgumentException("a header name to read must not be blank; \"\" matches no field");
     }
     for (Entry candidate : entries) {
@@ -148,7 +148,7 @@ public final class Headers {
    */
   public List<String> values(String name) {
     Objects.requireNonNull(name, "the header name to read; a null name matches nothing, so it asks for a guess");
-    if (name.isEmpty()) {
+    if (name.isBlank()) {
       throw new IllegalArgumentException("a header name to read must not be blank; \"\" matches no field");
     }
     List<String> found = new ArrayList<>(2);
