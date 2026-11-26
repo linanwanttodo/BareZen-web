@@ -320,7 +320,8 @@ public final class Router {
      * @param handler what to hand back for a matching request. The router stores it and never invokes it
      * @return this builder, so an application can write one registration per line
      * @throws NullPointerException if any argument is null
-     * @throws IllegalArgumentException if {@code pattern} is not a path, if a parameter name is not an identifier, if one
+     * @throws IllegalArgumentException if {@code pattern} is not a path, contains a raw space or control character,
+     *     carries a query, if a parameter name is not an identifier, if one
      *     name is used twice in one pattern, or if a route with the same method and the same shape is already registered.
      *     A duplicate is refused rather than resolved: replacing loses a handler silently, and "last one wins" would make
      *     an application depend on the order its plugins happened to run (ADR-0019 §9)
@@ -413,6 +414,7 @@ public final class Router {
       throw new IllegalArgumentException("the route pattern must be a path, not \"*\"; an OPTIONS * request names the"
           + " server rather than a resource, so there is nothing here for a handler to be registered against");
     }
+    checkPatternCharacters(pattern);
     if (!pattern.startsWith("/")) {
       throw new IllegalArgumentException("the route pattern must start with \"/\"; got \"" + pattern
           + "\". A pattern without a leading slash is relative, and what it is relative to is the adapter's business"
@@ -436,6 +438,17 @@ public final class Router {
       }
     }
     return new Registration(method, pattern, segments, List.copyOf(names), handler);
+  }
+
+  private static void checkPatternCharacters(String pattern) {
+    for (int index = 0; index < pattern.length(); index++) {
+      char character = pattern.charAt(index);
+      if (character <= 0x20 || character == 0x7f) {
+        throw new IllegalArgumentException("the route pattern contains a control character or space at index " + index
+            + " (\\u" + String.format("%04X", (int) character)
+            + "); use percent-encoding in a path pattern");
+      }
+    }
   }
 
   private static String checkedParameterName(String segment, String pattern, List<String> names) {

@@ -709,6 +709,29 @@ class RouterTest {
     }
 
     @Test
+    void aPatternCannotContainRawWhitespaceOrControls() {
+      List<String> accepted = new ArrayList<>();
+      for (String pattern : List.of("/users/a b", "/users/a\tb", "/users/a\r\nb", "/users/a\u007fb")) {
+        try {
+          Router.builder().route(HttpMethod.GET, pattern, LIST_USERS);
+          accepted.add(pattern);
+        } catch (IllegalArgumentException failure) {
+          assertThat(failure).hasMessageContaining("control character or space")
+              .satisfies(error -> assertThat(error.getMessage()).doesNotContain("\r").doesNotContain("\n"));
+        }
+      }
+      assertThat(accepted).as("unreachable or unsafe route patterns accepted by the builder").isEmpty();
+    }
+
+    @Test
+    void percentEncodedWhitespaceRemainsAValidLiteralPattern() {
+      Router router = Router.builder().route(HttpMethod.GET, "/users/a%20b", LIST_USERS).build();
+
+      assertThat(match(router, HttpMethod.GET, "/users/a%20b")).isPresent();
+      assertThat(router.methodsFor("/users/a%20b")).containsExactly(HttpMethod.GET);
+    }
+
+    @Test
     void bracesMustFillAWholeSegment() {
       // "{}" is three characters short of that: a two-character pair of braces is a literal segment holding braces,
       // not a parameter with an empty name, so it is refused before it could ever capture anything.
@@ -722,7 +745,7 @@ class RouterTest {
 
     @Test
     void aParameterNameMustBeAnIdentifier() {
-      for (String segment : List.of("{2fa}", "{user-name}", "{a b}", "{id!}", "{2fa+x}", "{{id}}")) {
+      for (String segment : List.of("{2fa}", "{user-name}", "{id!}", "{2fa+x}", "{{id}}")) {
         assertThatThrownBy(() -> Router.builder().route(HttpMethod.GET, "/users/" + segment, LIST_USERS))
             .as("refuse %s", segment)
             .isInstanceOf(IllegalArgumentException.class)

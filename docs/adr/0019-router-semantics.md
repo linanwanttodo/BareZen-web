@@ -144,7 +144,9 @@ counts are equal and every pair of segments matches, where a literal segment equ
 segment accepts any non-empty arrived text. Four properties follow from that, all of them chosen rather than incidental:
 
 - **Raw.** Nothing is decoded and nothing normalised — no `URI.normalize()`, no `URLDecoder`, no charset decision.
-  Phase 2.7 fixed the contract as a raw one (§5 is this phase's half of the bargain).
+  Phase 2.7 fixed the contract as a raw one (§5 is this phase's half of the bargain). Raw does not mean invalid:
+  registration refuses literal spaces, tabs, CR/LF and DEL before any diagnostic can echo them, because `Request`
+  cannot produce such a path; percent-encoded text such as `%20` remains a valid literal pattern.
 - **Exact segment count.** There is no prefix match, so `GET /users` cannot serve `/users/42`, and no trailing wildcard,
   so nothing reaches a handler "under" a route nobody registered.
 - **Case-sensitive literals.** `/Users` and `/users` are two resources, because in HTTP a path is case-sensitive
@@ -715,6 +717,13 @@ against the same `Router`.
   ADR, not a fifth field on a route.
 - **No middleware, no extension point, no context, no discovery** (§16, §17, §18) — each with a section explaining
   what would have to be true for it to appear, and none with a test that asks for it today.
+
+**Amendment (2026-11-27): reject route patterns the request contract cannot express.** `Builder.route` now
+checks raw target characters before leading-slash, query and parameter diagnostics. Space, tab, CR/LF and DEL are
+refused with an index and escaped code point, never the raw pattern in the message. The check is registration-time
+because such a route can never match a valid `Request` and would put unsafe text into startup logs. `%20` and other
+percent-encoded literals remain valid. `RouterTest` enumerated raw space, tab, CR/LF and DEL; all four were accepted
+before the change, and a reverse control registers and matches `/users/a%20b`.
 
 ## Consequences
 
