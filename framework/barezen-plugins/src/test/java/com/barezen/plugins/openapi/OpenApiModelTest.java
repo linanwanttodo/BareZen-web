@@ -2,8 +2,10 @@ package com.barezen.plugins.openapi;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.barezen.web.HttpMethod;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -155,14 +157,19 @@ class OpenApiModelTest {
     }
 
     @Test
-    @DisplayName("204 and 304 are refused a body schema — the framing contract forbids the bytes (ADR-0029)")
+    @DisplayName("1xx, 204, 205 and 304 are refused a body schema — the framing contract forbids the bytes")
     void noBodyStatuses() {
-      assertThatThrownBy(() -> ApiResponse.json("204", "gone", Schema.string()))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("204");
-      assertThatThrownBy(() -> ApiResponse.json("304", "not modified", Schema.string()))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("304");
+      List<String> accepted = new ArrayList<>();
+      for (String status : List.of("1XX", "103", "204", "205", "304")) {
+        Throwable failure = catchThrowableOfType(
+            () -> ApiResponse.json(status, "no content", Schema.string()), IllegalArgumentException.class);
+        if (failure == null) {
+          accepted.add(status);
+        } else {
+          assertThat(failure).hasMessageContaining(status);
+        }
+      }
+      assertThat(accepted).as("bodyless statuses that wrongly accepted a schema").isEmpty();
       assertThat(ApiResponse.json("200", "body", Schema.string()).bodySchema()).isNotNull();
     }
 

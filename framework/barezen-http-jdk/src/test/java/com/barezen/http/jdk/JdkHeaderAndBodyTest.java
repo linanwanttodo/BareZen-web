@@ -349,6 +349,23 @@ class JdkHeaderAndBodyTest {
       }
     }
 
+    @Test
+    void aResetContentResponseCarriesNoBody() throws IOException {
+      try (JdkHttpServerAdapter adapter = on(Router.builder()
+          .route(HttpMethod.GET, "/h", (request, parameters) ->
+              new Response(205, Headers.of("X-Reset", "form"), null))
+          .build())) {
+        int port = start(adapter);
+
+        RawHttp.Response answer = RawHttp.request(port, "GET", "/h", List.of(), null);
+
+        assertThat(answer.status()).isEqualTo(205);
+        assertThat(answer.firstOf("X-Reset")).isEqualTo("form");
+        assertThat(answer.firstOf("Content-Length")).isEqualTo("0");
+        assertThat(answer.body()).isEmpty();
+      }
+    }
+
     /**
      * A HEAD response carries the fields a GET would have produced, the length of that representation, and no body.
      *

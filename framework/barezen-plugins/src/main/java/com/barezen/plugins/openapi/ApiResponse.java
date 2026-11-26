@@ -9,13 +9,13 @@ import java.util.Objects;
  * <p>The status code is text, and the accepted shapes are the ones the specification's Responses Object defines:
  * a three-digit code ({@code "200"}), a wildcard range ({@code "2XX"}), or the one literal {@code "default"}.
  * Text rather than an int because {@code "2XX"} is a legal answer an int cannot hold, and because the router
- * layer (ADR-0029's framing work) treats codes as three-digit bytes end to end — the document stays honest by
+ * layer (ADR-0027's framing work) treats codes as three-digit bytes end to end — the document stays honest by
  * keeping the same shape as the transport.
  *
- * <p>{@code bodySchema == null} means "this response has no body", and {@code 204}/{@code 304} are refused a
- * schema rather than quietly emitting one: a document that describes bytes for a response the HTTP contract
- * forbids (ADR-0029's decision table) is the invalid-response case Stage 2.14-F names, caught here at the point
- * of declaration instead of in a generated artifact nobody reviewed.
+ * <p>{@code bodySchema == null} means "this response has no body", and {@code 1xx}, {@code 204}, {@code 205} and
+ * {@code 304} are refused a schema rather than quietly emitting one: a document that describes bytes for a response the
+ * HTTP contract forbids (ADR-0027's decision table) is the invalid-response case Stage 2.14-F names, caught here at the
+ * point of declaration instead of in a generated artifact nobody reviewed.
  */
 public record ApiResponse(String statusCode, String description, Schema bodySchema) {
 
@@ -33,10 +33,11 @@ public record ApiResponse(String statusCode, String description, Schema bodySche
       throw new IllegalArgumentException("status code \"" + statusCode
           + "\" is outside the subset: a three-digit code, an NXX range, or \"default\"");
     }
-    if (statusCode.equals("204") || statusCode.equals("304")) {
+    if (statusCode.startsWith("1") || statusCode.equals("204") || statusCode.equals("205")
+        || statusCode.equals("304")) {
       if (bodySchema != null) {
         throw new IllegalArgumentException("response " + statusCode
-            + " declares a body schema; the framing contract (ADR-0029) forbids a body there, and a document"
+            + " declares a body schema; the framing contract (ADR-0027) forbids a body there, and a document"
             + " describing one teaches clients to parse bytes that never arrive");
       }
     }
@@ -47,7 +48,7 @@ public record ApiResponse(String statusCode, String description, Schema bodySche
     return new ApiResponse(statusCode, description, bodySchema);
   }
 
-  /** A documented response with no body — {@code 204}, {@code 304}, or an empty {@code 200}. */
+  /** A documented response with no body — {@code 1xx}, {@code 204}, {@code 205}, {@code 304}, or an empty {@code 200}. */
   public static ApiResponse empty(String statusCode, String description) {
     return new ApiResponse(statusCode, description, null);
   }

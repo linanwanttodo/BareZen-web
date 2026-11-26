@@ -49,7 +49,7 @@ wrote.
 **`Response(status, Headers, byte[])` is kept unchanged in shape. Two rules are added inside its constructor, and one
 behaviour is added to the adapter's write. No new public type, method or field exists after this phase.**
 
-- `1xx`, `204` and `304` responses are refused a non-empty body at construction (`IllegalArgumentException`), because the
+- `1xx`, `204`, `205` and `304` responses are refused a non-empty body at construction (`IllegalArgumentException`), because the
   alternative — writing it and having the server discard it — is a silent disagreement between what a handler returned and
   what a client received.
 - `Content-Length` and `Transfer-Encoding` are refused as response fields on any status, because they describe the write
@@ -71,6 +71,7 @@ Every one of the five cases the phase listed is already expressible as a triple:
 | normal | `(200, fields, "hello")` | `Content-length: 5` + 5 bytes |
 | empty | `(200, fields, new byte[0])` or `(200, fields, null)` | `Content-length: 0` + 0 bytes |
 | `204` | `(204, fields, null)` | no length, no bytes |
+| `205` | `(205, fields, null)` | `Content-length: 0` + 0 bytes on the shipped JDK adapter |
 | `304` | `(304, fields, null)` | no length, no bytes |
 | `HEAD` | the same triple the `GET` would return | length of that body, 0 bytes |
 
@@ -102,7 +103,7 @@ contract-refuses, and they differ in who learns about the mistake:
   message, before anything is committed and before a socket exists.
 
 `contract-refuses` was chosen for both rules, with one deliberate duplication: the adapter keeps its own
-`mayCarryABody(status)` predicate rather than asking `Response` for the set. The two lists are the same three statuses and
+`mayCarryABody(status)` predicate rather than asking `Response` for the set. The two lists are the same bodyless status set and
 could be shared, but sharing them would mean either a contract type that answers wire questions or an adapter that reaches
 into a contract's internals. They are pinned to each other by tests on both sides instead —
 `refusesEveryStatusThatCarriesNoBodyWhenBytesWereGiven` in the contract, `aTwoOhFourIsWrittenWithNoBodyAndNoLength` and
@@ -118,7 +119,7 @@ all three and distinguishes none:
    `Content-length: 0` and nothing else. `null` and `byte[0]` are the same fact to the contract
    (`keepsAnEmptyBodyAndNoBodyAsTheSameFactToTheContract`), which is the honest direction of that statement: the contract
    cannot see which the handler wrote, and the wire shows neither.
-2. **a status that forbids a message body** — `1xx`, `204`, `304`. Here a `byte[0]` is the *correct* answer and a non-empty
+2. **a status that forbids a message body** — `1xx`, `204`, `205`, `304`. Here a `byte[0]` is the *correct* answer and a non-empty
    one is a contradiction, so the rule is about the pair, not about the array.
 3. **a `HEAD` response's representation length** — no bytes on the wire and a real length. "No body" and "no length" are
    different statements, and `HEAD` is where the first is true and the second is false.
@@ -128,10 +129,10 @@ current representation is empty", the second says "there is no representation an
 carried entirely by the status, which is why `byte[0]` needs no wrapper and why the adapter's `declared` value is a
 function of both fields rather than of either alone.
 
-### 4. `204` and `304`: refused at construction
+### 4. Bodyless statuses: refused at construction
 
-`carriesNoBody(status)` is `100..199 || 204 || 304` — the statuses HTTP defines as carrying no message body — and a
-non-empty body alongside one is an `IllegalArgumentException`. An empty body stays legal for all three.
+`carriesNoBody(status)` is `100..199 || 204 || 205 || 304` and a
+non-empty body alongside one is an `IllegalArgumentException`. An empty body stays legal for all four.
 
 The evidence for refusing rather than dropping is the measured JDK behaviour, not a preference. With a bare
 `sendResponseHeaders(204, 5)` (the shape a handler-written body produces when the adapter passes the length through), the
@@ -345,7 +346,7 @@ later phase with a consumer, not an audit fix.
 
 ## Testing evidence
 
-`ResponseTest` — 25 tests, of which 11 are new: `BodylessStatuses` (5) over the table `{100, 101, 103, 199, 204, 304}` and
+`ResponseTest` — 25 tests, of which 11 are new: `BodylessStatuses` (5) over the table `{100, 101, 103, 199, 204, 205, 304}` and
 `FramingFields` (6). `JdkResponseBodySemanticsTest` — 25 new tests in seven nested classes, all on a real socket, some also
 through `java.net.http.HttpClient`. `JdkHeaderAndBodyTest`'s HEAD test was renamed and strengthened to
 `aHeadResponseHasFieldsAndTheRepresentationLengthButNoBody`, asserting `Content-Length` is exactly `["5"]`.
@@ -396,6 +397,19 @@ explanation. F versus F2 is recorded as two rows rather than one because they pi
 bridge-local mutant is caught only where HEAD behaviour differs from the JDK's own suppression, while the dispatcher-level
 mutant, which makes HEAD a `GET` all the way down, is caught everywhere the shape is asserted. That difference is the
 evidence that the tests assert behaviour rather than the implementation of one class.
+
+## Amendment (2026-11-27): 205 Reset Content is bodyless too
+
+RFC 9110 §15.3.6 says that "a server MUST NOT generate content in a 205 response". The original bodyless predicate
+covered 1xx, 204 and 304 but omitted 205. `Response.carriesNoBody` and the JDK bridge's `mayCarryABody` now include 205,
+so a non-empty 205 is refused at construction and a valid empty 205 is written without entity bytes.
+
+`ResponseTest` adds 205 to its existing bodyless table; the test failed before the predicate changed because no exception
+was thrown. `JdkHeaderAndBodyTest.aResetContentResponseCarriesNoBody` sends a real GET and measures status 205, the
+application header, `Content-Length: 0`, and an empty body. Zero length is truthful for this JDK's 205 write; unlike 204
+and 304, the adapter does not claim that the field must be absent.
+
+Reference: [RFC 9110 §15.3.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.6).
 
 ## Limitations
 

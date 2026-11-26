@@ -172,8 +172,8 @@ final class JdkExchangeBridge {
    *       {@code Transfer-encoding: chunked} for it. So an empty body is declared as {@code -1}, which writes
    *       {@code Content-Length: 0} and no body, which is what a zero-length response is;
    *   <li>{@code -1} means "no body follows" and, for a status that may carry one, writes {@code Content-Length: 0}. For
-   *       a {@code 1xx}, {@code 204} or {@code 304} the JDK writes no {@code Content-Length} at all, which is what those
-   *       statuses require;
+   *       a {@code 1xx}, {@code 204} or {@code 304} the JDK writes no {@code Content-Length} at all. A {@code 205} is also
+   *       bodyless here; measured on this JDK, it writes {@code Content-Length: 0};
    *   <li><b>a {@code HEAD} response is the one case the declaration cannot express</b>, because HEAD needs the length of
    *       the representation and none of its bytes. The JDK's {@code HEAD} branch suppresses the body and writes no
    *       {@code Content-Length} of its own — and warns if a positive length was declared — so the length is written into
@@ -241,7 +241,7 @@ final class JdkExchangeBridge {
    * (ADR-0027 §4, §9).
    */
   private static boolean mayCarryABody(int status) {
-    return !(status >= 100 && status < 200) && status != 204 && status != 304;
+    return !(status >= 100 && status < 200) && status != 204 && status != 205 && status != 304;
   }
 
   /**

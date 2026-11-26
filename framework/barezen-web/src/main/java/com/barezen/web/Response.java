@@ -91,7 +91,7 @@ public final class Response {
    * @param body the response body, or {@code null} for none — a body of zero bytes and no body are the same thing to
    *     this contract, which {@code Content-Length: 0} distinguishes on the wire. Copied on construction, so a handler
    *     cannot change what it returned after returning it, and an adapter's buffer is not held. Must be empty for a
-   *     status HTTP says carries no message body: {@code 100..199}, {@code 204} and {@code 304}.
+   *     status HTTP says carries no message body: {@code 100..199}, {@code 204}, {@code 205} and {@code 304}.
    * @throws NullPointerException if {@code headers} is null
    * @throws IllegalArgumentException if {@code status} is outside 100..599, if {@code status} carries no body but a
    *     non-empty one was given, or if {@code headers} holds {@code Content-Length} or {@code Transfer-Encoding}
@@ -172,24 +172,23 @@ public final class Response {
    * what a client got is the failure this contract exists to prevent (ADR-0018 §3), and the earliest point at which it
    * can be named is the constructor the developer wrote the line in.
    *
-   * <p>{@code 100..199}, {@code 204} and {@code 304} are the statuses HTTP defines as carrying no message body. Zero
-   * bytes are not checked and not refused: {@code (204, no content)} is the meaning of the status, and a handler that
-   * returns an empty array or {@code null} is answering it correctly.
+   * <p>{@code 100..199}, {@code 204}, {@code 205} and {@code 304} are the statuses HTTP defines as carrying no message
+   * body. Zero bytes are not checked and not refused: {@code (204, no content)} is the meaning of the status, and a
+   * handler that returns an empty array or {@code null} is answering it correctly.
    */
   private static void checkBodyAllowed(int status, int bodyLength) {
     if (bodyLength == 0 || !carriesNoBody(status)) {
       return;
     }
     throw new IllegalArgumentException("a " + status + " response cannot carry a body; got " + bodyLength
-        + " body bytes. HTTP defines 1xx, 204 and 304 as responses with no message body, so these bytes"
-        + " would never reach the client: the server is obliged to discard them, which is a silent disagreement between"
-        + " what the handler returned and what the client receives. Return the body with a status that has a place for"
-        + " it, or return no body at all (ADR-0027 §4)");
+        + " body bytes. HTTP defines 1xx, 204, 205 and 304 as responses with no message body. Sending these bytes"
+        + " violates the status; discarding them later creates the silent disagreement this contract refuses. Return"
+        + " the body with a status that has a place for it, or return no body at all (ADR-0027 §4)");
   }
 
   /** Whether HTTP defines this status as carrying no message body. */
   private static boolean carriesNoBody(int status) {
-    return (status >= 100 && status < 200) || status == 204 || status == 304;
+    return (status >= 100 && status < 200) || status == 204 || status == 205 || status == 304;
   }
 
   /**

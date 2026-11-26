@@ -147,7 +147,7 @@ public byte[] body()
 
 状态必须在 100–599 之间。body 在构造和读取时都会复制；`null` 与空字节数组都表示零字节。
 
-当前契约禁止非空 body 出现在 1xx、204 或 304 响应中。Handler 也不得设置 `Content-Length` 或 `Transfer-Encoding`，无论名称是什么大小写、值是否相同或是否为空。这是响应帧的所有权规则：Handler 描述表示内容和应用字段，适配器决定 wire 上的长度与传输方式。
+当前契约禁止非空 body 出现在 1xx、204、205 或 304 响应中。Handler 也不得设置 `Content-Length` 或 `Transfer-Encoding`，无论名称是什么大小写、值是否相同或是否为空。这是响应帧的所有权规则：Handler 描述表示内容和应用字段，适配器决定 wire 上的长度与传输方式。
 
 一个普通文本响应可以这样写：
 

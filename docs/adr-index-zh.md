@@ -218,7 +218,7 @@ Handler 主动返回的状态不被替换，`OPTIONS *` 的旧 design debt 标�
 
 ### ADR-0027：响应体保持完整字节，framing 头归写出者所有
 
-`Response(status, Headers, byte[])` 不变，1xx、204 和 304 在构造时拒绝非空 body。
+`Response(status, Headers, byte[])` 不变，1xx、204、205 和 304 在构造时拒绝非空 body。
 Handler 不得设置 `Content-Length` 或 `Transfer-Encoding`，HEAD 则声明 representation 长度但不发送字节。
 304 长度问题后来由 ADR-0029 决定，小写 `head` 的长度错误后来由 ADR-0028 取代。
 

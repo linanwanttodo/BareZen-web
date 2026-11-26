@@ -21,7 +21,7 @@
 - [ADR-0044](../../docs/adr/0044-testkit-is-a-downward-only-test-tool.md) 决定 TestKit 是单向依赖 core、web、JDK adapter、security、data 的消费者测试工具；框架与插件都不依赖它，它也不依赖插件。
 - [ADR-0045](../../docs/adr/0045-examples-are-a-leaf-public-api-only.md) 决定示例是一个叶子模块，只使用公开 API，真实端口由 `main` 启动，JUnit 与 TestKit 在 test scope 验证同一入口。
 - [ADR-0042](../../docs/adr/0042-plugins-sit-on-the-framework-never-in-it.md) 继续约束插件放在框架之上而不是框架内部；因此 OpenAPI 生成器不另开一个会让框架依赖插件类型的新模块。
-- [ADR-0019](../../docs/adr/0019-router-semantics.md) 的路径模板语义是 operation 参数校验的参照；[ADR-0029](../../docs/adr/0029-response-framing-and-304-length.md) 决定 204/304 无体，文档不得给它们声明 body schema。
+- [ADR-0019](../../docs/adr/0019-router-semantics.md) 的路径模板语义是 operation 参数校验的参照；[ADR-0029](../../docs/adr/0029-response-framing-and-304-length.md) 与 [ADR-0027](../../docs/adr/0027-http-response-body-semantics.md) 决定 1xx/204/205/304 无体，文档不得给它们声明 body schema。
 - [ADR-0036](../../docs/adr/0036-sessions-are-opaque-and-revocable.md) 与 [ADR-0037](../../docs/adr/0037-status-codes-and-default-deny.md) 说明为什么当前 OpenAPI 子集只诚实地描述 bearer scheme，以及为什么测试要覆盖 401/403；[ADR-0038](../../docs/adr/0038-jdbc-boundary-and-driver-free-data-layer.md) 决定数据库由应用提供 `DataSource`；[ADR-0032](../../docs/adr/0032-class-major-build-contract.md) 继续要求每个产物保持 major 61。
 
 这些 ADR 是决定记录，不是替代源码的 API 文档。当前代码若已经细化或修订早期表述，本章以磁盘源码和实际测试输出为准，并明确标出差异。
@@ -54,7 +54,7 @@
 
 ## 一次失败推演
 
-假设路由中有 `GET /users/{id}`，文档却声明 `Parameter.query("id", Schema.string(), true)`，并给 204 响应配了 JSON body。第一次写文档的人可能认为“参数名相同就够了”，但位置错会把客户端生成错误请求；204 有 body 则违反 HTTP 分帧契约。当前实现不会等生成 JSON 后才警告：`Operation.Builder.build()` 会把 query 与模板中的 path 参数冲突拒绝，`ApiResponse` 构造时直接拒绝 204 body schema。文档对象根本不会存在，更不会被挂到路由上。
+假设路由中有 `GET /users/{id}`，文档却声明 `Parameter.query("id", Schema.string(), true)`，并给 205 响应配了 JSON body。第一次写文档的人可能认为“参数名相同就够了”，但位置错会把客户端生成错误请求；205 有 body 则违反 HTTP 无内容语义。当前实现不会等生成 JSON 后才警告：`Operation.Builder.build()` 会把 query 与模板中的 path 参数冲突拒绝，`ApiResponse` 构造时直接拒绝 205 body schema。文档对象根本不会存在，更不会被挂到路由上。
 
 再假设测试只调用 `document.handler().handle(...)`。它能验证 handler 返回了预期字节，却跳过了 JDK adapter 的 Content-Length 计算、HEAD 去除 body、连接关闭与套接字绑定。TestKit 的价值就是不让这些步骤被省略：应用构建公开 router，`TestServer.start` 启动真实适配器，client 通过 HTTP 请求，最后才对状态、header 和 body 做断言。若测试没有 close server，端口会一直占用，因此 try-with-resources 不是风格偏好，而是资源所有权的一部分。
 

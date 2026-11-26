@@ -27,7 +27,7 @@ Operation 则保留参数、响应和 security requirement 的声明顺序。响
 - 缺必需字段：document 的 title/version，response 的 description，operation 的至少一个 response。
 - 重复 `(method, path)`：同一路线身份出现两次。
 - 重复 operationId：不同模板经过派生后撞成同一个客户端可用标识。
-- 无效响应：状态文本非法、204/304 带 body schema，或 operation 没有响应。
+- 无效响应：状态文本非法、1xx/204/205/304 带 body schema，或 operation 没有响应。
 - 悬空 `$ref`：operation payload 或组件内部引用了不存在的组件。
 - 无效 security requirement：operation 使用了 document 未声明的 scheme。
 

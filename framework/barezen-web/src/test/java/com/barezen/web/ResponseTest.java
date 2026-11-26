@@ -198,8 +198,8 @@ class ResponseTest {
   @DisplayName("a status with no body cannot be given one")
   class BodylessStatuses {
 
-    /** The three families HTTP defines as carrying no message body. */
-    private static final int[] NO_BODY = {100, 101, 103, 199, 204, 304};
+    /** The status families HTTP defines as carrying no message body. */
+    private static final int[] NO_BODY = {100, 101, 103, 199, 204, 205, 304};
 
     @Test
     void refusesEveryStatusThatCarriesNoBodyWhenBytesWereGiven() {
