@@ -26,7 +26,7 @@ Pages 的地址约束也来自同一部署事实。项目页通常位于 `/<repo
 
 ## 动手
 
-示例注册路由的核心在 [StaticFileExample.java:44](../../examples/src/main/java/com/barezen/examples/staticcontent/StaticFileExample.java#L44)：
+示例注册路由的核心在 [StaticFileExample.java:46](../../examples/src/main/java/com/barezen/examples/staticcontent/StaticFileExample.java#L46)：
 
 ```java
 try (Stream<Path> files = Files.list(directory)) {
@@ -45,7 +45,7 @@ try (Stream<Path> files = Files.list(directory)) {
 
 main 在 `127.0.0.1:0` 启动真实 adapter，端口由操作系统分配。第一次 GET 读取 ETag，第二次携带相同 If-None-Match，第三次发送 HEAD，最后请求未注册路径。每一步打印实际观察，而不是只写“静态服务器已启动”。server.stop 放在 finally，客户端 InterruptedException 被保留为 cause 后转为 IllegalStateException。它不是长期运行服务，而是可重复执行的教学程序。
 
-GET-only 反例写在 [StaticFileExampleTest.java:73](../../examples/src/test/java/com/barezen/examples/staticcontent/StaticFileExampleTest.java#L73)：
+GET-only 反例写在 [StaticFileExampleTest.java:90](../../examples/src/test/java/com/barezen/examples/staticcontent/StaticFileExampleTest.java#L90)：
 
 ```java
 Router getOnly = Router.builder()
@@ -73,7 +73,7 @@ try (TestServer server = TestServer.start(getOnly)) {
 
 ## 怎么确认这一步没造错
 
-运行示例的 6 个真实套接字测试：
+运行示例的 7 个真实套接字测试：
 
 ```bash
 mvn -o -B -ntp -pl examples -am test \
@@ -81,7 +81,7 @@ mvn -o -B -ntp -pl examples -am test \
   -Dtest=StaticFileExampleTest
 ```
 
-本次实跑 6 项，0 失败、0 错误。测试分别验证每个平铺文件以自己的名称注册、classpath 资源通过公开 API 提供正文与 HEAD、相同 ETag 的 reload 返回无正文无长度的 304、HEAD 返回表示长度但不发送正文、GET-only 返回 405、未注册地址返回 404 且错误方法返回 405。TestServer 使用真实端口，不是直接调用 Handler 的替代品。
+本次实跑 7 项，0 失败、0 错误。测试分别验证每个平铺文件以自己的名称注册、classpath 资源通过公开 API 提供正文与 HEAD、相同 ETag 的 reload 返回无正文无长度的 304、HEAD 返回表示长度但不发送正文、公开 API 的单范围 206 与不可满足 416、GET-only 返回 405、未注册地址返回 404 且错误方法返回 405。TestServer 使用真实端口，不是直接调用 Handler 的替代品。
 
 直接执行示例可以观察最终输出。仓库根目录先构建测试产物，然后使用 examples README 记录的 classpath 方式；下面增加 `$PWD` 是为了避免相对 classpath 的歧义：
 
@@ -95,7 +95,7 @@ CP="$CP:$M2/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar:$M2/com/h2database/h
 java -cp "$CP" com.barezen.examples.staticcontent.StaticFileExample
 ```
 
-本次实跑看到两个文件生成四条路由：`GET /notes.txt`、`HEAD /notes.txt`、`GET /status.json`、`HEAD /status.json`；notes 为 44 字节，ETag 为 `"ec185bc08f4786af"`；reload 为 304、0 字节、Content-Length absent；HEAD 声明 44、收到 0 字节；未注册路径为 404、正文 `Not Found`。临时目录名每次不同，不是固定输出。
+本次实跑看到两个临时文件加一个 classpath 资源生成六条路由：`GET /notes.txt`、`HEAD /notes.txt`、`GET /status.json`、`HEAD /status.json`、`GET /classpath.txt`、`HEAD /classpath.txt`；notes 为 44 字节，ETag 为 `"ec185bc08f4786af"`；reload 为 304、0 字节、Content-Length absent；HEAD 声明 44、收到 0 字节；`Range: bytes=0-3` 为 206、4 字节、`Content-Range: bytes 0-3/44`；未注册路径为 404、正文 `Not Found`。临时目录名每次不同，不是固定输出。
 
 再执行 `./scripts/check-site.sh`。本次当前树实测输出 `checked 34 pages, 1 stylesheet(s)` 与 `OK: the static site is self-consistent`。ADR-0054 记录的是当时 12 页，文档引用历史结果时必须标明时间，不能把旧数字当成当前验收结果。
 
@@ -103,4 +103,4 @@ java -cp "$CP" com.barezen.examples.staticcontent.StaticFileExample
 
 barezen-content 现在有 shipped example 作为消费者，而文档站回归“文件夹就是交付物”。应用在装配时枚举明确目录，为每个文件注册两个方法；示例既打印观察，也用真实套接字固定这些观察。Pages 只检查文件与相对链接，不假装提供条件缓存或扩展less 路由。
 
-仍要诚实保留限制：枚举不递归、没有 Cache-Control、每次请求全量读取、没有 Range 或流式下载；文档站不会得到 ETag。下一步把模块行为、架构边界、字节码基线、示例和站点脚本放在同一条检查路径中，形成可重复的章节验收。
+仍要诚实保留限制：枚举不递归、没有 Cache-Control、每次请求全量读取、没有多部分范围或流式下载；文档站不会得到 ETag。下一步把模块行为、架构边界、字节码基线、示例和站点脚本放在同一条检查路径中，形成可重复的章节验收；之后再用第 5 步拆解已经纳入检查点的单范围 GET。

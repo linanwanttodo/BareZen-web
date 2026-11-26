@@ -2,6 +2,7 @@ package com.barezen.content;
 
 import com.barezen.web.Handler;
 import com.barezen.web.Headers;
+import com.barezen.web.HttpMethod;
 import com.barezen.web.Request;
 import com.barezen.web.Response;
 import java.io.IOException;
@@ -11,11 +12,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
 /**
- * One disk file or classpath resource, served as one route: bytes, a type, an {@code ETag}, and a conditional GET.
+ * One disk file or classpath resource, served as one route: bytes, a type, an {@code ETag}, a conditional GET and one
+ * byte range on GET.
  *
  * <p><b>One handler per file, and why there is no directory route.</b> {@link com.barezen.Router} answers
  * «method plus raw path, to a handler» and its patterns are a literal segment or exactly {@code {name}} capturing one
@@ -196,7 +200,7 @@ public final class StaticContent {
   }
 
   /**
-   * The one handler: read the bytes, derive the tag, answer 304 to a client that already has them.
+   * The one handler: read the bytes, derive the tag, then answer a conditional request or one byte range.
    *
    * <p>Package-private because a handler that reaches the disk is not something an application should be subclassing;
    * the configuration it might want (a type, a cache policy) is either an argument here or a handler of its own.
@@ -244,12 +248,96 @@ public final class StaticContent {
 
   private static Response respond(byte[] content, String contentType, Request request) {
     String etag = etagOf(content);
-    if (matches(request.headers().first("If-None-Match").orElse(null), etag)) {
+    if (matches(request.headers().values("If-None-Match"), etag)) {
       // No body, and no length stated: ADR-0029 D1 keeps a 304 free of Content-Length, and Response refuses a body
       // for the status anyway. The ETag travels because a validator has to survive the answer it validated.
       return new Response(304, Headers.of("ETag", etag), null);
     }
-    return new Response(200, Headers.of("Content-Type", contentType).with("ETag", etag), content);
+    Headers representation = Headers.of("Content-Type", contentType)
+        .with("ETag", etag)
+        .with("Accept-Ranges", "bytes");
+    List<String> ranges = request.headers().values("Range");
+    List<String> ifRanges = request.headers().values("If-Range");
+    if (request.method() != HttpMethod.GET || ranges.size() > 1 || ifRanges.size() > 1
+        || (ifRanges.size() == 1 && !ifRanges.get(0).equals(etag))) {
+      return new Response(200, representation, content);
+    }
+    ByteRange range = parseRange(ranges.isEmpty() ? null : ranges.get(0), content.length);
+    if (range == null) {
+      return new Response(200, representation, content);
+    }
+    if (range.first() < 0) {
+      return new Response(416, representation.with("Content-Range", "bytes */" + content.length), new byte[0]);
+    }
+    Headers rangeHeaders = representation.with("Content-Range",
+        "bytes " + range.first() + "-" + range.last() + "/" + content.length);
+    return new Response(206, rangeHeaders,
+        Arrays.copyOfRange(content, (int) range.first(), (int) range.last() + 1));
+  }
+
+  private static final ByteRange UNSATISFIABLE = new ByteRange(-1, -1);
+
+  private record ByteRange(long first, long last) {}
+
+  private static ByteRange parseRange(String value, int size) {
+    if (value == null || value.indexOf(',') >= 0) {
+      return null;
+    }
+    int equals = value.indexOf('=');
+    if (equals < 0 || !value.substring(0, equals).trim().equalsIgnoreCase("bytes")) {
+      return null;
+    }
+    String specification = value.substring(equals + 1).trim();
+    int dash = specification.indexOf('-');
+    if (dash < 0 || specification.indexOf('-', dash + 1) >= 0) {
+      return null;
+    }
+    String firstText = specification.substring(0, dash).trim();
+    String lastText = specification.substring(dash + 1).trim();
+    if (firstText.isEmpty()) {
+      long suffix = position(lastText);
+      if (suffix < 0) {
+        return null;
+      }
+      if (size == 0 || suffix == 0) {
+        return UNSATISFIABLE;
+      }
+      return new ByteRange(size - Math.min(suffix, size), size - 1);
+    }
+    long first = position(firstText);
+    if (first < 0) {
+      return null;
+    }
+    if (lastText.isEmpty()) {
+      if (first >= size) {
+        return UNSATISFIABLE;
+      }
+      return new ByteRange(first, size - 1L);
+    }
+    long last = position(lastText);
+    if (last < 0 || last < first) {
+      return null;
+    }
+    if (first >= size) {
+      return UNSATISFIABLE;
+    }
+    return new ByteRange(first, Math.min(last, size - 1L));
+  }
+
+  private static long position(String text) {
+    if (text.isEmpty()) {
+      return -1;
+    }
+    for (int index = 0; index < text.length(); index++) {
+      if (text.charAt(index) < '0' || text.charAt(index) > '9') {
+        return -1;
+      }
+    }
+    try {
+      return Long.parseLong(text);
+    } catch (NumberFormatException overflow) {
+      return -1;
+    }
   }
 
   /**
@@ -283,14 +371,16 @@ public final class StaticContent {
    * the validator was recorded weakly. Quoting is stripped before comparison rather than normalised on the way out, so
    * a client that sent {@code W/"abc"} matches a strong {@code "abc"}.
    */
-  private static boolean matches(String ifNoneMatch, String etag) {
-    if (ifNoneMatch == null || ifNoneMatch.isBlank()) {
-      return false;
-    }
-    for (String candidate : ifNoneMatch.split(",")) {
-      String trimmed = candidate.trim();
-      if (trimmed.equals("*") || unquote(trimmed).equals(unquote(etag))) {
-        return true;
+  private static boolean matches(List<String> validators, String etag) {
+    for (String validator : validators) {
+      if (validator.isBlank()) {
+        continue;
+      }
+      for (String candidate : validator.split(",")) {
+        String trimmed = candidate.trim();
+        if (trimmed.equals("*") || unquote(trimmed).equals(unquote(etag))) {
+          return true;
+        }
       }
     }
     return false;

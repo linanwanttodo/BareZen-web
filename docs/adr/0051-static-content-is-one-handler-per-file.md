@@ -4,7 +4,7 @@
 
 accepted
 Date: 2026-10-06
-Decides: what a static file is in this framework and where it lives, how a file becomes routable without widening the route table, what an `ETag` is derived from and why there is no `Last-Modified`, what a 304 answers now that a real conditional-GET consumer exists, and which files may not be served
+Decides: what a static file is in this framework and where it lives, how a file becomes routable without widening the route table, what an `ETag` is derived from and why there is no `Last-Modified`, what a 304 answers now that a real conditional-GET consumer exists, which files may not be served, and how one GET byte range is selected without streaming
 Related: ADR-0019 §5/§19 (raw segments, the refused-name list that names `PathPattern` and `PathMatcher`), ADR-0018 §12 (web names no IO, so file serving lives elsewhere), ADR-0029 D1 (the 304 length decision, and the trigger this phase meets), ADR-0023 §2 (a 404 names no path), ADR-0030 (a response body is `byte[]`, with named reopening conditions), ADR-0011/ADR-0013 (no clock in a decision that has an argument, no configuration read at request time)
 
 ## Context
@@ -175,10 +175,37 @@ bytes are read once and frozen because a jar resource is not a live deployment f
 GET, MIME table and one-route-per-resource rules are shared with `file(...)`. No classpath scanning, directory route,
 request-supplied resource name or remote loader was added.
 
+## Amendment (2026-11-27): one byte range on GET
+
+A real consumer now needs to retrieve part of a representation without changing the buffered `Response` contract. The
+public factory surface stays unchanged: `file(...)` and `resource(...)` both answer a single `bytes` range on GET.
+`bytes=2-5`, `bytes=7-` and `bytes=-3` produce 206 with the selected bytes, `Content-Range`, the existing content type
+and ETag, and `Accept-Ranges: bytes`. The adapter still owns `Content-Length`, which is the selected body's length.
+A syntactically valid range outside the representation, a zero-length suffix, or any valid range over an empty
+representation produces 416, an empty body and `Content-Range: bytes */size`.
+
+Malformed syntax, an end before the start, an unknown unit, numeric overflow, a comma-separated set and repeated Range
+field lines fall back to the complete 200 response. This is deliberate scope control: the module does not implement
+multipart/byteranges or pretend that ignoring an unsupported range is an error. HEAD ignores Range and retains the full
+GET representation length. `If-Range` enables a range only when its single value exactly matches the current strong
+ETag; a stale tag, weak tag, HTTP date or repeated field line falls back to 200. `If-None-Match` is evaluated first, so a
+matching validator still produces 304, and its repeated field lines are combined as one candidate list.
+
+The range is parsed with non-negative ASCII decimal positions into `long`, then clamped to the in-memory `int` size
+before copying. This avoids both Unicode-digit acceptance and integer overflow turning a client header into an invalid
+array index. No new dependency, public type, streaming writer, cache policy or request-supplied path is introduced.
+
+`StaticContentTest` grows from 23 to 35 tests: 11 range cases and one additional real-socket framing case. The range
+suite first failed against the previous implementation with 200 where 206/416 was required; repeated field-line tests
+then exposed first-value-only handling, and empty open ranges plus reversed out-of-bounds ranges exposed the difference
+between malformed and unsatisfiable input. The focused checkpoint runs 35 behavior tests, 6 architecture rules and 4
+class-major checks in content. The shipped `StaticFileExample` also sends `Range: bytes=0-3` and has a TestKit assertion
+for both 206 and 416 through the public API.
+
 ## Non-goals
 
 Wildcard or prefix routes, directory listing, `Last-Modified`/`If-Modified-Since`, `Cache-Control` or any CDN policy,
-range requests, compression, streaming a large file, classpath scanning, and a static handler that takes a path from
+multipart/byteranges, compression, streaming a large file, classpath scanning, and a static handler that takes a path from
 the request.
 
 ## Reopening trigger

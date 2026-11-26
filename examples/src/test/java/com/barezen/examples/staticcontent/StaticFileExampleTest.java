@@ -12,9 +12,9 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 /**
- * Proves the three answers {@link StaticFileExample#main} prints, over a real socket: a first request carries the bytes
- * and a tag, a conditional reload is a 304 with no body and no length, and a {@code HEAD} states a length it does not
- * send (ADR-0029, re-measured by ADR-0051 with a consumer in the room).
+ * Proves the answers {@link StaticFileExample#main} prints, over a real socket: a first request carries the bytes
+ * and a tag, a conditional reload is a 304 with no body and no length, a {@code HEAD} states a length it does not
+ * send, and one byte range is a 206 while an unsatisfiable range is a 416 (ADR-0029, ADR-0051).
  */
 final class StaticFileExampleTest {
 
@@ -66,6 +66,23 @@ final class StaticFileExampleTest {
       assertThat(head.status()).isEqualTo(200);
       assertThat(head.header("Content-Length")).contains(Integer.toString(length));
       assertThat(head.bodyBytes()).isEmpty();
+    }
+  }
+
+  @Test
+  void aSingleByteRangeAndAnUnsatisfiableRangeUseThePublicApi() throws IOException {
+    try (TestServer server = TestServer.start(StaticFileExample.router(StaticFileExample.workspace()))) {
+      Assertions.assertThat(server.client().request(HttpMethod.GET, "/notes.txt")
+          .header("Range", "bytes=0-3").send())
+          .statusIs(206)
+          .headerIs("Content-Range", "bytes 0-3/44")
+          .headerIs("Accept-Ranges", "bytes")
+          .bodyIs("stat");
+      Assertions.assertThat(server.client().request(HttpMethod.GET, "/notes.txt")
+          .header("Range", "bytes=44-").send())
+          .statusIs(416)
+          .headerIs("Content-Range", "bytes */44")
+          .bodyIs("");
     }
   }
 

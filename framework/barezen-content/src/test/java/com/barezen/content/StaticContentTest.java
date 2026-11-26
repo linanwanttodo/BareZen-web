@@ -16,6 +16,7 @@ import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -25,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A file served as a route: the bytes, the type, the tag, and what a conditional GET answers.
+ * A file served as a route: the bytes, the type, the tag, conditional GET and one byte range.
  *
  * <p>Two layers of proof. The unit half drives {@link Handler#handle} directly, because an ETag that changes when the
  * bytes do and a 304 that carries no body are decisions about a value. The socket half runs the same handler through
@@ -177,6 +178,175 @@ class StaticContentTest {
       assertThat(handler.handle(request(HttpMethod.GET, "/x", Map.of()), Map.of()).status()).isEqualTo(200);
       assertThat(handler.handle(request(HttpMethod.GET, "/x", Map.of("If-None-Match", "  ")), Map.of()).status())
           .isEqualTo(200);
+    }
+  }
+
+  @Nested
+  @DisplayName("a single byte range")
+  class Ranges {
+
+    @Test
+    void aBoundedRangeReturns206WithTheSelectedBytes(@TempDir Path directory) throws Exception {
+      Path file = write(directory, "a.txt", "0123456789");
+
+      Response response = StaticContent.file(file)
+          .handle(request(HttpMethod.GET, "/a.txt", Map.of("Range", "bytes=2-5")), Map.of());
+
+      assertThat(response.status()).isEqualTo(206);
+      assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("2345");
+      assertThat(response.headers().first("Content-Range")).contains("bytes 2-5/10");
+      assertThat(response.headers().first("Content-Type")).contains("text/plain; charset=utf-8");
+      assertThat(response.headers().first("ETag")).isPresent();
+      assertThat(response.headers().first("Accept-Ranges")).contains("bytes");
+    }
+
+    @Test
+    void openEndsSuffixesAndClampedEndsAreSatisfiable(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+
+      assertRange(handler, "bytes=7-", "789", "bytes 7-9/10");
+      assertRange(handler, "bytes=0-", "0123456789", "bytes 0-9/10");
+      assertRange(handler, "bytes=-3", "789", "bytes 7-9/10");
+      assertRange(handler, "bytes=-99", "0123456789", "bytes 0-9/10");
+      assertRange(handler, "bytes=8-99", "89", "bytes 8-9/10");
+    }
+
+    @Test
+    void aValidButUnsatisfiableRangeReturns416WithTheKnownSize(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+
+      for (String value : List.of("bytes=10-", "bytes=99-100", "bytes=-0")) {
+        Response response = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of("Range", value)), Map.of());
+        assertThat(response.status()).as(value).isEqualTo(416);
+        assertThat(response.body()).isEmpty();
+        assertThat(response.headers().first("Content-Range")).contains("bytes */10");
+      }
+    }
+
+    @Test
+    void malformedMultipleAndUnknownRangesFallBackToTheWholeRepresentation(@TempDir Path directory)
+        throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+
+      for (String value : List.of("items=0-1", "bytes=3-1", "bytes=10-9", "bytes=0-1,3-4", "bytes=x-y", "bytes=-",
+          "bytes=+1-2", "bytes=999999999999999999999-", " ")) {
+        Response response = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of("Range", value)), Map.of());
+        assertThat(response.status()).as(value).isEqualTo(200);
+        assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("0123456789");
+        assertThat(response.headers().first("Content-Range")).isEmpty();
+      }
+    }
+
+    @Test
+    void ifRangeAppliesOnlyWhenTheStrongValidatorStillMatches(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+      String etag = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of()), Map.of())
+          .headers().first("ETag").orElseThrow();
+
+      assertRange(handler, Map.of("Range", "bytes=1-2", "If-Range", etag), "12", "bytes 1-2/10");
+      for (String validator : List.of("\"stale\"", "W/" + etag, "Wed, 21 Oct 2015 07:28:00 GMT")) {
+        Response response = handler.handle(
+            request(HttpMethod.GET, "/a.txt", Map.of("Range", "bytes=1-2", "If-Range", validator)), Map.of());
+        assertThat(response.status()).as(validator).isEqualTo(200);
+        assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("0123456789");
+      }
+    }
+
+    @Test
+    void headAndAnEmptyRepresentationHaveExplicitRangeAnswers(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+      Response head = handler.handle(request(HttpMethod.HEAD, "/a.txt", Map.of("Range", "bytes=1-2")), Map.of());
+      assertThat(head.status()).isEqualTo(200);
+      assertThat(new String(head.body(), StandardCharsets.UTF_8)).isEqualTo("0123456789");
+
+      Handler empty = StaticContent.file(write(directory, "empty.txt", ""));
+      Response response = empty.handle(request(HttpMethod.GET, "/empty.txt", Map.of("Range", "bytes=0-0")), Map.of());
+      assertThat(response.status()).isEqualTo(416);
+      assertThat(response.headers().first("Content-Range")).contains("bytes */0");
+      assertThat(empty.handle(request(HttpMethod.GET, "/empty.txt", Map.of("Range", "bytes=0-")), Map.of())
+          .status()).isEqualTo(416);
+    }
+
+    @Test
+    void aMatchingValidatorStillWinsOverARange(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+      String etag = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of()), Map.of())
+          .headers().first("ETag").orElseThrow();
+
+      Response response = handler.handle(request(HttpMethod.GET, "/a.txt",
+          Map.of("If-None-Match", etag, "Range", "bytes=1-2")), Map.of());
+
+      assertThat(response.status()).isEqualTo(304);
+      assertThat(response.body()).isEmpty();
+      assertThat(response.headers().first("Content-Range")).isEmpty();
+    }
+
+    @Test
+    void repeatedRangeLinesFallBackRatherThanTrustingOnlyTheFirst(@TempDir Path directory)
+        throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+      String etag = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of()), Map.of())
+          .headers().first("ETag").orElseThrow();
+
+      Response repeatedRanges = handler.handle(new Request(HttpMethod.GET, "/a.txt", null,
+          Headers.empty().with("Range", "bytes=1-2").with("Range", "bytes=3-4"), null), Map.of());
+      assertThat(repeatedRanges.status()).isEqualTo(200);
+      assertThat(new String(repeatedRanges.body(), StandardCharsets.UTF_8)).isEqualTo("0123456789");
+    }
+
+    @Test
+    void repeatedIfRangeLinesFallBackRatherThanTrustingOnlyTheFirst(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+      String etag = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of()), Map.of())
+          .headers().first("ETag").orElseThrow();
+
+      Response response = handler.handle(new Request(HttpMethod.GET, "/a.txt", null,
+          Headers.empty().with("Range", "bytes=1-2")
+              .with("If-Range", etag)
+              .with("If-Range", "\"stale\""), null), Map.of());
+      assertThat(response.status()).isEqualTo(200);
+      assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("0123456789");
+    }
+
+    @Test
+    void repeatedIfNoneMatchLinesAreOneValidatorList(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "a.txt", "0123456789"));
+      String etag = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of()), Map.of())
+          .headers().first("ETag").orElseThrow();
+
+      Response response = handler.handle(new Request(HttpMethod.GET, "/a.txt", null,
+          Headers.empty().with("If-None-Match", "\"stale\"").with("If-None-Match", etag), null), Map.of());
+
+      assertThat(response.status()).isEqualTo(304);
+      assertThat(response.body()).isEmpty();
+    }
+
+    @Test
+    void classpathResourcesShareTheSameRangeRules() {
+      Handler handler = StaticContent.resource(StaticContent.class.getClassLoader(), "static-content/hello.txt");
+      byte[] expected = "hello from the classpath\n".getBytes(StandardCharsets.UTF_8);
+
+      Response response = handler.handle(
+          request(HttpMethod.GET, "/hello.txt", Map.of("Range", "bytes=6-9")), Map.of());
+
+      assertThat(response.status()).isEqualTo(206);
+      assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("from");
+      assertThat(response.headers().first("Content-Range"))
+          .contains("bytes 6-9/" + expected.length);
+    }
+
+    private static void assertRange(Handler handler, String range, String body, String contentRange) {
+      Response response = handler.handle(request(HttpMethod.GET, "/a.txt", Map.of("Range", range)), Map.of());
+      assertThat(response.status()).isEqualTo(206);
+      assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo(body);
+      assertThat(response.headers().first("Content-Range")).contains(contentRange);
+    }
+
+    private static void assertRange(Handler handler, Map<String, String> headers, String body, String contentRange) {
+      Response response = handler.handle(request(HttpMethod.GET, "/a.txt", headers), Map.of());
+      assertThat(response.status()).isEqualTo(206);
+      assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo(body);
+      assertThat(response.headers().first("Content-Range")).contains(contentRange);
     }
   }
 
@@ -365,6 +535,44 @@ class StaticContentTest {
         assertThat(cached.firstOf("ETag")).isEqualTo(etag);
 
         RawHttp.Response head = RawHttp.request(port, "HEAD", "/assets/app.css", java.util.List.of(), null);
+        assertThat(head.status()).isEqualTo(200);
+        assertThat(head.firstOf("Content-Length")).isEqualTo("14");
+        assertThat(head.body()).isEmpty();
+      } finally {
+        adapter.stop();
+      }
+    }
+
+    @Test
+    void aRangeAndAnUnsatisfiableRangeAreFramedOverTheSocket(@TempDir Path directory) throws Exception {
+      Path file = write(directory, "app.css", "body{margin:0}");
+      Handler handler = StaticContent.file(file);
+      Router router = Router.builder()
+          .route(HttpMethod.GET, "/assets/app.css", handler)
+          .route(HttpMethod.HEAD, "/assets/app.css", handler)
+          .build();
+      com.barezen.http.jdk.JdkHttpServerAdapter adapter =
+          new com.barezen.http.jdk.JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", 0), router);
+      adapter.start();
+      try {
+        int port = adapter.port().getAsInt();
+        RawHttp.Response partial = RawHttp.request(port, "GET", "/assets/app.css",
+            java.util.List.of("Range: bytes=0-3"), null);
+        assertThat(partial.status()).isEqualTo(206);
+        assertThat(partial.firstOf("Content-Length")).isEqualTo("4");
+        assertThat(partial.firstOf("Content-Range")).isEqualTo("bytes 0-3/14");
+        assertThat(partial.firstOf("Accept-Ranges")).isEqualTo("bytes");
+        assertThat(partial.bodyUtf8()).isEqualTo("body");
+
+        RawHttp.Response unsatisfiable = RawHttp.request(port, "GET", "/assets/app.css",
+            java.util.List.of("Range: bytes=14-"), null);
+        assertThat(unsatisfiable.status()).isEqualTo(416);
+        assertThat(unsatisfiable.firstOf("Content-Length")).isEqualTo("0");
+        assertThat(unsatisfiable.firstOf("Content-Range")).isEqualTo("bytes */14");
+        assertThat(unsatisfiable.body()).isEmpty();
+
+        RawHttp.Response head = RawHttp.request(port, "HEAD", "/assets/app.css",
+            java.util.List.of("Range: bytes=0-3"), null);
         assertThat(head.status()).isEqualTo(200);
         assertThat(head.firstOf("Content-Length")).isEqualTo("14");
         assertThat(head.body()).isEmpty();

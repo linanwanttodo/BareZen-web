@@ -4,11 +4,11 @@
 
 前七章已经能装配对象、匹配路由并把 Response 写到真实套接字，但仍不能正确回答一个浏览器最常见的问题：这个样式表或页面现在是什么内容，我上次保存的副本还能用吗？本章增加 `barezen-content`，但它不是把目录整个暴露给网络，而是把“一个磁盘文件”变成“一个普通 Handler”。路由、认证、生命周期与响应分帧仍由前几章的组件负责。
 
-最终形状很窄：应用在装配时选择文件，调用 `StaticContent.file(path)` 得到 Handler，再为 GET 和 HEAD 注册路由。每次请求读取当前字节、计算 ETag；`If-None-Match` 匹配就返回只有 ETag 的 304，否则返回 200、类型、ETag 与完整字节。需要把资源打进 jar 时，使用 `StaticContent.resource(classLoader, name)`；它在装配时校验并冻结资源字节。Content-Length 不由 Handler 声明，adapter 从实际要写的字节派生；304 没有长度，HEAD 有表示长度但不发送正文。
+最终形状很窄：应用在装配时选择文件，调用 `StaticContent.file(path)` 得到 Handler，再为 GET 和 HEAD 注册路由。每次请求读取当前字节、计算 ETag；`If-None-Match` 匹配就返回只有 ETag 的 304，否则返回 200、类型、ETag 与完整字节。GET 的一个 `bytes` 范围返回 206 与 `Content-Range`，不可满足范围返回 416；HEAD 忽略 Range，仍返回完整表示长度。需要把资源打进 jar 时，使用 `StaticContent.resource(classLoader, name)`；它在装配时校验并冻结资源字节。Content-Length 不由 Handler 声明，adapter 从实际要写的字节派生；304 没有长度，HEAD 有表示长度但不发送正文。
 
 时间线上有两个不能混淆的消费者。`326c25a` 引入静态内容模块，最初服务于当时的文档站；`9aeb03e` 又把文档站改为 GitHub Pages 直接托管的纯文件目录，并把消费者移到 `examples/staticcontent/StaticFileExample`。所以当前源码中，site 不是 Maven 模块，StaticContent 也不会替 Pages 生成 ETag。教程讲实现，也讲这个决定为什么改变了部署方式。
 
-完成本章后，你应能解释为什么不增加 `/assets/*`，为什么路径不能来自请求，为什么 ETag 取内容哈希而不是修改时间；你应能从真实套接字区分 200、304 与 HEAD 的正文和长度；还应能指出全量缓冲、平铺目录枚举和缺少 Cache-Control 的代价，而不是把这些边界说成已经支持的功能。
+完成本章后，你应能解释为什么不增加 `/assets/*`，为什么路径不能来自请求，为什么 ETag 取内容哈希而不是修改时间；你应能从真实套接字区分 200、304、206、416 与 HEAD 的正文和长度；还应能指出全量缓冲、平铺目录枚举、单范围与缺少 Cache-Control 的代价，而不是把这些边界说成已经支持的功能。
 
 ## 涉及 ADR
 
@@ -24,6 +24,7 @@
 2. [条件请求与 304 的长度规则](02-条件请求与304的长度规则.md)：从字节生成强 ETag，处理弱比较、列表与通配符，并在套接字上守住 304 无长度。
 3. [消费者迁移与 HEAD 显式注册](03-消费者迁移与HEAD显式注册.md)：沿 `9aeb03e` 删除文档站服务器，把示例变成消费者，同时记录 Pages 的相对 URL、`.html` 与目录枚举边界。
 4. [检查点：静态资源可用](04-检查点-静态资源可用.md)：组合运行 Handler、架构、字节码和示例测试，再直接运行 main 与站点检查脚本，核对实际输出。
+5. [单范围 GET 与 206/416](05-单范围GET与206-416边界.md)：在不改变全量缓冲和分帧所有权的前提下，实现三种 bytes 范围、If-Range、歧义回退与消费者验证。
 
 ## 本章提交地图
 
@@ -52,7 +53,7 @@ git show 9aeb03e -- examples/src/main/java/com/barezen/examples/staticcontent/St
 
 你应能列出构造时拒绝与请求时回答：不存在、目录、空类型在装配时失败；装配后文件被删除或不可读则返回纯文本 404。前者是部署错误，后者是资源当前不可用。两者都不把文件系统路径回给客户端。
 
-你应能说明 ETag 是带引号的 16 位十六进制字符串，来自 SHA-256 前 8 字节；相同内容跨文件和重启得到相同标签，内容改变则标签改变。If-None-Match 支持 `*`、逗号列表和 `W/` 弱标签，当前没有 If-Match、If-Modified-Since、Range、压缩或缓存策略。
+你应能说明 ETag 是带引号的 16 位十六进制字符串，来自 SHA-256 前 8 字节；相同内容跨文件和重启得到相同标签，内容改变则标签改变。If-None-Match 支持 `*`、逗号列表、重复字段行和 `W/` 弱标签；GET 支持单范围 `bytes` 请求、206 与 416，If-Range 只接受完全匹配的强 ETag。当前没有 If-Match、If-Modified-Since、多部分范围、压缩或缓存策略。
 
 你应能从路由表看见每个平铺文件对应 GET 与 HEAD 两条记录，并知道 Files.list 只枚举一层普通文件。动态资产集、子目录发布、大文件与 CDN 缓存都有明确 reopen trigger，当前实现没有偷偷承诺它们。
 

@@ -27,7 +27,7 @@ BareZen-web 是一个轻量、模块化、插件化的 Java Web 框架，包名 
 | `framework/barezen-http-servlet` | 在 Servlet 容器内复用同一路由 |
 | `framework/barezen-security` | 认证、授权、密码哈希与会话 |
 | `framework/barezen-data` | DataSource 边界、事务与迁移 |
-| `framework/barezen-content` | 静态文件与条件请求 |
+| `framework/barezen-content` | 静态文件、classpath 资源、条件请求与单范围 GET |
 | `framework/barezen-plugins` | 认证、用户与 OpenAPI 插件 |
 | `framework/barezen-testkit` | 真实端口集成测试工具 |
 | `examples` | 8 个可运行示例 |

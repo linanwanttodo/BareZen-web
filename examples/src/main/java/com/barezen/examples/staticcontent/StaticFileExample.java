@@ -19,15 +19,16 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Static files on the contract: one route per file, an {@code ETag} from the bytes, and the three answers a browser
+ * Static files on the contract: one route per file, an {@code ETag} from the bytes, and the answers a browser
  * actually depends on.
  *
  * <p>{@code barezen-content} exists because {@link Router} has no wildcard pattern by decision (ADR-0019 §19), so an
  * application that serves files registers one handler per file — the listing below is done at assembly, from a directory
  * the application chose, never from a path a client supplied (ADR-0051). The conditional-GET behaviour is the part worth
  * running rather than reading: a first request gets the bytes and a tag, a second with {@code If-None-Match} gets a 304
- * with no body and no length, and a {@code HEAD} states the length without sending the body. The last two are the shape
- * ADR-0029 decided and ADR-0051 re-measured once something could know a file's size in-process.
+ * with no body and no length, a {@code HEAD} states the length without sending the body, and one {@code Range} gets a 206
+ * with the selected bytes. The first three are the shape ADR-0029 decided and ADR-0051 re-measured once something could
+ * know a file's size in-process.
  */
 public final class StaticFileExample {
 
@@ -99,6 +100,11 @@ public final class StaticFileExample {
       System.out.println("HEAD /notes.txt       -> " + head.statusCode() + ", states Content-Length "
           + head.headers().firstValue("Content-Length").orElse("(absent)") + ", received "
           + head.body().length + " bytes of body");
+
+      HttpResponse<String> partial = client.send(HttpRequest.newBuilder(address)
+          .header("Range", "bytes=0-3").GET().build(), HttpResponse.BodyHandlers.ofString());
+      System.out.println("GET bytes 0-3         -> " + partial.statusCode() + ", " + partial.body().length()
+          + " bytes, Content-Range " + partial.headers().firstValue("Content-Range").orElse("(absent)"));
 
       HttpResponse<String> missing = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/../etc/passwd")).GET().build(),
