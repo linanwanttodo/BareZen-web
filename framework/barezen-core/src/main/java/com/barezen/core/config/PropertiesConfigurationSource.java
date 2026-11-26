@@ -54,9 +54,9 @@ final class PropertiesConfigurationSource implements ConfigurationSource {
     try (InputStream in = Files.newInputStream(file);
         Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
       properties.load(reader);
-    } catch (IOException e) {
+    } catch (IOException | IllegalArgumentException malformed) {
       throw new ConfigurationException("configuration file '" + file + "' exists but could not be read"
-          + " as UTF-8 properties", e);
+          + " or parsed as UTF-8 properties", malformed);
     }
     Map<String, String> values = new LinkedHashMap<>();
     // stringPropertyNames() skips any entry whose key or value is not a String, which is the filter wanted

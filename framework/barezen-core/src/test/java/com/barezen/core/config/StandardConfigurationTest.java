@@ -117,6 +117,18 @@ class StandardConfigurationTest {
   }
 
   @Test
+  @DisplayName("a malformed properties escape is a configuration failure with its cause")
+  void malformedPropertiesEscapeFailsAsConfigurationException(@TempDir Path directory) throws IOException {
+    Path file = directory.resolve("application.properties");
+    Files.writeString(file, "bad=\\u12G4\n");
+
+    assertThatThrownBy(() -> standard(directory))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining(file.toString())
+        .hasCauseInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
   @DisplayName("a key default applies through the standard wiring too")
   void keyDefaultsWorkThroughStandard(@TempDir Path directory) {
     ConfigurationKey<String> key = ConfigurationKey.of("barezen.it.absent.everywhere", String.class, "the-default");

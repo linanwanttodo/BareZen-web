@@ -61,7 +61,8 @@ than its type. Each gets a record when a second implementation or a real validat
 
 - Core keeps no new dependency: `java.util.Properties` reads the file. YAML is not supported in this phase, and a
   format that needs one will get a `ConfigurationSource` in a module that owns the parser rather than a parser
-  inside core (ADR-0001).
+  inside core (ADR-0001). Amended on 2026-11-26: both I/O failures and `Properties.load` parsing failures,
+  including malformed Unicode escapes, become `ConfigurationException` with the file path and original cause.
 - Resolving a value happens once, so a test builds a component's behaviour by passing a value. No test in core
   arranges global state except `StandardConfigurationTest`, which exists precisely to prove the production wiring
   reads it.
