@@ -36,24 +36,24 @@ import java.util.Set;
  *   <li><b>duplicate version in the given list</b> — refused before anything touches the database: two migrations
  *       claiming one version means the version no longer identifies a change, so the run throws
  *       {@link IllegalArgumentException} naming it;
- *   <li><b>failed migration</b> — its transaction rolls back with its history row, no later migration runs, and
- *       the failure reaches the caller as {@link DataAccessException} naming the version and description; the
- *       <em>history</em> stays at the last version that fully succeeded, and the guarantee below states what
- *       that does and does not say about the schema;
+ *   <li><b>failed migration</b> — rollback is attempted, no later migration runs, and a SQL failure reaches the
+ *       caller as {@link DataAccessException} naming the version and description; a failed commit response has an
+ *       uncertain outcome, so the next run reads <em>history</em> as the authority. The guarantee below states
+ *       what that does and does not say about the schema;
  *   <li><b>out-of-order version</b> — a pending version lower than the highest already-applied one is refused
  *       before anything runs. It is the one state that cannot be answered safely: silently skipping it rewrites
  *       history, silently applying it means migration 7 ran after migration 12 against a schema that assumed 12
  *       happened second, so it fails loudly (ADR-0040).
  * </ul>
  *
- * <p>The one guarantee the framework can make, stated against a measured exception, because a framework that
- * hides it just relocates the failure: a version is recorded if and only if its {@link Migration#apply} completed.
- * Whether the <em>schema</em> is intact after a failed migration is the product's answer, not ours — the
- * failed-migration probe in {@code MigratorTest} measures that H2, like MySQL and MariaDB, commits DDL
- * implicitly, so a rolled-back {@code CREATE TABLE} can remain visible even though its version was never
- * recorded. That is exactly why the history table, not the schema, is the framework's authority: the next
- * startup re-runs the unrecorded version, and ADR-0040 records why recovery is re-run-and-repair rather than a
- * promise of per-dialect rollback this build cannot keep.
+ * <p>The guarantee the framework can make is about its own writes: it records a version only after apply, history
+ * insertion and commit all return normally. A commit response can still fail after the database committed, so the
+ * actual history table — not the exception alone — decides what runs next. Whether the <em>schema</em> is intact
+ * after a failed migration is the product's answer, not ours — the failed-migration probe in {@code MigratorTest}
+ * measures that H2, like MySQL and MariaDB, commits DDL implicitly, so a rolled-back {@code CREATE TABLE} can remain
+ * visible even though its version was never recorded. That is why history, not schema, is authoritative: startup
+ * skips recorded versions and re-runs unrecorded ones. ADR-0040 records re-run-and-repair rather than a promise of
+ * per-dialect rollback this build cannot keep.
  *
  * <p>What a migration may do with the connection it is handed is stated in {@link Migration}; what this class
  * never does is expose the history table as anything other than the typed {@link AppliedMigration} list, so an
@@ -95,10 +95,10 @@ public final class Migrator {
    * Applies every given migration the database has not yet accepted, and returns exactly what this run applied.
    *
    * <p>Order of events for each applied version, in one commit: {@link Migration#apply} runs, then the history
-   * row is inserted. A caller that sees this method return normally holds the list of versions now in the
-   * table; a caller that receives an exception holds a database at the last version before the failed one, and
-   * the returned list is empty because nothing of a failed run is durable — the partial state Stage 2.12-F asks
-   * about cannot be produced and then reported as success.
+   * row is inserted. A normal return holds the list of versions this run recorded. A failure returns no list and
+   * stops later versions; earlier committed versions remain. Because a driver can fail the commit response after
+   * the database committed, an exception does not prove the failed version is absent — the next run reads history
+   * as the authority and either skips a recorded version or re-runs an unrecorded one.
    *
    * @param migrations the application's full migration list, any order; each is validated before anything runs
    * @return the migrations this run applied and recorded, ascending by version — empty when the database was
@@ -222,11 +222,11 @@ public final class Migrator {
   /**
    * Runs one migration and its history row as one committed unit, on the shared connection.
    *
-   * <p>Auto-commit is switched off for exactly this window and restored after the commit; a migration that
-   * throws — checked or not — never reaches a recorded version, because the history insert shares the
-   * transaction that just rolled back. The caller receives {@link DataAccessException} naming the version, and
-   * {@link #migrate} stops before any later migration ran, so the run's outcome is readable from the history as
-   * "the database is at version N-1" — with the schema caveat the class javadoc states from measurement.
+   * <p>Auto-commit is switched off for exactly this window and restored after the commit. Any failure stops later
+   * versions. A SQL failure reports that rollback was attempted; an unchecked failure propagates unchanged. Both
+   * keep a rollback failure as suppressed. A failed commit response has an uncertain outcome, so the next run
+   * reads history rather than assuming "version N-1" — with the schema caveat the class javadoc states from
+   * measurement.
    */
   private void applyOne(Connection connection, Migration migration, Instant now, List<AppliedMigration> sink)
       throws SQLException {
@@ -242,14 +242,22 @@ public final class Migrator {
       }
       connection.commit();
     } catch (SQLException | RuntimeException | Error failure) {
-      // The version stays unrecorded and no later migration runs — migrate stops here and the caller's database
-      // is at the last version that fully succeeded. A rollback that itself failed is not a second failure to
-      // report: an unrecorded version re-runs the migration, which is the recoverable direction. The connection
-      // leaves this method in transaction scope on purpose; the failure aborts the run and closeQuietly drops it.
-      rollbackQuietly(connection);
+      // No later migration runs. SQL failures are translated; unchecked failures stay themselves. In both paths a
+      // rollback failure is suppressed on the first failure, and closeQuietly drops the connection afterwards.
       if (failure instanceof SQLException sql) {
-        throw new DataAccessException("migration " + migration.version() + " (\""
-            + migration.description() + "\") failed and was rolled back; no later migration ran", sql);
+        DataAccessException translated = new DataAccessException("migration " + migration.version() + " (\""
+            + migration.description() + "\") failed; rollback was attempted; no later migration ran", sql);
+        try {
+          connection.rollback();
+        } catch (SQLException rollbackFailure) {
+          translated.addSuppressed(rollbackFailure);
+        }
+        throw translated;
+      }
+      try {
+        connection.rollback();
+      } catch (SQLException rollbackFailure) {
+        failure.addSuppressed(rollbackFailure);
       }
       throw failure;
     }
@@ -307,15 +315,6 @@ public final class Migrator {
       }
     }
     return versions;
-  }
-
-  private static void rollbackQuietly(Connection connection) {
-    try {
-      connection.rollback();
-    } catch (SQLException ignored) {
-      // The migration failure is what the caller receives; a rollback that also failed leaves the version
-      // unrecorded, which re-runs the migration — the recoverable direction.
-    }
   }
 
   /** Same never-left-open rule as {@link Database}: the run's outcome is reported, a failed close cannot outrank it. */

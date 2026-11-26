@@ -63,7 +63,8 @@ endpoint. The recorded output of the eight runs:
 - **`SecurityExample`** — `SecurityMiddleware.wrap` as a route decorator, the three authentication/authorization
   outcomes (401 missing token, 403 no permission, 200 granted), and identity delivered to a `SecuredHandler` as a
   parameter, never a thread-local. `PasswordHasher` shows a real credential check.
-- **`DatabaseExample`** — `Migrator` records a version if and only if its `apply` completed; `Database.transaction`
+- **`DatabaseExample`** — `Migrator` records a version only after apply, history insertion and commit return normally;
+  a failed commit response is resolved by reading history on the next run. `Database.transaction`
   decides commit/rollback so the callback cannot; `RowMapper` reads rows. The example names H2 because it is an
   application, not the framework (ADR-0038's rule holds where it was set).
 - **`PluginExample`** — `PluginRegistration.validate` orders the plugins by their declared dependencies and the

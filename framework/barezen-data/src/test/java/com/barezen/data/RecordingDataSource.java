@@ -48,6 +48,7 @@ final class RecordingDataSource implements DataSource {
 
   /** Each named JDBC method in this set fails once, independently of the other armed methods. */
   private final Set<String> armedFailures = ConcurrentHashMap.newKeySet();
+  private final Set<String> armedAfterFailures = ConcurrentHashMap.newKeySet();
 
   RecordingDataSource(DataSource delegate) {
     this.delegate = delegate;
@@ -56,6 +57,11 @@ final class RecordingDataSource implements DataSource {
   /** Makes exactly the next {@code Connection.commit} fail; every later call behaves. */
   void failNextCommit() {
     armedFailures.add("commit");
+  }
+
+  /** Makes the next real {@code Connection.commit} succeed, then report a failure to its caller. */
+  void failAfterNextCommit() {
+    armedAfterFailures.add("commit");
   }
 
   /** Makes exactly the next {@code Connection.rollback} fail. */
@@ -255,7 +261,11 @@ final class RecordingDataSource implements DataSource {
       if (consumeArmedFailure(method.getName())) {
         throw new SQLException("injected failure at the JDBC seam: " + method.getName());
       }
-      return callReal(method, args);
+      Object result = callReal(method, args);
+      if (armedAfterFailures.remove(method.getName())) {
+        throw new SQLException("injected failure after the JDBC call succeeded: " + method.getName());
+      }
+      return result;
     }
 
     private PreparedStatement trackStatement(PreparedStatement realStatement) {

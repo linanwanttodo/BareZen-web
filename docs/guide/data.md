@@ -250,11 +250,11 @@ applied_at   TIMESTAMP NOT NULL
 
 迁移失败时：
 
-- 失败版本不写历史行；
+- apply 或历史插入失败时不追加该版本；commit 响应失败时结果可能不确定，应以实读历史为准；
 - 后续版本不执行；
 - 已提交的早期版本保留；
-- `SQLException` 包装为带版本与 description 的 `DataAccessException`；
-- 迁移自己抛出的 `RuntimeException` 或 `Error` 原样传播；
+- `SQLException` 包装为带版本与 description 的 `DataAccessException`，rollback 失败作为 suppressed；
+- 迁移自己抛出的 `RuntimeException` 或 `Error` 原样传播，rollback 失败作为 suppressed；
 - 下一次启动会重新执行未记录的失败版本。
 
 但“回滚了”只对历史行和可回滚 DML 成立。`MigratorTest` 在 H2 上实测：一个先 `CREATE TABLE`、随后抛异常的迁移，回滚后表仍然存在，历史却没有该版本。H2 的隐式 DDL 提交使 schema 与历史可能短暂不一致。
@@ -290,7 +290,7 @@ after rollback, rows -> 2 (the doomed insert never landed)
 
 - `DatabaseTest`：CRUD、null 参数、结果顺序与异常翻译。
 - `TransactionTest`：提交、检查异常、运行时异常、提交失败、回滚失败、可见性、包私有决策者、生命周期与独立嵌套事务。
-- `MigratorTest`：升序、重复执行、重复版本、失败停止、H2 DDL 残留、幂等重试、乱序拒绝与历史查询。
+- `MigratorTest`：升序、重复执行、重复版本、失败停止、H2 DDL 残留、幂等重试、乱序拒绝、历史查询与提交/回滚双重失败。
 - `DatabaseLifecycleTest`：连接、statement、result set 在成功和失败路径上的关闭。
 - `BarezenDataArchitectureTest`：驱动、框架反向依赖、全局状态、线程与日志边界。
 

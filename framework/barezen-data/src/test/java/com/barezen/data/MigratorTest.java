@@ -253,7 +253,7 @@ class MigratorTest {
       assertThatThrownBy(() -> migrator.migrate(List.of(fails, later)))
           .isInstanceOf(DataAccessException.class)
           .hasMessageContaining("migration 1")
-          .hasMessageContaining("rolled back");
+          .hasMessageContaining("rollback was attempted");
 
       // The framework's guarantee, measured on H2 rather than assumed: the version is NOT recorded and the run
       // stopped, so the next startup re-runs it. The orphan table itself remains — this probe measures H2's
@@ -311,9 +311,50 @@ class MigratorTest {
     }
 
     @Test
+    @DisplayName("a rollback failure after a failed migration commit is suppressed and the version stays unrecorded")
+    void commitAndRollbackFailuresAreBothReported() {
+      RecordingDataSource recorded = H2.recording();
+      Migrator migrator = Migrator.of(new Database(recorded));
+      recorded.failNextCommit();
+      recorded.failNextRollback();
+
+      assertThatThrownBy(() -> migrator.migrate(List.of(
+          migration(1, "create item", "CREATE TABLE item (id INT PRIMARY KEY)"))))
+          .isInstanceOf(DataAccessException.class)
+          .hasMessageContaining("migration 1")
+          .hasMessageContaining("rollback was attempted")
+          .hasMessageNotContaining("was rolled back")
+          .satisfies(failure -> assertThat(failure.getSuppressed())
+              .hasSize(1)
+              .allMatch(suppressed -> suppressed instanceof SQLException
+                  && suppressed.getMessage().contains("rollback")));
+
+      assertThat(migrator.history()).isEmpty();
+      assertThat(recorded.leaks()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a lost commit response is resolved from recorded history on the next run")
+    void aFailedCommitResponseDoesNotGuessWhetherTheVersionLanded() {
+      RecordingDataSource recorded = H2.recording();
+      Migrator migrator = Migrator.of(new Database(recorded));
+      Migration migration = migration(1, "create item", "CREATE TABLE item (id INT PRIMARY KEY)");
+      recorded.failAfterNextCommit();
+
+      assertThatThrownBy(() -> migrator.migrate(List.of(migration)))
+          .isInstanceOf(DataAccessException.class)
+          .hasMessageContaining("rollback was attempted")
+          .hasCauseInstanceOf(SQLException.class);
+
+      assertThat(historyVersions(migrator)).containsExactly(1L);
+      assertThat(migrator.migrate(List.of(migration))).isEmpty();
+      assertThat(recorded.leaks()).isEmpty();
+    }
+
+    @Test
     @DisplayName("a runtime failure thrown by a migration also aborts the run")
     void uncheckedMigrationFailuresAlsoRollBackAndStopTheRun() {
-      DataSource database = H2.fresh();
+      RecordingDataSource recorded = H2.recording();
       Migration throwsRuntime = new Migration() {
         @Override
         public long version() {
@@ -330,14 +371,20 @@ class MigratorTest {
           throw new IllegalArgumentException("a migration bug is a migration bug");
         }
       };
-      Migrator migrator = Migrator.of(new Database(database));
+      Migrator migrator = Migrator.of(new Database(recorded));
+      recorded.failNextRollback();
 
       assertThatThrownBy(() -> migrator.migrate(List.of(throwsRuntime)))
           .isInstanceOf(IllegalArgumentException.class)
           .as("an application-style failure stays itself; the data layer does not translate what it did not cause")
-          .hasMessage("a migration bug is a migration bug");
+          .hasMessage("a migration bug is a migration bug")
+          .satisfies(failure -> assertThat(failure.getSuppressed())
+              .hasSize(1)
+              .allMatch(suppressed -> suppressed instanceof SQLException
+                  && suppressed.getMessage().contains("rollback")));
 
       assertThat(migrator.history()).isEmpty();
+      assertThat(recorded.leaks()).isEmpty();
     }
   }
 

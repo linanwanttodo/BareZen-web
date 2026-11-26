@@ -16,7 +16,7 @@
 
 - [ADR-0038：持久化只经过 javax.sql 边界，框架不命名驱动](../../docs/adr/0038-jdbc-boundary-and-driver-free-data-layer.md)：选择应用提供 `DataSource`，而不是框架读取配置建连接。数据模块零 compile 依赖，SQLException 在边界统一翻译，业务回调的 RuntimeException 保持原样；参数值不进入异常消息。
 - [ADR-0039：事务对象由调用者持有，决策者始终不可见](../../docs/adr/0039-transaction-ownership-and-package-private-deciders.md)：`Transaction` 作为参数进入工作单元，commit/rollback 是 package-private。决策表覆盖正常返回、SQLException、RuntimeException/Error、commit 失败与 rollback 失败；嵌套明确开启第二条独立事务。
-- [ADR-0040：迁移历史是权威，DDL 不保证回滚](../../docs/adr/0040-migration-history-authority-and-measured-ddl-rollback.md)：一个版本只有在 `apply` 完成后才记录。H2 实测显示回滚后的 CREATE TABLE 仍存在，因此恢复规则是重跑未记录版本并修复，而不是承诺 schema 还原。
+- [ADR-0040：迁移历史是权威，DDL 不保证回滚](../../docs/adr/0040-migration-history-authority-and-measured-ddl-rollback.md)：一个版本只有在 apply、历史插入和 commit 正常返回后才计入本次成功列表；commit 响应失败时以实读历史为准。H2 实测显示回滚后的 CREATE TABLE 仍存在，因此恢复规则是重跑未记录版本并修复，而不是承诺 schema 还原。
 
 还应回看第 7 章的 ADR-0013：连接事实在装配处解析并作为对象交给基础设施。数据模块不读取 `System.getProperty`、`System.getenv` 或 `Configuration`，也不是 service locator；这正是第 7 章显式装配原则在持久化边界上的复用。
 
@@ -43,7 +43,7 @@ git show 0971abc -- examples/src/main/java/com/barezen/examples/database/Databas
 1. [DataSource 边界与驱动无关](01-DataSource边界与驱动无关.md)：先决定“谁创建连接”，再实现参数绑定、游标归属、异常翻译和资源关闭。
 2. [显式事务与归属规则](02-显式事务与归属规则.md)：把 commit/rollback 藏在 package-private 后面，用决策表与 JDBC 调用序列验证每条失败路径。
 3. [版本化迁移与回滚权威](03-版本化迁移与回滚权威.md)：用历史表标识已完成版本，处理乱序、重复、失败重跑和 H2 的隐式 DDL 提交。
-4. [检查点：真实驱动跑通](04-检查点-真实驱动跑通.md)：组合运行 65 项模块测试、2 项示例测试和真实 main，并列出尚未证明的产品级能力。
+4. [检查点：真实驱动跑通](04-检查点-真实驱动跑通.md)：组合运行 67 项模块测试、2 项示例测试和真实 main，并列出尚未证明的产品级能力。
 
 ## 本章完成后的能力清单
 
@@ -61,7 +61,7 @@ git show 0971abc -- examples/src/main/java/com/barezen/examples/database/Databas
 
 若每次启动运行所有 migration，第二次 CREATE 就会失败；若只保存一个“最后版本”，无法区分 1、2、4 与 1、2、3、4。若对最低待执行版本与最高已应用版本的比较放在过滤之前，每次正常启动都会把旧版本 1 误判成倒序。若承诺“失败 migration 不留任何痕迹”，H2 已经实测否定它：DDL 可能留下孤儿表。若 migration 不可重跑，下一次启动会持续撞上自己留下的对象；若修改已应用的 migration SQL 而不换版本，当前没有 checksum 能发现这种历史篡改。
 
-最后，65 项测试不是“支持所有数据库”的证明。它只证明当前公共 API 在 H2 与注入失败点上满足契约；JDK 17 字节码契约也只证明 class major 61，不证明在 JDK 17 上完成过多产品矩阵。覆盖率、测试数和真实示例都应如实陈述，不能替代 PostgreSQL、MySQL、真实连接池或并发部署的独立验收。
+最后，67 项测试不是“支持所有数据库”的证明。它只证明当前公共 API 在 H2 与注入失败点上满足契约；JDK 17 字节码契约也只证明 class major 61，不证明在 JDK 17 上完成过多产品矩阵。覆盖率、测试数和真实示例都应如实陈述，不能替代 PostgreSQL、MySQL、真实连接池或并发部署的独立验收。
 
 ## 下一章预告
 

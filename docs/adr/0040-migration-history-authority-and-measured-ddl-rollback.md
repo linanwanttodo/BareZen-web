@@ -50,10 +50,11 @@ the PostgreSQL/H2 folding difference the history-table probe already shows (meas
 to upper case; documented — not measured — on PostgreSQL: lower case) would become a per-product branch in framework
 code. Branches like that are how "supports everything" turns into "tests everything."
 
-**C — history-table authority with an honest failure story, chosen.** The framework's promise is exactly one
-sentence, about the table it owns: *a version is recorded if and only if its `apply` completed.* Everything else —
-whether the schema is intact after a failure — is stated as the product's answer, with the contract rewritten around
-re-runnability rather than rollback, which is the model ADR-0038 §Testing names re-run-and-repair.
+**C — history-table authority with an honest failure story, chosen.** The framework records a version only after
+`apply`, history insertion and commit all return normally. A failed commit response can still have committed, so the
+recorded table — not the exception alone — is the authority. Everything else — whether the schema is intact after a
+failure — is stated as the product's answer, with the contract rewritten around re-runnability rather than rollback,
+which is the model ADR-0038 §Testing names re-run-and-repair.
 
 ## Decision
 
@@ -78,7 +79,7 @@ declined.
 | existing database | only unrecorded versions run, returned ascending |
 | already applied | skipped silently and cheaply — `migrate` is meant to run at every startup |
 | duplicate version in the list | `IllegalArgumentException`, refused before any database contact |
-| failed migration | its transaction rolls back with its row, no later migration runs, `DataAccessException` names the version; the history stays at the last fully-successful version — the schema may not, per the measurement above |
+| failed migration | rollback is attempted, no later version runs, `DataAccessException` names the version; history remains the authority (a failed commit response has an uncertain outcome), and the schema may not roll back, per the measurement above |
 | out-of-order pending version | refused before anything runs: a pending version ≤ the highest applied one throws rather than silently skipping (rewrites history) or silently applying (runs 7 after 12 against a schema that assumed the opposite) |
 
 **Two exception families, split by who fixes them.** `IllegalArgumentException` for a non-positive version, a blank
@@ -145,14 +146,30 @@ Negative, stated because they are real:
 
 ## Testing
 
-`MigratorTest` (21): Fresh 3 (order proven through a `tracked()` decorator, not asserted from a list), Existing 2,
-Duplicate 1, Failure 3 (history empty, run stopped, **orphan survives — the measured claim**), OutOfOrder 3 (lower
+`MigratorTest` (23): Fresh 3 (order proven through a `tracked()` decorator, not asserted from a list), Existing 2,
+Duplicate 1, Failure 5 (history empty, run stopped, **orphan survives — the measured claim**, commit and rollback
+failures both reported, lost commit response resolved from history), OutOfOrder 3 (lower
 pending refused, higher pending after a gap allowed, the up-to-date-list regression pinned), Validation 3, History 3,
 Construction 2, RunEffect 1. The mutation harness (`/tmp/p212/mut.py`) covers this ADR's decisions directly: M9
 (apply skipped but recorded) fails Fresh; M10 (descending run) fails the order probe; M11 (no out-of-order refusal)
 and M12 (no duplicate check) fail their states; M13 (boundary relaxed to `version < 0`) fails Validation — all killed,
 tree restored byte-identically. The two Context measurements are reproducible with `/tmp/DdlTx.java` and
 `/tmp/DdlTx2.java` against the fetched H2 jar.
+
+## Amendment (2026-11-27): a failed commit has an uncertain outcome, and rollback evidence is retained
+
+`applyOne` previously called `rollbackQuietly()` and then claimed the migration "was rolled back", even when rollback
+itself failed. A `SQLException` is now translated with the message "rollback was attempted"; a rollback `SQLException`
+is attached to that `DataAccessException` as suppressed. Unchecked migration failures still propagate unchanged and
+now retain the rollback `SQLException` as suppressed as well. No later migration runs after either failure.
+
+The wording also marks a real limit: a driver can fail the commit response after the database has committed, so a
+rollback cannot prove that the version is absent. The history table remains the authority. A later `migrate` call reads
+it and either skips a recorded version or re-runs an unrecorded one; callers must not infer the outcome from the
+exception alone. The new recorder test injects commit and rollback failures before the real commit, asserts one
+suppressed rollback `SQLException`, an empty history and no leaked resources. A second recorder test lets the real H2
+commit succeed before the proxy reports failure: history contains version 1 and the next `migrate` skips it. That test
+turns the uncertain-outcome rule into an executable fact. `MigratorTest` grows from 21 to 23.
 
 ## Non-goals
 

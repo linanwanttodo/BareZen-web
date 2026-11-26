@@ -324,7 +324,7 @@ sealed `AuthenticationResult` 区分 `Authenticated`、`Failure` 和 `Anonymous`
 
 ### ADR-0040：迁移历史是权威，但不承诺 DDL 可回滚
 
-历史表只记录 `apply()` 成功完成的版本，迁移按版本升序执行并拒绝非法或乱序的待执行项。
+历史表只在 `apply()`、历史插入和 commit 正常返回后记录版本；commit 响应失败时结果不确定，下一次运行必须实读历史。迁移按版本升序执行并拒绝非法或乱序的待执行项。
 H2 实测表明 DDL 可能隐式提交，因此失败后不能声称 schema 已回滚，只能依赖幂等迁移重跑与修复。
 没有 down、checksum、自动发现或并发迁移锁，作者必须保证迁移可安全重试。
 
