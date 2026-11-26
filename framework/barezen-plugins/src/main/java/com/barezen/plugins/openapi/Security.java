@@ -13,9 +13,10 @@ import java.util.Objects;
  *
  * <p>Two types live here on purpose. {@link Scheme} is the reusable declaration that goes in the document's
  * {@code components}; {@link Requirement} is the per-operation statement that the scheme named in {@code Scheme}
- * is needed, optionally with named scopes. The pairing is checked by the generator against the schemes actually
+ * is needed. The pairing is checked by the generator against the schemes actually
  * declared: a {@link Requirement} naming an undeclared scheme is the "invalid security requirement" mutation
- * Stage 2.14-G lists, refused at document build rather than emitted.
+ * Stage 2.14-G lists, refused at document build rather than emitted. This subset supports only HTTP bearer, whose
+ * OpenAPI scopes array must be empty.
  */
 public final class Security {
 
@@ -48,7 +49,7 @@ public final class Security {
     }
   }
 
-  /** One operation's security requirement: the named scheme, and optionally the scopes it must be granted with. */
+  /** One operation's security requirement: the named bearer scheme. OAuth scopes are outside this subset. */
   public static final class Requirement {
     private final String schemeName;
     private final List<String> scopes;
@@ -58,17 +59,16 @@ public final class Security {
       this.scopes = List.copyOf(scopes);
     }
 
-    /** The requirement "present a token under this scheme"; the scopes list may be empty (no scope constraint). */
+    /** The requirement "present a token under this scheme"; the scopes list must be empty for HTTP bearer. */
     public static Requirement of(String schemeName, List<String> scopes) {
       Objects.requireNonNull(schemeName, "schemeName");
       if (schemeName.isBlank()) {
         throw new IllegalArgumentException("scheme name must not be blank");
       }
       Objects.requireNonNull(scopes, "scopes; use List.of() for none");
-      for (String scope : scopes) {
-        if (scope == null || scope.isBlank()) {
-          throw new IllegalArgumentException("a security scope, if present, must be non-blank");
-        }
+      if (!scopes.isEmpty()) {
+        throw new IllegalArgumentException("a bearer security requirement must have an empty scopes list; OpenAPI"
+            + " 3.0.3 permits scope names only for oauth2 or openIdConnect schemes");
       }
       return new Requirement(schemeName, scopes);
     }

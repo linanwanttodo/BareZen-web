@@ -67,7 +67,7 @@ for (Operation operation : builder.operations) {
 
 先检查重复路线，再检查派生 id，错误诊断才准确。两个完全相同的 GET `/users` 同时也会撞 operationId，但“同一 operation 声明两次”比“两个模板碰撞”更接近根因。测试分别覆盖这两件事，避免实现只在第二个循环抛一个泛化消息。
 
-引用检查位于 [ApiDocument.java:98](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/ApiDocument.java#L98)。它遍历 operation 的 parameters、requestBody、responses，再遍历每个 security requirement，最后检查组件 schema 自身。任何 `$ref` 不存在都会抛出包含使用位置与目标名的 `IllegalArgumentException`。security 则只检查 scheme name 是否声明；当前 bearer scheme 没有 OAuth scope 注册表，因此不会假装验证 scopes 的授权语义。
+引用检查位于 [ApiDocument.java:98](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/ApiDocument.java#L98)。它遍历 operation 的 parameters、requestBody、responses，再遍历每个 security requirement，最后检查组件 schema 自身。任何 `$ref` 不存在都会抛出包含使用位置与目标名的 `IllegalArgumentException`。security 则只检查 scheme name 是否声明；当前 bearer scheme 不是 OAuth2，因此 `Security.Requirement.of` 直接拒绝非空 scopes，不会输出 OpenAPI 3.0.3 禁止的 scope 数组。
 
 渲染入口 [OpenApiJson.java:28](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/OpenApiJson.java#L28) 先写 `openapi`，再写 `info`，然后按 document 顺序写 servers、paths、components、tags。空 servers/components/tags 不输出，避免制造无意义字段。operation 的字段顺序固定为 operationId、summary、tags、parameters、requestBody、security、responses；response 先写 description，有 body schema 才写 content。
 
@@ -118,7 +118,7 @@ mvn -o -B -ntp -pl framework/barezen-plugins -am test \
   -Dtest=OpenApiModelTest,OpenApiDocumentTest,JsonWriterTest,ReadmeDocumentExampleTest
 ```
 
-这组共 55 项：OpenApiModel 28、OpenApiDocument 19、JsonWriter 7、README example 1；本章统一检查点中全部通过。`OpenApiDocumentTest.Determinism` 改变 operation 装配顺序，`responseOrderIsDeclaredOrderInOutput` 固定 404 在 200 前；`orderIsDefinedNotAccidental` 检查 `/alpha` 在 `/mike` 前、DELETE 在 GET 前。它们分别防止“无序但偶尔相同”和“排序过度”两种回归。
+这组共 56 项：OpenApiModel 29、OpenApiDocument 19、JsonWriter 7、README example 1；本章统一检查点中全部通过。`OpenApiDocumentTest.Determinism` 改变 operation 装配顺序，`responseOrderIsDeclaredOrderInOutput` 固定 404 在 200 前；`orderIsDefinedNotAccidental` 检查 `/alpha` 在 `/mike` 前、DELETE 在 GET 前。它们分别防止“无序但偶尔相同”和“排序过度”两种回归。
 
 `JsonWriterTest` 的 Output 4 项覆盖对象/数组顺序、嵌套空容器、转义和非 ASCII 原样保留；Misuse 3 项覆盖在数组里写 field、关闭不匹配容器和未闭合 document。只测试正常输出不足以证明 writer 安全：如果 object/array 栈检查永远通过，渲染调用写错时仍可能悄悄产出错误文本，因此拒绝路径也必须可执行。
 

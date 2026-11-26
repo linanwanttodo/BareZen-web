@@ -215,14 +215,22 @@ class OpenApiModelTest {
       assertThat(scheme.name()).isEqualTo("sessionToken");
       assertThat(scheme.toString()).isEqualTo("bearer:sessionToken");
 
-      Security.Requirement requirement = Security.Requirement.of("sessionToken", List.of("read", "write"));
+      Security.Requirement requirement = Security.Requirement.of("sessionToken", List.of());
       assertThat(requirement.schemeName()).isEqualTo("sessionToken");
-      assertThat(requirement.scopes()).containsExactly("read", "write");
-      assertThat(Security.Requirement.of("sessionToken", List.of()).scopes()).isEmpty();
+      assertThat(requirement.scopes()).isEmpty();
     }
 
     @Test
-    @DisplayName("blank scheme names and blank or null scopes are refused")
+    @DisplayName("a bearer requirement cannot declare OAuth scopes")
+    void bearerScopesMustBeEmpty() {
+      assertThatThrownBy(() -> Security.Requirement.of("sessionToken", List.of("read")))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("bearer")
+          .hasMessageContaining("empty");
+    }
+
+    @Test
+    @DisplayName("blank scheme names, null scopes and non-empty bearer scopes are refused")
     void refusals() {
       assertThatThrownBy(() -> Security.Scheme.bearer(" "))
           .isInstanceOf(IllegalArgumentException.class);

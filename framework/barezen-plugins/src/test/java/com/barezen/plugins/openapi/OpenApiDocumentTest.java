@@ -84,7 +84,7 @@ class OpenApiDocumentTest {
           .operation(Operation.builder(
               new OperationMetadata(HttpMethod.POST, "/users", "Create a user", List.of("users")))
               .requestBody(RequestBody.json(Schema.ref("User"), true))
-              .security(Security.Requirement.of("sessionToken", List.of("write")))
+              .security(Security.Requirement.of("sessionToken", List.of()))
               .response(ApiResponse.json("201", "created", Schema.ref("User")))
               .build())
           .build();
@@ -104,7 +104,7 @@ class OpenApiDocumentTest {
               + "\"post\":{\"operationId\":\"postUsers\",\"summary\":\"Create a user\",\"tags\":[\"users\"],"
               + "\"requestBody\":{\"required\":true,\"content\":{\"application/json\":"
               + "{\"schema\":{\"$ref\":\"#/components/schemas/User\"}}}},"
-              + "\"security\":[{\"sessionToken\":[\"write\"]}],"
+              + "\"security\":[{\"sessionToken\":[]}],"
               + "\"responses\":{\"201\":{\"description\":\"created\",\"content\":{\"application/json\":"
               + "{\"schema\":{\"$ref\":\"#/components/schemas/User\"}}}}}}},"
               + "\"/users/{id}\":{\"get\":{\"operationId\":\"getUsersId\",\"summary\":\"Fetch one user\","
