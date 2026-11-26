@@ -66,14 +66,16 @@ public final class Request {
    *     server's read buffer, usually — can be reused without changing this request
    * @throws NullPointerException if {@code method}, {@code path} or {@code headers} is null
    * @throws IllegalArgumentException if {@code path} does not begin with {@code /} and is not {@code *}, which is not a
-   *     request target. A relative path such as {@code user/1} would be resolved differently by every server, so
-   *     accepting it would move the disagreement into the handler
+   *     request target, or if {@code path} or {@code query} contains an ASCII control character or space. A raw space
+   *     separates request-line fields and a control character can end a line; both must be percent-encoded instead.
+   *     A relative path such as {@code user/1} would be resolved differently by every server, so accepting it would
+   *     move the disagreement into the handler
    */
   public Request(HttpMethod method, String path, String query, Headers headers, byte[] body) {
     this.method = Objects.requireNonNull(method, "the request method; without one a handler cannot know"
         + " whether the client is asking or telling");
     this.path = checkedPath(path);
-    this.query = query;
+    this.query = checkedQuery(query);
     this.headers = Objects.requireNonNull(headers,
         "the request headers; a request without a header set is not a request, it is a missing message");
     this.body = body == null ? NO_BODY : body.clone();
@@ -154,11 +156,29 @@ public final class Request {
 
   private static String checkedPath(String path) {
     Objects.requireNonNull(path, "the request path; with no path there is no resource a handler could act on");
+    checkTargetCharacters(path, "request path");
     if (!path.equals("*") && !path.startsWith("/")) {
       throw new IllegalArgumentException("the request path must start with \"/\" or be \"*\"; got \"" + path + "\"."
           + " A path without a leading slash is relative, and what it is relative to is the server's business, not"
           + " the handler's");
     }
     return path;
+  }
+
+  private static String checkedQuery(String query) {
+    if (query != null) {
+      checkTargetCharacters(query, "request query");
+    }
+    return query;
+  }
+
+  private static void checkTargetCharacters(String target, String field) {
+    for (int index = 0; index < target.length(); index++) {
+      char character = target.charAt(index);
+      if (character <= 0x20 || character == 0x7f) {
+        throw new IllegalArgumentException("the " + field + " contains a control character or space at index " + index
+            + " (\\u" + String.format("%04X", (int) character) + "); use percent-encoding in a request target");
+      }
+    }
   }
 }

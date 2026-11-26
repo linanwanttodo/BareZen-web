@@ -124,7 +124,9 @@ worth building carefully, because it is the only place HTTP's own rules are rich
 Three shapes are shared by all of them and are the phase's contribution rather than a style preference:
 
 - **construction validates, afterwards nothing does.** A `Request` that exists has a non-null method, a path that is a
-  request target, and headers whose names are tokens and values hold no control character. No accessor re-checks,
+  request target, and headers whose names are tokens and values hold no control character. Raw path and query text
+  contains no ASCII space or control character: those belong to request-line framing and must be percent-encoded.
+  Refusal messages name the field, index and escaped code point rather than repeating the rejected character. No accessor re-checks,
   because there is nothing left to check.
 - **absence is typed, not defaulted.** An absent query is `Optional.empty()`, an absent header is `Optional.empty()`,
   no body is an empty array. Nothing returns `null` from a read, and nothing turns a missing value into a plausible

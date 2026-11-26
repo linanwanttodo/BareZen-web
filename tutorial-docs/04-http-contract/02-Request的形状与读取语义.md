@@ -14,7 +14,7 @@ path 保存客户端发送的原始形式。`/a%2Fb` 与 `/a/b` 在语义上不�
 
 原始还意味着不归一化。`/a//b`、`/a/`、`/a/./b` 都原样保存。尾斜杠、重复斜杠和点段是否等价，是第五章 Router 要显式处理的匹配规则。Request 如果先清理一遍，Router 的规则就不再是对客户端请求目标的规则，而是对框架重写结果的规则。
 
-path 必须以 `/` 开头，或者恰好是 `*`。`*` 支持 `OPTIONS *` 询问服务器本身；普通相对路径和绝对形式 URI 被拒绝，因为它们的解析依赖契约没有的 base 或代理上下文。拒绝发生在构造时，错误消息直接说明缺的是 request target，而不是等到 Handler 里再猜。
+path 必须以 `/` 开头，或者恰好是 `*`。`*` 支持 `OPTIONS *` 询问服务器本身；普通相对路径和绝对形式 URI 被拒绝，因为它们的解析依赖契约没有的 base 或代理上下文。拒绝发生在构造时，错误消息直接说明缺的是 request target，而不是等到 Handler 里再猜。path 与 query 还不能包含原始 ASCII 空格或控制字符：空格会拆分请求行字段，CR/LF 会结束一行，它们必须写成 `%20`、`%0D`、`%0A`。错误消息只报告字段、索引与转义码点，不把原始 CR/LF 再写进日志。
 
 query 与 path 一样保持原始，不带前导 `?`。`/search` 对应 Optional.empty()，`/search?` 对应 Optional.of("")。二者不同：“没有提供过滤条件”与“显式提供空过滤条件”可能触发默认和重置两种行为。用 Optional 表达预期缺失，比返回 null 或默认空串更明确，也和 Headers.first 的规则一致。
 
@@ -32,14 +32,14 @@ body 采用 byte[]，构造和读取都复制。适配器可以复用读缓冲�
 
 ## 动手
 
-- [Request.java:72](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L72)：唯一构造器，校验 method/path/headers，复制 body。
-- [Request.java:99](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L99)：path 原始读取。
-- [Request.java:112](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L112)：query 返回 Optional。
-- [Request.java:136](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L136)：body 每次返回副本。
+- [Request.java:74](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L74)：唯一构造器，校验 method/path/query/headers，复制 body。
+- [Request.java:101](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L101)：path 原始读取。
+- [Request.java:114](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L114)：query 返回 Optional。
+- [Request.java:138](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L138)：body 每次返回副本。
 - [HttpMethod.java:86](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L86)：标准方法忽略大小写归一，其他方法保持原始 token。
 - [RequestTest.java:21](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21)：表面、路径、查询、字节体、拒绝和日志脱敏测试。
 - [HttpMethodTest.java](../../framework/barezen-web/src/test/java/com/barezen/web/HttpMethodTest.java)：标准方法、未知方法与拒绝输入。
-- [ADR-0018 §6–§8](../../docs/adr/0018-http-is-a-contract-not-a-server.md#L238)：同步 Handler、原始值、字节体与防御性复制。
+- [ADR-0018 §6–§8](../../docs/adr/0018-http-is-a-contract-not-a-server.md#L240)：同步 Handler、原始值、字节体与防御性复制。
 
 `32ebc41` 建立 Request 时已经写入“无 uri、无 param、无 decoded twin”。`74ea0fb` 增加 OPTIONS * 的真实适配器测试后，Router 对星号目标做了小改；Request 本身接受 `*` 的规则来自请求目标语义，不是给某个服务器打补丁。
 
@@ -53,7 +53,7 @@ body 采用 byte[]，构造和读取都复制。适配器可以复用读缓冲�
 
 [RequestTest.Surface](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21) 用反射断言只有 method/path/query/headers/body/toString，没有 setter、put、remove。这个测试保护的不是代码风格，而是 Handler 能否信任输入不被后一个组件改写。
 
-路径与 query 测试分别覆盖 `%2F`、编码点段、重复斜杠、尾斜杠、OPTIONS *、相对路径拒绝、空 query 与未解析 query。字节体测试覆盖输入缓冲被改写、返回数组被改写、null/空数组和二进制内容。日志测试构造 Authorization 与密码 body，断言 toString 只有方法、path 和字节数。
+路径与 query 测试分别覆盖 `%2F`、编码点段、重复斜杠、尾斜杠、OPTIONS *、相对路径拒绝、原始空格/控制字符拒绝、空 query 与未解析 query。字节体测试覆盖输入缓冲被改写、返回数组被改写、null/空数组和二进制内容。日志测试构造 Authorization 与密码 body，断言 toString 只有方法、path 和字节数。
 
 ```bash
 mvn -o -B -ntp -pl framework/barezen-web -am test \
@@ -61,7 +61,7 @@ mvn -o -B -ntp -pl framework/barezen-web -am test \
   -Dtest=RequestTest,HttpMethodTest
 ```
 
-当前 RequestTest 有 19 项、HttpMethodTest 有 11 项。完整 web 模块检查点会再次运行它们，并同时验证 Router 与架构规则。
+当前 RequestTest 有 21 项、HttpMethodTest 有 11 项。完整 web 模块检查点会再次运行它们，并同时验证 Router 与架构规则。
 
 ## 此刻的代码长什么样
 

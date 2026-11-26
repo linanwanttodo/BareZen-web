@@ -64,7 +64,7 @@ mvn -o -B -ntp -pl framework/barezen-web -am test \
   -Dtest=HeadersTest,ResponseTest
 ```
 
-当前 HeadersTest 23 项、ResponseTest 26 项。完整矩阵的真实 socket 测试属于 JDK 适配器，本章不能仅凭这两个单元测试类声称已经验证 HEAD 与 304 的 wire 输出。
+当前 HeadersTest 25 项、ResponseTest 26 项。完整矩阵的真实 socket 测试属于 JDK 适配器，本章不能仅凭这两个单元测试类声称已经验证 HEAD 与 304 的 wire 输出。
 
 ## 此刻的代码长什么样
 

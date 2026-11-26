@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -111,6 +112,33 @@ class RequestTest {
           .hasMessageContaining("must start with \"/\"");
       // An absolute-form target belongs to a proxy, and a relative path is resolved against a base the contract does
       // not have — so both would be an argument about routing, arriving inside a value object.
+    }
+
+    @Test
+    void refusesControlCharactersAndSpacesInThePathWithoutEchoingThem() {
+      for (String path : List.of("/safe\r\nX-Injected: 1", "/safe\n", "/safe\t", "/safe value", "/safe\u007f",
+          "relative\r\nX-Injected: 1")) {
+        assertThatThrownBy(() -> get(path))
+            .isInstanceOf(IllegalArgumentException.class)
+            .satisfies(failure -> {
+              String message = failure.getMessage();
+              assertThat(message).doesNotContain("\r").doesNotContain("\n").doesNotContain("\t");
+              assertThat(message).contains("control character or space");
+            });
+      }
+    }
+
+    @Test
+    void refusesControlCharactersAndSpacesInTheQueryWithoutEchoingThem() {
+      for (String query : List.of("q=a\r\nX-Injected: 1", "q=a\n", "q=a\t", "q=a value", "q=a\u007f")) {
+        assertThatThrownBy(() -> new Request(HttpMethod.GET, "/search", query, Headers.empty(), null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .satisfies(failure -> {
+              String message = failure.getMessage();
+              assertThat(message).doesNotContain("\r").doesNotContain("\n").doesNotContain("\t");
+              assertThat(message).contains("control character or space");
+            });
+      }
     }
 
     @Test
