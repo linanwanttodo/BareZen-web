@@ -33,6 +33,8 @@ import java.util.Optional;
  * <ul>
  *   <li>no credential, an anonymous result or a failed authentication answers {@code 401 Unauthorized}: the request
  *       has no identity, so the question "is it allowed?" cannot be asked;
+ *   <li>a malformed {@code Authorization} field that cannot form a credential answers {@code 401 Unauthorized}:
+ *       it is a client input error, not a broken authentication component;
  *   <li>an authenticated identity that the authorization denies answers {@code 403 Forbidden}: the identity is known,
  *       and the answer is no;
  *   <li>an authentication or authorization component that throws answers {@code 500 Internal Server Error}: a broken
@@ -107,7 +109,12 @@ public final class SecurityMiddleware implements Handler {
 
   @Override
   public Response handle(Request request, Map<String, String> parameters) {
-    Credential credential = credentialFrom(request);
+    Credential credential;
+    try {
+      credential = credentialFrom(request);
+    } catch (IllegalArgumentException malformedCredential) {
+      return status(401, "Unauthorized");
+    }
     AuthenticationResult result;
     try {
       result = authentication.authenticate(credential);

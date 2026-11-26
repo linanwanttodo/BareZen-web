@@ -1,6 +1,7 @@
 package com.barezen.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import com.barezen.web.Handler;
@@ -214,6 +215,25 @@ class SecurityMiddlewareTest {
           (request, parameters) -> ok("answered"));
       Response response = handler.handle(requestWithAuthorization("raw-token"), Map.of());
       assertThat(response.status()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("a scheme made only of Unicode whitespace is refused as a client error")
+    void unicodeWhitespaceSchemeIsUnauthorized() {
+      AtomicInteger calls = new AtomicInteger();
+      Handler handler = SecurityMiddleware.wrap(
+          Authentication.bearer("Bearer", "good", ADA),
+          (request, parameters) -> {
+            calls.incrementAndGet();
+            return ok("answered");
+          });
+
+      assertThatCode(() -> {
+        Response response = handler.handle(requestWithAuthorization("\u2003 good"), Map.of());
+        assertThat(response.status()).isEqualTo(401);
+        assertThat(bodyOf(response)).isEqualTo("Unauthorized");
+      }).doesNotThrowAnyException();
+      assertThat(calls).hasValue(0);
     }
 
     @Test

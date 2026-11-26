@@ -39,7 +39,8 @@ Spring Security's `.anyRequest().permitAll()` footgun is exactly why.
 
 The mapping is:
 
-- no credential offered, or a credential that does not verify → 401 `Unauthorized`, the handler is never called;
+- no credential offered, a credential that does not verify, or a malformed `Authorization` field that cannot form a
+  credential → 401 `Unauthorized`, the handler is never called;
 - an authenticated identity the `Authorization` denies → 403 `Forbidden`, the handler is never called;
 - an `Authentication` or `Authorization` implementation that throws → 500 `Internal Server Error`, the handler is
   never called.
@@ -87,7 +88,7 @@ name the test that checks the handler is never called.
 
 ## Testing
 
-`SecurityMiddlewareTest` (18 tests) has the five states as its first @Nested group and the required-permission matrix
+`SecurityMiddlewareTest` (19 tests) has the five states as its first @Nested group and the required-permission matrix
 (granted, ungranted, ANY-by-default, null refusal) as its last; `SecurityHttpEndToEndTest` (6 tests) repeats the
 statuses over a real socket. Each refusal asserts the handler-call counter is zero. Mutations SM1 (the gate), SM2
 (401-as-403), SM3 (the inverted allow test), SM4 (500 charged to the client), and SM14 (the route's required
