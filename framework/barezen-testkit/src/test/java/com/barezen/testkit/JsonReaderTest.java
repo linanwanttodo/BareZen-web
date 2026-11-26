@@ -2,6 +2,7 @@ package com.barezen.testkit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import java.util.List;
 import java.util.Map;
@@ -171,6 +172,35 @@ class JsonReaderTest {
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("invalid JSON");
       assertThatThrownBy(() -> JsonValue.parse("\"\\uＦＦＦＦ\""))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("invalid JSON");
+    }
+
+    @Test
+    @DisplayName("numbers follow the JSON grammar and keep every valid literal exact")
+    void numberGrammar() {
+      for (String literal : List.of("0", "-0", "0.0", "10", "-3.50", "1e3", "1E-2", "-123.45e+6")) {
+        assertThat(JsonValue.parse(literal).asText()).isEqualTo(literal);
+      }
+      for (String literal : List.of("-", "01", "1.", "1e", "1e+", "1２")) {
+        assertThat(catchThrowableOfType(() -> JsonValue.parse(literal), IllegalArgumentException.class))
+            .as(literal)
+            .hasMessageContaining("JSON");
+      }
+    }
+
+    @Test
+    @DisplayName("a raw control character inside a string is refused")
+    void rawStringControl() {
+      assertThatThrownBy(() -> JsonValue.parse("\"a" + (char) 1 + "b\""))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("invalid JSON");
+    }
+
+    @Test
+    @DisplayName("Unicode whitespace is not JSON whitespace")
+    void jsonWhitespace() {
+      assertThatThrownBy(() -> JsonValue.parse("\u2003{}"))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("invalid JSON");
     }

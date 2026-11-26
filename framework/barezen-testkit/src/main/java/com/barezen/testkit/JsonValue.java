@@ -131,7 +131,11 @@ final class JsonValue {
     }
 
     void skipWhitespace() {
-      while (position < input.length() && Character.isWhitespace(input.charAt(position))) {
+      while (position < input.length()) {
+        char character = input.charAt(position);
+        if (character != ' ' && character != '\t' && character != '\n' && character != '\r') {
+          return;
+        }
         position++;
       }
     }
@@ -270,6 +274,8 @@ final class JsonValue {
             default:
               throw error("invalid escape '\\" + esc + "'");
           }
+        } else if (c < 0x20) {
+          throw error("unescaped control character in string");
         } else {
           out.append(c);
         }
@@ -304,27 +310,40 @@ final class JsonValue {
       if (peek() == '-') {
         position++;
       }
-      while (!atEnd() && Character.isDigit(input.charAt(position))) {
-        position++;
+      if (atEnd() || !isAsciiDigit(input.charAt(position))) {
+        throw error("a number requires an integer part");
       }
-      if (!atEnd() && (input.charAt(position) == '.' || input.charAt(position) == 'e' || input.charAt(position) == 'E')) {
-        if (input.charAt(position) == '.') {
+      if (input.charAt(position) == '0') {
+        position++;
+      } else {
+        requireDigits("a number requires an integer part");
+      }
+      if (!atEnd() && input.charAt(position) == '.') {
+        position++;
+        requireDigits("a decimal point must be followed by at least one digit");
+      }
+      if (!atEnd() && (input.charAt(position) == 'e' || input.charAt(position) == 'E')) {
+        position++;
+        if (!atEnd() && (input.charAt(position) == '+' || input.charAt(position) == '-')) {
           position++;
-          while (!atEnd() && Character.isDigit(input.charAt(position))) {
-            position++;
-          }
         }
-        if (!atEnd() && (input.charAt(position) == 'e' || input.charAt(position) == 'E')) {
-          position++;
-          if (!atEnd() && (input.charAt(position) == '+' || input.charAt(position) == '-')) {
-            position++;
-          }
-          while (!atEnd() && Character.isDigit(input.charAt(position))) {
-            position++;
-          }
-        }
+        requireDigits("an exponent must contain at least one digit");
       }
       return new Value(Value.Kind.NUMBER, null, null, input.substring(start, position));
+    }
+
+    private void requireDigits(String message) {
+      int start = position;
+      while (!atEnd() && isAsciiDigit(input.charAt(position))) {
+        position++;
+      }
+      if (position == start) {
+        throw error(message);
+      }
+    }
+
+    private static boolean isAsciiDigit(char character) {
+      return character >= '0' && character <= '9';
     }
 
     private void expectLiteral(String literal) {
