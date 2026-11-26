@@ -162,6 +162,20 @@ class JsonReaderTest {
     }
 
     @Test
+    @DisplayName("a truncated or non-hex Unicode escape is a parse error, not a substring failure")
+    void unicodeEscapes() {
+      assertThatThrownBy(() -> JsonValue.parse("\"\\u12\""))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("invalid JSON");
+      assertThatThrownBy(() -> JsonValue.parse("\"\\u12G4\""))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("invalid JSON");
+      assertThatThrownBy(() -> JsonValue.parse("\"\\uＦＦＦＦ\""))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("invalid JSON");
+    }
+
+    @Test
     @DisplayName("an empty input is an error, not a null")
     void empty() {
       assertThatThrownBy(() -> JsonValue.parse("")).isInstanceOf(IllegalArgumentException.class);

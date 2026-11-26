@@ -26,7 +26,7 @@ client 不应要求应用理解 JDK request builder。`TestHttpClient` 暴露 GE
 
 第三项设计是断言 API 保持小而可理解。`Assertions` 只有三个入口：响应、整数计数、`Optional<Principal>`。响应可检查状态、单个 header、header 存在、精确 body、body 子串，以及 JSON 路径上的 string/number/boolean/array size。链式调用让成功路径读起来像一句需求，但失败消息必须同时说明 expected 和 actual，避免只抛裸 `AssertionError` 让人重新运行调试。
 
-JSON path 使用点分导航，数组索引也是数字段，例如 `tags.0.name`。数字按源文本比较，`jsonNumberIs("info.version", "1")` 不会把字符串 `"1"` 当成数字。key 自身含点时无法精确寻址，调用者只能退回更宽泛的 body 检查；这个限制比发明转义语法更诚实。package-private `JsonValue` 只服务断言，不是公开 JSON 库，也不应被描述为覆盖完整 JSON 标准的解析器。malformed JSON 抛 `IllegalArgumentException`，说明 fixture/响应本身不成立，不是期望值不匹配。
+JSON path 使用点分导航，数组索引也是数字段，例如 `tags.0.name`。数字按源文本比较，`jsonNumberIs("info.version", "1")` 不会把字符串 `"1"` 当成数字。key 自身含点时无法精确寻址，调用者只能退回更宽泛的 body 检查；这个限制比发明转义语法更诚实。package-private `JsonValue` 只服务断言，不是公开 JSON 库，也不应被描述为覆盖完整 JSON 标准的解析器。malformed JSON 抛 `IllegalArgumentException`，说明 fixture/响应本身不成立，不是期望值不匹配；`\u` 转义必须恰好包含四位 ASCII 十六进制数字，截断、非十六进制和全角数字都在同一解析边界被拒绝。
 
 第四项设计是 fixtures 每个实例自己持有状态。`textHandler`、`statusHandler`、`echoHandler`、`jsonHandler` 是简单响应构造器；`CountingHandler` 用实例字段 `AtomicInteger` 计数，`PrincipalCapturingHandler` 用 `AtomicReference` 和实例内列表记录最近身份与见过的名字。计数器不能是 static，否则两个测试即使拿到两个 fixture 也共享一次执行。`independentInstances` 测试正是用第二个 fixture 仍为零来拒绝这种实现。
 
@@ -118,7 +118,7 @@ mvn -o -B -ntp -pl framework/barezen-testkit -am test \
   -Dtest=AssertionsTest,FixturesTest,JsonReaderTest,TestDatabaseTest,TestServerIntegrationTest,ReadmeTestKitExampleTest,BarezenTestKitArchitectureTest,ClassMajorContractTest
 ```
 
-当前实跑 77 项，全部通过：Assertions 13、Fixtures 14、JsonReader 17、TestDatabase 7、TestServerIntegration 15、ClassMajor 4、Architecture 6、README example 1。这个数字与 ADR-0044 的记录一致，但本章引用的是当前 JDK 24 环境下的再次实跑，而不是照抄历史声明。
+当前实跑 78 项，全部通过：Assertions 13、Fixtures 14、JsonReader 18、TestDatabase 7、TestServerIntegration 15、ClassMajor 4、Architecture 6、README example 1。这个数字与 ADR-0044 的记录一致，但本章引用的是当前 JDK 24 环境下的再次实跑，而不是照抄历史声明。
 
 `TestServerIntegrationTest` 不只看一个 health 请求。它覆盖七个动词、请求 header 到达 handler、port 与 baseUri 一致、重复 close、ServerSocket 能重新取得刚释放的端口、两个 server 得到不同端口、未路由路径 404、security 的成功/拒绝组合、alice 与 bob 的身份隔离，以及 server 关闭后的请求抛 `TestRequestFailedException`。这些测试分别对应“真实 socket”可能暴露的泄漏与串扰。
 

@@ -265,8 +265,7 @@ final class JsonValue {
               out.append('\t');
               break;
             case 'u':
-              out.append((char) Integer.parseInt(input.substring(position, position + 4), 16));
-              position += 4;
+              out.append(parseUnicodeEscape());
               break;
             default:
               throw error("invalid escape '\\" + esc + "'");
@@ -275,6 +274,29 @@ final class JsonValue {
           out.append(c);
         }
       }
+    }
+
+    private char parseUnicodeEscape() {
+      if (input.length() - position < 4) {
+        throw error("a Unicode escape requires exactly four hexadecimal digits");
+      }
+      int codeUnit = 0;
+      for (int index = 0; index < 4; index++) {
+        char digit = input.charAt(position + index);
+        int value;
+        if (digit >= '0' && digit <= '9') {
+          value = digit - '0';
+        } else if (digit >= 'a' && digit <= 'f') {
+          value = digit - 'a' + 10;
+        } else if (digit >= 'A' && digit <= 'F') {
+          value = digit - 'A' + 10;
+        } else {
+          throw error("a Unicode escape requires exactly four ASCII hexadecimal digits");
+        }
+        codeUnit = (codeUnit << 4) | value;
+      }
+      position += 4;
+      return (char) codeUnit;
     }
 
     private Value parseNumber() {
