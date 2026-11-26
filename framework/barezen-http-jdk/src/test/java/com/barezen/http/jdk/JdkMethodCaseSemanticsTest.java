@@ -340,14 +340,13 @@ class JdkMethodCaseSemanticsTest {
           new Response(200, Headers.of("Content-Type", "text/plain"), HELLO)))) {
         int port = start(adapter);
 
-        // A control character, a quote, a non-ASCII byte: the JDK puts them in the token and hands the exchange over,
-        // so each arrives as an extension method and the route table answers it with the 405 the matrix already pins.
-        // (JDK 17 and 21 both — the parser accepted all three identically, measured in /tmp/p210/probe2.)
+        // A control character, a quote and a non-ASCII byte are not HTTP method tokens. A JDK that rejects one in its
+        // parser answers 400 before an exchange exists; a JDK that hands it over reaches HttpMethod.of, which refuses it
+        // before routing. Neither path may turn malformed input into an extension-method 405.
         for (String line : List.of("G\u0001ET", "\"GET\"", "G\u00e9ET")) {
           RawHttp.Response answer = RawHttp.requestRaw(port,
               line + " /doc HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nConnection: close\r\n\r\n");
-          assertThat(answer.status()).as("status for token %s", line).isEqualTo(405);
-          assertThat(answer.valuesOf("Allow")).as("Allow for token %s", line).containsExactly("GET");
+          assertThat(answer.status()).as("status for token %s", line).isEqualTo(400);
         }
       }
     }
