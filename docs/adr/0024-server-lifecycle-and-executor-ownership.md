@@ -277,6 +277,8 @@ cancel — not a thread pool, and not a server that answers requests.
 provider's exception propagates unwrapped, the adapter is spent, a second `start()` is refused, and a borrowed provider
 is not closed. It then asserts `canBind(port)` is **false**, pinning the JDK's behaviour: a future runtime that starts
 releasing the socket makes that test fail, and the debt entry below is revisited rather than quietly resolved.
+Amended on 2026-11-26: the same cleanup and STOPPED transition applies when startup throws `Error`, not only
+`RuntimeException`; the original `Error` is rethrown unchanged after cleanup.
 
 **Design debt, named:** a `start()` that fails after binding cannot give the port back on the JDKs this phase was
 verified on. The mitigation is that the framework never creates an adapter whose `start()` can fail this way except out

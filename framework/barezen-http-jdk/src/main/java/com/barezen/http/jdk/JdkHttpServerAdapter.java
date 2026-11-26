@@ -201,7 +201,7 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
         created.setExecutor(threads.newUnboundedExecutor("barezen-http-jdk"));
         created.createContext("/", new JdkRequestDispatcher(router, bodyLimit));
         created.start();
-      } catch (IOException | RuntimeException startupFailure) {
+      } catch (IOException | RuntimeException | Error startupFailure) {
         if (created != null) {
           created.stop(0);
         }
@@ -209,9 +209,13 @@ public final class JdkHttpServerAdapter implements HttpServerAdapter {
           threads.close();
         }
         state = State.STOPPED;
-        throw startupFailure instanceof IOException bindFailure
-            ? new UncheckedIOException("cannot start the JDK HTTP server on " + address, bindFailure)
-            : (RuntimeException) startupFailure;
+        if (startupFailure instanceof IOException bindFailure) {
+          throw new UncheckedIOException("cannot start the JDK HTTP server on " + address, bindFailure);
+        }
+        if (startupFailure instanceof RuntimeException runtimeFailure) {
+          throw runtimeFailure;
+        }
+        throw (Error) startupFailure;
       }
       server = created;
       state = State.RUNNING;

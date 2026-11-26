@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The lifecycle matrix, run against a real bound port rather than a mock (ADR-0024 §1).
@@ -326,20 +328,27 @@ class JdkHttpServerLifecycleTest {
       }
     }
 
-    @Test
-    void aStartThatFailedAfterBindingSpendsTheAdapterAndClosesNothingItDidNotCreate() {
+    @ParameterizedTest(name = "provider fails with Error={0}")
+    @ValueSource(booleans = {false, true})
+    void aStartThatFailedAfterBindingSpendsTheAdapterAndClosesNothingItDidNotCreate(boolean failsWithError) {
       // The other half of start()'s catch: HttpServer.create() succeeded, so the JDK has a bound socket and a running
       // idle-timeout timer, and then the borrowed provider refuses to hand out an executor. Nothing in this module
       // throws at a moment of a test's choosing, so the collaborator is a hand-written provider rather than a mock
       // (ADR-0024 §4, §7).
       int bound = freePort();
-      RefusingProvider refusing = new RefusingProvider();
+      RefusingProvider refusing = new RefusingProvider(failsWithError);
       JdkHttpServerAdapter adapter = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", bound), ROUTES,
           refusing);
 
-      assertThatThrownBy(adapter::start)
-          .isInstanceOf(IllegalStateException.class)
-          .hasMessage("no executor here");
+      if (failsWithError) {
+        assertThatThrownBy(adapter::start)
+            .isInstanceOf(AssertionError.class)
+            .hasMessage("no executor here");
+      } else {
+        assertThatThrownBy(adapter::start)
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("no executor here");
+      }
 
       // The refusal propagates unchanged — a provider's own exception is information the caller needs, not something to
       // wrap — and the instance is spent rather than retryable.
@@ -364,6 +373,22 @@ class JdkHttpServerLifecycleTest {
     private static final class RefusingProvider implements ThreadProvider {
       int closeCalls;
       int executorRequests;
+      private final boolean failsWithError;
+
+      RefusingProvider() {
+        this(false);
+      }
+
+      RefusingProvider(boolean failsWithError) {
+        this.failsWithError = failsWithError;
+      }
+
+      private java.util.concurrent.ExecutorService refused() {
+        if (failsWithError) {
+          throw new AssertionError("no executor here");
+        }
+        throw new IllegalStateException("no executor here");
+      }
 
       @Override
       public Kind kind() {
@@ -382,13 +407,13 @@ class JdkHttpServerLifecycleTest {
 
       @Override
       public java.util.concurrent.ExecutorService newBoundedExecutor(int maxConcurrency, String namePrefix) {
-        throw new IllegalStateException("no executor here");
+        return refused();
       }
 
       @Override
       public java.util.concurrent.ExecutorService newUnboundedExecutor(String namePrefix) {
         executorRequests++;
-        throw new IllegalStateException("no executor here");
+        return refused();
       }
 
       @Override
