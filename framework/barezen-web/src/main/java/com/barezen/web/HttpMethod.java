@@ -65,6 +65,9 @@ public final class HttpMethod {
   /** The nine, in the order HTTP defines them. Private: a caller that needs the set compares against the values above. */
   private static final HttpMethod[] STANDARD = {GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH};
 
+  /** RFC 9110 separator set plus space and tab: none may appear in a method token. */
+  private static final String SEPARATORS = "()<>@,;:\\\"/[]?={} \t";
+
   private final String text;
 
   private HttpMethod(String text) {
@@ -79,9 +82,9 @@ public final class HttpMethod {
    * @return the standard value for one of the nine, or a value holding {@code method} exactly as sent for anything
    *     else
    * @throws NullPointerException if {@code method} is null
-   * @throws IllegalArgumentException if {@code method} is blank. A request line without a method names no method, and
-   *     defaulting to {@code GET} would answer a request nobody sent; core applies the same rule to a blank
-   *     participant id rather than generating one.
+   * @throws IllegalArgumentException if {@code method} is blank or is not an HTTP token. A request line without a
+   *     method names no method, and defaulting to {@code GET} would answer a request nobody sent; control characters,
+   *     whitespace and separators are refused for the same reason a malformed request line is refused
    */
   public static HttpMethod of(String method) {
     Objects.requireNonNull(method,
@@ -89,6 +92,16 @@ public final class HttpMethod {
     if (method.isBlank()) {
       throw new IllegalArgumentException("the request method must not be blank; got \"" + method + "\"."
           + " An empty method names no method, and guessing one would run the wrong handler");
+    }
+    for (int index = 0; index < method.length(); index++) {
+      char character = method.charAt(index);
+      if (character <= 0x20 || character >= 0x7f || SEPARATORS.indexOf(character) >= 0) {
+        String shown = character <= 0x20 || character >= 0x7f
+            ? "\\u" + String.format("%04X", (int) character) : "'" + character + "'";
+        throw new IllegalArgumentException("request method is not an HTTP token; got " + shown
+            + " at index " + index + ". A method is one token on the request line, not a place for whitespace,"
+            + " controls or separators");
+      }
     }
     for (HttpMethod standard : STANDARD) {
       if (standard.text.equalsIgnoreCase(method)) {

@@ -96,7 +96,7 @@ public byte[] body()
 
 ### method：方法值，不是枚举
 
-`HttpMethod` 是值类型。九个标准方法名——`GET`、`HEAD`、`POST`、`PUT`、`DELETE`、`CONNECT`、`OPTIONS`、`TRACE`、`PATCH`——忽略大小写并复用共享值；扩展方法保留原始拼写。`HttpMethod.of("get")` 的 `text()` 是 `GET`，但扩展方法不会因此被擅自转成大写。
+`HttpMethod` 是值类型。九个标准方法名——`GET`、`HEAD`、`POST`、`PUT`、`DELETE`、`CONNECT`、`OPTIONS`、`TRACE`、`PATCH`——忽略大小写并复用共享值；扩展方法保留原始拼写。`HttpMethod.of("get")` 的 `text()` 是 `GET`，但扩展方法不会因此被擅自转成大写。输入必须是 RFC 9110 token：空白、控制字符、非 ASCII 与分隔符会被拒绝，合法 `tchar` 标点仍可用于扩展方法；异常消息不会回显 CR/LF。
 
 路由匹配使用这个归一化后的值。实际 wire 上是否抑制 HEAD body，则是适配器根据原始请求 token 决定的事情，不能把这两层语义混为一谈。
 

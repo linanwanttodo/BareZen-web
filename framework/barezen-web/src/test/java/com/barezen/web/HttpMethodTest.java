@@ -2,8 +2,11 @@ package com.barezen.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -120,6 +123,28 @@ class HttpMethodTest {
           .hasMessageContaining("must not be blank");
       // Guessing GET for an empty method would serve a resource to a request that never asked for one, which is the
       // one failure mode a method parser must not have.
+    }
+
+    @Test
+    void refusesCharactersThatCannotOccurInAMethodToken() {
+      List<String> accepted = new ArrayList<>();
+      for (String method : List.of("GET POST", "GET\r\nX-Injected: 1", "GET\t", "GÉT", "GET/POST", "GET,POST")) {
+        Throwable failure = catchThrowableOfType(() -> HttpMethod.of(method), IllegalArgumentException.class);
+        if (failure == null) {
+          accepted.add(method);
+        } else {
+          assertThat(failure).hasMessageContaining("HTTP token")
+              .satisfies(error -> assertThat(error.getMessage()).doesNotContain("\r").doesNotContain("\n"));
+        }
+      }
+      assertThat(accepted).as("invalid method tokens accepted by the parser").isEmpty();
+    }
+
+    @Test
+    void acceptsEveryLegalTokenPunctuationCharacter() {
+      String punctuation = "!#$%&'*+-.^_`|~";
+      assertThat(HttpMethod.of(punctuation).text()).isEqualTo(punctuation);
+      assertThat(HttpMethod.of("M-SEARCH").text()).isEqualTo("M-SEARCH");
     }
   }
 

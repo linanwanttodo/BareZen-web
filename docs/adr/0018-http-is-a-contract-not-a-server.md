@@ -178,6 +178,8 @@ never matches, quietly, and the spelling a client used is not the developer's ch
 So `HttpMethod` is a final class holding a name, with nine shared values, and `of(String)` normalises once at the
 edge:
 
+- the input must be a non-blank RFC 9110 token before any case normalisation: whitespace, controls, non-ASCII and
+  separators are refused, while every legal `tchar` punctuation character remains available to extension methods;
 - one of the nine, in any case, returns that shared value, and `text()` reads upper case;
 - anything else keeps the exact spelling and compares exactly, because a method name is a case-sensitive token — so
   `of("PROPFIND")` and `of("propfind")` are two methods, which is what the specification says and the only rule that
@@ -193,6 +195,14 @@ The class carries no behaviour beyond its name: no `requiresBody()`, no `isIdemp
 HTTP semantics table the contract would own, and their first consumer is a router — which is not in this phase (§10).
 A handler that needs to switch on a method switches on `text()`, which is the one real cost of not using an enum, and
 it is cheaper than losing an unknown method's name.
+
+**Amendment (2026-11-27): validate the method token at the public parse boundary.** `of(String)` previously refused
+only blank input. It now applies the RFC 9110 `token` grammar before standard-name case folding, using the same visible
+ASCII and separator rules as a header field name. The refusal names the offending character as an escaped code point
+when it is a control or non-ASCII character, so CR/LF input is not copied into a log-bound exception message.
+`HttpMethodTest` enumerates space, CR/LF, tab, non-ASCII, slash and comma; all six were accepted before the change. A
+reverse control accepts the full legal punctuation set and `M-SEARCH`. The declared method surface is unchanged because
+the check is inline in `of`, and the surface reflection test still passes.
 
 ### 5. Header semantics
 

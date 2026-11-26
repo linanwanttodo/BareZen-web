@@ -24,7 +24,7 @@ query 不提供参数 Map，因为 `q=a%20b+&x=1&x=2` 已经包含多个待决�
 
 method 使用 HttpMethod 而非 enum 或 String。九个标准方法有共享常量，`of("get")` 返回 GET；未知方法保留原文，`of("purge")` 与 `of("PURGE")` 不相等，因为 HTTP 方法 token 区分大小写。String 比较容易写错 `"Get"`，enum 又无法表达 WebDAV 或缓存服务器的扩展方法。
 
-这条标准方法归一化只发生在 HttpMethod 的值构造中，不意味着可以改写 Request 的原始目标，也不替代适配器对真实请求行的解析。契约测试直接调用 `of`，适配器测试再验证服务器实际送来的 token；两层分别守住值语义与传输边界，避免把一个服务器的大小写行为误当成 HTTP 通则。
+这条标准方法归一化只发生在 HttpMethod 的值构造中，不意味着可以改写 Request 的原始目标，也不替代适配器对真实请求行的解析。`of` 先拒绝非 RFC 9110 token 的空白、控制字符、非 ASCII 和分隔符，再折叠九个标准方法；合法 `tchar` 标点仍可用于扩展方法。契约测试直接调用 `of`，适配器测试再验证服务器实际送来的 token；两层分别守住值语义与传输边界，避免把一个服务器的大小写行为误当成 HTTP 通则。
 
 body 采用 byte[]，构造和读取都复制。适配器可以复用读缓冲，Handler 可以复用输出缓冲，任何一方事后修改都不能改变 Request。空 body 永远返回非 null 的零长度数组，null 输入与零长度输入在契约里统一；线上是否有 `Content-Length: 0` 由适配器决定。
 
@@ -36,7 +36,7 @@ body 采用 byte[]，构造和读取都复制。适配器可以复用读缓冲�
 - [Request.java:101](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L101)：path 原始读取。
 - [Request.java:114](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L114)：query 返回 Optional。
 - [Request.java:138](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L138)：body 每次返回副本。
-- [HttpMethod.java:86](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L86)：标准方法忽略大小写归一，其他方法保持原始 token。
+- [HttpMethod.java:89](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L89)：先校验 RFC 9110 token，再对标准方法忽略大小写归一，其他方法保持原始 token。
 - [RequestTest.java:21](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21)：表面、路径、查询、字节体、拒绝和日志脱敏测试。
 - [HttpMethodTest.java](../../framework/barezen-web/src/test/java/com/barezen/web/HttpMethodTest.java)：标准方法、未知方法与拒绝输入。
 - [ADR-0018 §6–§8](../../docs/adr/0018-http-is-a-contract-not-a-server.md#L240)：同步 Handler、原始值、字节体与防御性复制。
@@ -61,7 +61,7 @@ mvn -o -B -ntp -pl framework/barezen-web -am test \
   -Dtest=RequestTest,HttpMethodTest
 ```
 
-当前 RequestTest 有 21 项、HttpMethodTest 有 11 项。完整 web 模块检查点会再次运行它们，并同时验证 Router 与架构规则。
+当前 RequestTest 有 21 项、HttpMethodTest 有 13 项。完整 web 模块检查点会再次运行它们，并同时验证 Router 与架构规则。
 
 ## 此刻的代码长什么样
 
