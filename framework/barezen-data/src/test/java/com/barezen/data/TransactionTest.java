@@ -50,7 +50,7 @@ class TransactionTest {
       assertThatThrownBy(() -> subject.transaction(tx -> {
         tx.executeUpdate("INSERT INTO item VALUES (1)");
         throw new SQLException("the unit of work failed through raw JDBC");
-      })).isInstanceOf(DataAccessException.class);
+      })).isInstanceOf(DataAccessException.class).hasMessageContaining("rollback was attempted");
 
       assertThat(count(subject, "item")).as("failure means nothing of it stays").isZero();
     }
@@ -106,6 +106,30 @@ class TransactionTest {
       assertThat(sequence).as("the sequence a reviewer would expect at this boundary")
           .containsExactly("setAutoCommit:false", "commit", "rollback", "setAutoCommit:true");
       assertThat(recorded.leaks()).as("a failed commit still does not leak a connection").isEmpty();
+    }
+
+    @Test
+    @DisplayName("a rollback failure after a failed commit is suppressed on the commit failure")
+    void commitAndRollbackFailuresAreBothReported() {
+      RecordingDataSource recorded = H2.recording();
+      seed(recorded, "CREATE TABLE item (id INT PRIMARY KEY)");
+      Database subject = new Database(recorded);
+      recorded.failNextCommit();
+      recorded.failNextRollback();
+
+      assertThatThrownBy(() -> subject.transaction(tx -> {
+        tx.executeUpdate("INSERT INTO item VALUES (1)");
+        return null;
+      })).isInstanceOf(DataAccessException.class)
+          .hasMessageContaining("transaction commit failed")
+          .hasMessageContaining("rollback was attempted")
+          .hasMessageNotContaining("was rolled back")
+          .satisfies(failure -> assertThat(failure.getSuppressed())
+              .hasSize(1)
+              .allMatch(suppressed -> suppressed instanceof SQLException
+                  && suppressed.getMessage().contains("rollback")));
+
+      assertThat(recorded.leaks()).isEmpty();
     }
 
     @Test

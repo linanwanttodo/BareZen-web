@@ -116,7 +116,7 @@ public final class Database {
    * <p>The decision table, tested as a table (Stage 2.12-D): the callback returns normally → {@code commit()};
    * the callback throws anything, including its own {@link SQLException} from raw JDBC and any runtime exception
    * from application code → {@code rollback()} and the failure propagates, translated if it was the data
-   * layer's; the callback returns but the commit fails → the transaction rolls back first and
+   * layer's; the callback returns but the commit fails → the transaction attempts rollback first and
    * {@link DataAccessException} reports the commit failure with the rollback failure attached if that failed too.
    * In every row of that table the connection is closed before {@code transaction} returns, and {@link
    * Transaction} is no longer usable afterwards.
@@ -142,10 +142,10 @@ public final class Database {
       try {
         result = work.doInTransaction(transaction);
       } catch (SQLException failure) {
-        // Raw JDBC inside a callback: roll the unit of work back, then translate. The failure the caller gets
+        // Raw JDBC inside a callback: attempt rollback, then translate. The failure the caller gets
         // is the database's, and a rollback that also fails travels with it suppressed rather than replacing it.
         rollbackWithSuppressed(transaction, failure);
-        throw new DataAccessException("transaction failed and was rolled back", failure);
+        throw new DataAccessException("transaction failed; rollback was attempted", failure);
       } catch (RuntimeException | Error failure) {
         // An application failure (including a DataAccessException a repository call produced): the unit of work
         // is broken and nothing of it may stay. The failure itself is rethrown untranslated — it names the

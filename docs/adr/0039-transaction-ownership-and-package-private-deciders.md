@@ -57,19 +57,19 @@ parameter passed to every repository call inside it. `Transaction` has no static
 lookup — the delivery decision of ADR-0033 applied to persistence, with the same reason: a value reachable by magic
 is a value whose owner nobody can see.
 
-**The decision table**, tested as a table (`TransactionTest.DecisionTable`, six tests):
+**The decision table**, tested as a table (`TransactionTest.DecisionTable`, seven tests):
 
 | callback outcome | what runs | what the caller gets |
 | --- | --- | --- |
 | returns normally | `commit()` | the callback's result, durable |
-| throws `SQLException` (raw JDBC) | `rollback()` | `DataAccessException` ("transaction failed and was rolled back", cause preserved) |
+| throws `SQLException` (raw JDBC) | `rollback()` | `DataAccessException` ("transaction failed; rollback was attempted", cause preserved) |
 | throws a runtime exception or `Error` (application or repository failure) | `rollback()` | the failure itself, untranslated (ADR-0038's non-translation rule) |
-| returns, commit fails | rollback-then-release | `DataAccessException` naming the commit failure |
-| rollback itself fails | release anyway | original failure with the rollback failure `addSuppressed` |
+| returns, commit fails | rollback-then-release | `DataAccessException` naming the commit failure; a rollback `SQLException` is suppressed on it |
+| callback fails, rollback itself fails | release anyway | original failure with the rollback `DataAccessException` `addSuppressed` |
 
 In every row the connection is closed before `transaction` returns. The commit-failure row is sequenced by the
 recorder, not asserted from intent: `decisionSequence()` proves the JDBC calls were
-`[setAutoCommit(false), commit, rollback, setAutoCommit(true)]` — a failed commit rolls back before the connection is
+`[setAutoCommit(false), commit, rollback, setAutoCommit(true)]` — a failed commit attempts rollback before the connection is
 returned to its pool, because a connection whose commit threw cannot be assumed to have committed nothing
 (`commitFailureRollsBackAndReports`). The release path restores `setAutoCommit(true)` best-effort before handing the
 connection back (`Transaction.release`), so a pooled connection is never returned dirty; if that restore fails it is
@@ -122,13 +122,26 @@ Negative, stated because they are real:
 
 ## Testing
 
-`TransactionTest` (13): DecisionTable 6 (every row above, recorder-sequenced), Isolation 2 (uncommitted work private;
+`TransactionTest` (14): DecisionTable 7 (every row above, recorder-sequenced), Isolation 2 (uncommitted work private;
 rolled-back DML leaves no trace), Ownership 4 (visibility reflection probe, dead-after-decision guard, one
 connection per unit of work via the recorder, nesting independence), Concurrent 1 (eight threads on one `Database`,
 eight independent units, no cross-talk). Legacy probes: M1 (delete rollback), M2 (delete commit), M3 (commit after
 exception), M4 (no rollback on commit failure), M7 (drop the lifetime guard), M8 (never `setAutoCommit(false)`),
 M14 (failure path leaks the connection), M15 (make commit public again) — all killed, tree restored byte-identically
 (`/tmp/p212/mut.py`).
+
+## Amendment (2026-11-27): preserve both commit and rollback failures
+
+The decision table already promised a suppressed rollback failure, but the commit path called `rollbackQuietly()` and
+discarded it. `Transaction.commit()` now creates the commit `DataAccessException` first, attempts rollback, attaches a
+rollback `SQLException` as suppressed, releases the connection, and throws the commit failure. The callback-failure
+path is unchanged: `Transaction.rollback()` translates its own failure and `Database.rollbackWithSuppressed` attaches
+that `DataAccessException` to the application's original failure.
+
+`RecordingDataSource` can now arm commit and rollback independently. The new
+`commitAndRollbackFailuresAreBothReported` test injects both failures, requires exactly one suppressed rollback
+`SQLException`, and still requires an empty leak set. It failed against the previous implementation because the
+suppressed array was empty. `TransactionTest` is now 14 tests, with 7 in the decision table.
 
 ## Non-goals
 

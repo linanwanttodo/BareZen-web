@@ -117,8 +117,8 @@ public interface RowMapper<T> {
 | 抛 `SQLException` | `rollback()`，随后翻译 | `DataAccessException`，原异常为 cause |
 | 抛 `RuntimeException` | `rollback()` | 原异常，不包装 |
 | 抛 `Error` | `rollback()` | 原 `Error` |
-| 回调正常，但 `commit()` 失败 | 尽力 `rollback()`，再释放连接 | 提交失败的 `DataAccessException` |
-| 回调失败，且 `rollback()` 也失败 | 仍释放连接 | 原失败；回滚异常作为 suppressed |
+| 回调正常，但 `commit()` 失败 | 尽力 `rollback()`，再释放连接 | 提交失败的 `DataAccessException`；若 rollback 也失败，其 `SQLException` 作为 suppressed |
+| 回调失败，且 `rollback()` 也失败 | 仍释放连接 | 原失败；回滚的 `DataAccessException` 作为 suppressed |
 
 ```java
 try {

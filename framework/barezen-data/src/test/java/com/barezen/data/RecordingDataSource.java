@@ -13,6 +13,8 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 
@@ -44,8 +46,8 @@ final class RecordingDataSource implements DataSource {
   private final AtomicInteger autoCommitChanges = new AtomicInteger();
   private final AtomicInteger updateExecutions = new AtomicInteger();
 
-  /** When non-null, the next call of this JDBC method throws, once. */
-  private volatile String armedFailure;
+  /** Each named JDBC method in this set fails once, independently of the other armed methods. */
+  private final Set<String> armedFailures = ConcurrentHashMap.newKeySet();
 
   RecordingDataSource(DataSource delegate) {
     this.delegate = delegate;
@@ -53,22 +55,22 @@ final class RecordingDataSource implements DataSource {
 
   /** Makes exactly the next {@code Connection.commit} fail; every later call behaves. */
   void failNextCommit() {
-    armedFailure = "commit";
+    armedFailures.add("commit");
   }
 
   /** Makes exactly the next {@code Connection.rollback} fail. */
   void failNextRollback() {
-    armedFailure = "rollback";
+    armedFailures.add("rollback");
   }
 
   /** Makes exactly the next {@code Connection.setAutoCommit} fail. */
   void failNextSetAutoCommit() {
-    armedFailure = "setAutoCommit";
+    armedFailures.add("setAutoCommit");
   }
 
   /** Makes exactly the next {@code PreparedStatement.setObject} fail — the bind seam of a prepared statement. */
   void failNextBind() {
-    armedFailure = "setObject";
+    armedFailures.add("setObject");
   }
 
   /** The decision-bearing JDBC calls made on connections, in order — "commit after rollback?" reads from here. */
@@ -133,12 +135,7 @@ final class RecordingDataSource implements DataSource {
 
   /** True once, for a matching armed seam; clears the arm so the same failure fires exactly one time. */
   private boolean consumeArmedFailure(String method) {
-    String armed = armedFailure;
-    if (armed != null && armed.equals(method)) {
-      armedFailure = null;
-      return true;
-    }
-    return false;
+    return armedFailures.remove(method);
   }
 
   private static final class Tracked {

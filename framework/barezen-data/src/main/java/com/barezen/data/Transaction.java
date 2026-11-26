@@ -108,8 +108,9 @@ public final class Transaction {
    * Makes every statement run through this transaction durable, in one JDBC commit.
    *
    * <p>Package private (ADR-0039): {@link Database} calls it once, when its callback returns normally. A
-   * commit that fails rolls back first — a connection whose commit threw cannot be assumed to have committed
-   * nothing — and releases the connection before {@link DataAccessException} reaches the caller.
+   * commit that fails attempts rollback first — a connection whose commit threw cannot be assumed to have committed
+   * nothing — and releases the connection before {@link DataAccessException} reaches the caller. A rollback failure is
+   * attached to that exception as suppressed.
    */
   void commit() {
     requireUndecided();
@@ -117,9 +118,15 @@ public final class Transaction {
     try {
       connection.commit();
     } catch (SQLException e) {
-      rollbackQuietly();
+      DataAccessException failure = new DataAccessException(
+          "transaction commit failed; rollback was attempted", e);
+      try {
+        connection.rollback();
+      } catch (SQLException rollbackFailure) {
+        failure.addSuppressed(rollbackFailure);
+      }
       release();
-      throw new DataAccessException("transaction commit failed; the unit of work was rolled back", e);
+      throw failure;
     }
     release();
   }
@@ -185,15 +192,6 @@ public final class Transaction {
       // and replacing a commit or rollback outcome with this failure would hide it.
     }
     releaser.run();
-  }
-
-  private void rollbackQuietly() {
-    try {
-      connection.rollback();
-    } catch (SQLException ignored) {
-      // A rollback cannot restore what the commit failed to persist; the commit failure is the exception the
-      // caller receives, and this only bounds the damage.
-    }
   }
 
   private static void closeQuietly(Connection connection) {
