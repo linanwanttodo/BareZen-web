@@ -94,7 +94,13 @@ final class Tls {
           + KEYSTORE_PASSWORD.name() + "\" supplies no password. A keystore opened without one fails the same way as"
           + " one opened with the wrong one, and the operator cannot tell the two apart from the JDK's message");
     }
-    Path keystore = Path.of(path.get());
+    Path keystore;
+    try {
+      keystore = Path.of(path.get());
+    } catch (java.nio.file.InvalidPathException invalid) {
+      throw new ConfigurationException("\"" + KEYSTORE_PATH.name()
+          + "\" is not a valid filesystem path; the configured value cannot name a keystore", invalid);
+    }
     try {
       // The JDK's default type is what its own keytool writes, so a deployment's keystore and this reader agree
       // without a key nobody would think to set.

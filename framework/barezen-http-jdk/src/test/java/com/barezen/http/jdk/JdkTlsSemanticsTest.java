@@ -261,6 +261,19 @@ class JdkTlsSemanticsTest {
     }
 
     @Test
+    void anInvalidPathSyntaxFailsAsAConfigurationException() {
+      Configuration invalid = Configuration.inMemory(Map.of(
+          Tls.KEYSTORE_PATH.name(), "bad\u0000path",
+          Tls.KEYSTORE_PASSWORD.name(), PASSWORD));
+
+      assertThatThrownBy(() -> Tls.from(invalid))
+          .isInstanceOf(ConfigurationException.class)
+          .hasMessageContaining(Tls.KEYSTORE_PATH.name())
+          .hasCauseInstanceOf(java.nio.file.InvalidPathException.class)
+          .satisfies(failure -> assertThat(failure.getMessage()).doesNotContain("\u0000"));
+    }
+
+    @Test
     void theFailureLandsAtConstructionBeforeAnyPortIsBound(@TempDir Path directory) throws Exception {
       Configuration wrong = Configuration.inMemory(Map.of(
           Tls.KEYSTORE_PATH.name(), keystore(directory).toString(),

@@ -100,14 +100,16 @@ construction, naming both keys.
 
 ## Testing
 
-- `JdkTlsSemanticsTest` — 12 tests. Configured (6): the same route answers over `https` with the client trusting exactly
+- `JdkTlsSemanticsTest` — 13 tests. Configured (6): the same route answers over `https` with the client trusting exactly
   this keystore; `isRunning()`/`port()` behave as they do in plaintext; a client trusting the system CAs is refused; a
   plaintext request to the TLS port gets no readable answer; the startup log says `HTTPS`, names the keystore and never
   the password; a 404 over TLS is the contract's own bytes, naming no path. Unconfigured (2): the adapter still serves
-  plaintext on the same constructor; an explicitly blank path fails construction. Refusals (4): a keystore without a
-  password names both keys; a wrong password names the file and not the secret; a missing file fails construction; the
-  failure lands at construction so no port was spent. Amended on 2026-11-25: blank is no longer treated as absent,
-  because an explicit empty value must not silently downgrade TLS.
+  plaintext on the same constructor; an explicitly blank path fails construction. Refusals (5): a keystore without a
+  password names both keys; a wrong password names the file and not the secret; a missing file fails construction; an
+  invalid path syntax is translated to `ConfigurationException` without echoing the raw value; the failure lands at
+  construction so no port was spent. Amended on 2026-11-25: blank is no longer treated as absent,
+  because an explicit empty value must not silently downgrade TLS. Amended on 2026-11-26: `InvalidPathException`
+  is translated at the same configuration boundary.
 - Keystores are generated per test by the running JDK's own `keytool` (`-storetype PKCS12`, `SAN=dns:localhost,ip:127.0.0.1`,
   one day of validity) in a `@TempDir`, so no keystore and no password is ever committed.
 - **Mutations**, each killed against this test class, each file md5-restored: T1 ignore the keystore key (6 failures + 2

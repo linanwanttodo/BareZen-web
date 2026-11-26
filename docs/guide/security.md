@@ -241,7 +241,7 @@ TLS 不属于 `barezen-security`，而属于 JDK 适配器。两个配置键是�
 - `barezen.http.jdk.tls.keystorePath`
 - `barezen.http.jdk.tls.keystorePassword`
 
-没有配置 `barezen.http.jdk.tls.keystorePath` 时，适配器保持明文 HTTP；如果键存在但值为空白，构造直接失败，不会静默降级。path 存在但没有密码或密码为空时，构造适配器失败；文件不存在、密码错误或 keystore 无法读取，也在构造时失败，不会先占用端口再在启动时意外降级。
+没有配置 `barezen.http.jdk.tls.keystorePath` 时，适配器保持明文 HTTP；如果键存在但值为空白，构造直接失败，不会静默降级。path 存在但没有密码或密码为空时，构造适配器失败；文件不存在、路径语法非法、密码错误或 keystore 无法读取，也在构造时以 `ConfigurationException` 失败，不会先占用端口再在启动时意外降级。非法路径的异常消息不回显原始路径值。
 
 适配器使用 JDK 默认 keystore 类型与默认 TLS 参数，不提供 mTLS、协议白名单、cipher suite 选择、自动证书续期或 HTTP 到 HTTPS 的重定向。`Request` 不携带 scheme 或 `isSecure()`，因此 Handler 不能根据契约判断当前是否加密。TLS 只保护传输，不替代认证、授权或会话撤销。
 
