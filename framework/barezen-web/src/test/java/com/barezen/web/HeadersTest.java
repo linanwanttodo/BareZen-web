@@ -3,6 +3,7 @@ package com.barezen.web;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -230,6 +231,15 @@ class HeadersTest {
             assertThat(message).doesNotContain("\n");
             assertThat(message).contains("\\u000D").contains("\\u000A");
           });
+    }
+
+    @Test
+    void validatesANameBeforeANullValueCanEchoIt() {
+      Throwable failure = catchThrowableOfType(
+          () -> Headers.of("X\r\nInjected", null), IllegalArgumentException.class);
+
+      assertThat(failure).hasMessageContaining("not an HTTP token")
+          .satisfies(error -> assertThat(error.getMessage()).doesNotContain("\r").doesNotContain("\n"));
     }
 
     @Test

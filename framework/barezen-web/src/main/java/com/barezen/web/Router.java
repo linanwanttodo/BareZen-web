@@ -330,7 +330,7 @@ public final class Router {
       Objects.requireNonNull(method,
           "the route method; a route with no method is not a route, it is a guess about what the client meant");
       Objects.requireNonNull(handler,
-          "the route handler for \"" + pattern + "\"; a route to nothing would match a request and have nothing to hand"
+          "the route handler; a route to nothing would match a request and have nothing to hand"
               + " back, which is a bug in the application rather than a condition a client can act on");
       Registration registration = parsed(method, pattern, handler);
       refuseAmbiguous(registration);

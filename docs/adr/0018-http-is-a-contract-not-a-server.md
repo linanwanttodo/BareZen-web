@@ -234,6 +234,11 @@ its index. The message escapes the control characters it reports, because a reje
 same content it refuses; a probe found the first draft printed a two-digit `\u0D`, which is no escape any parser
 accepts.
 
+**Validation order is part of that safety rule.** The name is checked before a null value is refused, so the
+value-error message may include the name only after it is known to be a safe ASCII token. Otherwise
+`Headers.of("X\r\nInjected", null)` would put the rejected name into a `NullPointerException` before token validation
+ran. `HeadersTest.validatesANameBeforeANullValueCanEchoIt` pins both the exception type and the absence of raw CR/LF.
+
 **No map, no interpretation, no builder.** `Map<String,String>` cannot represent a repeated field and
 `Map<String,List<String>>` offers the interpretation this type refuses. Field-specific rules — cookie parsing,
 `Content-Type` parameters, comma-splitting, quality-weight sorting for negotiation — are per-field semantics, and a

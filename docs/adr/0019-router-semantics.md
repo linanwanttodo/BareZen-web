@@ -723,7 +723,9 @@ checks raw target characters before leading-slash, query and parameter diagnosti
 refused with an index and escaped code point, never the raw pattern in the message. The check is registration-time
 because such a route can never match a valid `Request` and would put unsafe text into startup logs. `%20` and other
 percent-encoded literals remain valid. `RouterTest` enumerated raw space, tab, CR/LF and DEL; all four were accepted
-before the change, and a reverse control registers and matches `/users/a%20b`.
+before the change, and a reverse control registers and matches `/users/a%20b`. A null handler is refused without
+including the pattern in its message, because that pattern has not yet passed validation; the null-handler test
+requires the diagnostic to contain neither CR nor LF.
 
 ## Consequences
 

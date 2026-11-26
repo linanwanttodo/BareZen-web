@@ -220,9 +220,9 @@ public final class Headers {
    */
   private static Entry entry(String name, String value) {
     Objects.requireNonNull(name, "the header name; a field with no name cannot be matched, sent or read back");
+    checkName(name);
     Objects.requireNonNull(
         value, "the value of header '" + name + "'; use \"\" for a field that is present with no value");
-    checkName(name);
     checkValue(name, value);
     return new Entry(name, value);
   }

@@ -3,6 +3,7 @@ package com.barezen.web;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -772,6 +773,16 @@ class RouterTest {
           .isInstanceOf(NullPointerException.class).hasMessageContaining("route handler");
       assertThatThrownBy(() -> builder.build().match(null))
           .isInstanceOf(NullPointerException.class).hasMessageContaining("request to route");
+    }
+
+    @Test
+    void aNullHandlerMessageDoesNotEchoAnUnvalidatedPattern() {
+      Throwable failure = catchThrowableOfType(
+          () -> Router.builder().route(HttpMethod.GET, "/users\r\nX-Injected: 1", null),
+          NullPointerException.class);
+
+      assertThat(failure).hasMessageContaining("route handler")
+          .satisfies(error -> assertThat(error.getMessage()).doesNotContain("\r").doesNotContain("\n"));
     }
 
     @Test
