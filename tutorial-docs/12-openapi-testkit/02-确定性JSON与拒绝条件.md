@@ -118,7 +118,7 @@ mvn -o -B -ntp -pl framework/barezen-plugins -am test \
   -Dtest=OpenApiModelTest,OpenApiDocumentTest,JsonWriterTest,ReadmeDocumentExampleTest
 ```
 
-这组共 56 项：OpenApiModel 29、OpenApiDocument 19、JsonWriter 7、README example 1；本章统一检查点中全部通过。`OpenApiDocumentTest.Determinism` 改变 operation 装配顺序，`responseOrderIsDeclaredOrderInOutput` 固定 404 在 200 前；`orderIsDefinedNotAccidental` 检查 `/alpha` 在 `/mike` 前、DELETE 在 GET 前。它们分别防止“无序但偶尔相同”和“排序过度”两种回归。
+这组共 58 项：OpenApiModel 30、OpenApiDocument 20、JsonWriter 7、README example 1；本章统一检查点中全部通过。`OpenApiDocumentTest.Determinism` 改变 operation 装配顺序，`responseOrderIsDeclaredOrderInOutput` 固定 404 在 200 前；`orderIsDefinedNotAccidental` 检查 `/alpha` 在 `/mike` 前、DELETE 在 GET 前。它们分别防止“无序但偶尔相同”和“排序过度”两种回归。
 
 `JsonWriterTest` 的 Output 4 项覆盖对象/数组顺序、嵌套空容器、转义和非 ASCII 原样保留；Misuse 3 项覆盖在数组里写 field、关闭不匹配容器和未闭合 document。只测试正常输出不足以证明 writer 安全：如果 object/array 栈检查永远通过，渲染调用写错时仍可能悄悄产出错误文本，因此拒绝路径也必须可执行。
 

@@ -200,6 +200,24 @@ class OpenApiDocumentTest {
     }
 
     @Test
+    @DisplayName("component schema names use the OpenAPI component-key grammar")
+    void invalidComponentSchemaName() {
+      assertThatThrownBy(() -> ApiDocument.builder().info("T", "1.0")
+          .schema("User/Profile", Schema.string())
+          .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must match [A-Za-z0-9._-]+");
+      assertThatThrownBy(() -> ApiDocument.builder().info("T", "1.0")
+          .schema("User Profile", Schema.string())
+          .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must match [A-Za-z0-9._-]+");
+      assertThat(ApiDocument.builder().info("T", "1.0")
+          .schema("User.Profile-1_2", Schema.string())
+          .build().schemas()).containsKey("User.Profile-1_2");
+    }
+
+    @Test
     @DisplayName("category 6 — a security requirement naming an undeclared scheme is refused at build")
     void invalidSecurityRequirement() {
       Operation guarded = Operation.builder(new OperationMetadata(HttpMethod.DELETE, "/users/{id}", "Delete", List.of()))

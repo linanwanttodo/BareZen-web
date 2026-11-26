@@ -36,6 +36,7 @@ public final class Security {
       if (name.isBlank()) {
         throw new IllegalArgumentException("scheme name must not be blank");
       }
+      checkComponentName(name);
       return new Scheme(name);
     }
 
@@ -65,6 +66,7 @@ public final class Security {
       if (schemeName.isBlank()) {
         throw new IllegalArgumentException("scheme name must not be blank");
       }
+      checkComponentName(schemeName);
       Objects.requireNonNull(scopes, "scopes; use List.of() for none");
       if (!scopes.isEmpty()) {
         throw new IllegalArgumentException("a bearer security requirement must have an empty scopes list; OpenAPI"
@@ -84,6 +86,13 @@ public final class Security {
     @Override
     public String toString() {
       return schemeName + scopes;
+    }
+  }
+
+  private static void checkComponentName(String name) {
+    if (!name.matches("[A-Za-z0-9._-]+")) {
+      throw new IllegalArgumentException("security component name \"" + name
+          + "\" must match [A-Za-z0-9._-]+; OpenAPI component keys cannot contain slashes or whitespace");
     }
   }
 }

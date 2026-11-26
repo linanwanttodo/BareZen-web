@@ -230,6 +230,21 @@ class OpenApiModelTest {
     }
 
     @Test
+    @DisplayName("a bearer scheme name uses the OpenAPI component-key grammar")
+    void schemeNameUsesComponentKeyGrammar() {
+      assertThatThrownBy(() -> Security.Scheme.bearer("session/token"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("component name");
+      assertThatThrownBy(() -> Security.Scheme.bearer("session token"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("component name");
+      assertThatThrownBy(() -> Security.Requirement.of("session/token", List.of()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("component name");
+      assertThat(Security.Scheme.bearer("Session.Token-1_2").name()).isEqualTo("Session.Token-1_2");
+    }
+
+    @Test
     @DisplayName("blank scheme names, null scopes and non-empty bearer scopes are refused")
     void refusals() {
       assertThatThrownBy(() -> Security.Scheme.bearer(" "))

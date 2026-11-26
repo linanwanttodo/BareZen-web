@@ -258,6 +258,10 @@ public final class ApiDocument {
       if (name.isBlank()) {
         throw new IllegalArgumentException("component schema name must not be blank");
       }
+      if (!name.matches("[A-Za-z0-9._-]+")) {
+        throw new IllegalArgumentException("component schema name \"" + name
+            + "\" must match [A-Za-z0-9._-]+; OpenAPI component keys cannot contain slashes or whitespace");
+      }
       Schema previous = schemas.putIfAbsent(name, schema);
       if (previous != null) {
         throw new IllegalArgumentException("component schema \"" + name + "\" declared twice; a second definition"
