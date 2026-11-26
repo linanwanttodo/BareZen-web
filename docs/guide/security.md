@@ -83,7 +83,7 @@ AuthenticationResult authenticate(Credential credential);
 | `failure(reason)` | 提供了凭据，但验证失败 | 401 |
 | `anonymous()` | 没有可接受的身份声明 | 401 |
 
-`maybePrincipal()` 只在认证成功时有值；`isAuthenticated()` 只对成功状态返回 true。`Failure.reason` 是应用选择的诊断文本，不能包含凭据，也不会被中间件发送到客户端。
+`maybePrincipal()` 只在认证成功时有值；`isAuthenticated()` 只对成功状态返回 true。`Authenticated` 与 `Failure` 的公共 record 构造器也拒绝 null，不只依赖工厂校验。`Failure.reason` 是应用选择的诊断文本，不能包含凭据，也不会被中间件发送到客户端。
 
 需要注意，“提供错误凭据”和“没有提供凭据”在当前中间件中都返回 401。三态的价值是让认证实现保留原因、让调用方能区分状态，而不是让 wire 暴露不同失败细节。`AuthPlugin` 现在完整保留该契约：null credential 返回 `anonymous()`，scheme 不匹配、未知或过期 session token 返回 `failure(reason)`；中间件仍以固定 401 拒绝两者。
 

@@ -79,6 +79,11 @@ public sealed interface AuthenticationResult {
    */
   record Authenticated(Principal principal) implements AuthenticationResult {
 
+    public Authenticated {
+      Objects.requireNonNull(principal,
+          "the verified principal; an authenticated result without one is a failure dressed as a success");
+    }
+
     @Override
     public Optional<Principal> maybePrincipal() {
       return Optional.of(principal);
@@ -95,7 +100,13 @@ public sealed interface AuthenticationResult {
    *
    * @param reason why the credential was refused
    */
-  record Failure(String reason) implements AuthenticationResult {}
+  record Failure(String reason) implements AuthenticationResult {
+
+    public Failure {
+      Objects.requireNonNull(reason,
+          "the refusal reason; without one the caller cannot tell a bad token from a missing one");
+    }
+  }
 
   /**
    * No credential offered.

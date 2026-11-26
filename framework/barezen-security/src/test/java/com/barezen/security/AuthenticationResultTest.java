@@ -48,6 +48,18 @@ class AuthenticationResultTest {
   }
 
   @Test
+  @DisplayName("the public Authenticated constructor also refuses a null principal")
+  void authenticatedConstructorRefusesNull() {
+    assertThatNullPointerException().isThrownBy(() -> new AuthenticationResult.Authenticated(null));
+  }
+
+  @Test
+  @DisplayName("the public Failure constructor also refuses a null reason")
+  void failureConstructorRefusesNull() {
+    assertThatNullPointerException().isThrownBy(() -> new AuthenticationResult.Failure(null));
+  }
+
+  @Test
   @DisplayName("failure refuses a null reason")
   void failureRefusesNull() {
     assertThatNullPointerException().isThrownBy(() -> AuthenticationResult.failure(null));
