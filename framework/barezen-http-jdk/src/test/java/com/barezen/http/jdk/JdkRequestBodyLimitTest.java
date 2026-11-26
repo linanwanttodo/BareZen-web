@@ -10,6 +10,7 @@ import com.barezen.web.HttpMethod;
 import com.barezen.web.Request;
 import com.barezen.web.Response;
 import com.barezen.web.Router;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -512,6 +513,22 @@ class JdkRequestBodyLimitTest {
           negative))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("negative");
+    }
+
+    @Test
+    @DisplayName("the largest long limit reads a body without overflowing the probe capacity")
+    void theLargestLongLimitDoesNotOverflow() throws IOException {
+      InputStream body = new ByteArrayInputStream(new byte[1]) {
+        @Override
+        public synchronized int read(byte[] buffer, int offset, int length) {
+          if (length == 0) {
+            throw new AssertionError("an overflowed probe capacity requested a zero-length read");
+          }
+          return super.read(buffer, offset, length);
+        }
+      };
+
+      assertThat(BodyLimit.readBounded(body, Long.MAX_VALUE)).containsExactly((byte) 0);
     }
 
     @Test

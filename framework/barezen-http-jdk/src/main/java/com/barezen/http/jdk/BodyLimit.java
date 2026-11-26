@@ -122,8 +122,9 @@ record BodyLimit(long bytes) {
     // one, so capacity is never below 1, buf is never zero-length, and read() always asks the stream for something
     // (a limit of 0 reads exactly one byte to decide).
     // Read one past the limit: a read that lands exactly on `limit` cannot tell "body == limit" from "body == limit+1"
-    // until it asks for more, and asking for more is what this capacity is for.
-    final long capacity = limit + 1;
+    // until it asks for more, and asking for more is what this capacity is for. The largest long has no successor, so
+    // its probe capacity saturates instead of wrapping negative and silently returning an empty body.
+    final long capacity = limit == Long.MAX_VALUE ? limit : limit + 1;
     byte[] buf = new byte[(int) Math.min(capacity, 8192)];
     int size = 0;
     while (size < capacity) {

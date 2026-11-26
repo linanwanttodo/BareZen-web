@@ -152,7 +152,9 @@ a client that keeps its connection legitimately — and the JDK's own recovery r
    one known before reading; a truncated body *under* the limit stays the arrival failure it was (400).
 5. **An unknown (chunked) length is counted, and the count stops at the first byte past the bound** — the endless
    stream gets its 413 mid-body without being finished. The buffer is grown to what actually arrived (bounded by
-   limit + 1 so `== limit` and `> limit` are distinguishable), never to the limit in advance. Release and connection
+   limit + 1 so `== limit` and `> limit` are distinguishable), never to the limit in advance. At `Long.MAX_VALUE`
+   the probe capacity saturates because no successor exists; wrapping it negative would skip the read and silently
+   return an empty body. Release and connection
    recovery are the JDK's: no `close()` runs before the answer (§Investigation 4), the dispatcher's `finally` does,
    and §Investigation 5's drain rule decides keep-alive versus close.
 
@@ -219,7 +221,7 @@ produce. The ArchUnit rules all still hold unmodified: the adapter reads no envi
 All on raw sockets (a limit about framing cannot be tested through a client that rewrites framing — `RawHttp`),
 green on both JDKs via the full reactor:
 
-- `JdkRequestBodyLimitTest` — the whole decision, 28 tests in five nested groups, per §Compatibility Impact item 7.
+- `JdkRequestBodyLimitTest` — the whole decision, 29 tests in five nested groups, per §Compatibility Impact item 7.
   The two buffer-crossing tests (§Investigation 7) were run against the unfixed reader and both failed with
   `SocketException: Connection reset` — the mutation is recorded rather than asserted away, and the fix is the one
   `room` expression in `readBounded`.
@@ -233,6 +235,12 @@ green on both JDKs via the full reactor:
 - `BarezenHttpJdkArchitectureTest` (24 rules) passes unmodified, including the no-environment rule the new read
   path had to satisfy — its one `System.arraycopy` draft was the rule's own counterexample, and the shipped
   `Arrays.copyOf` is that rule's evidence.
+
+**Amendment (2026-11-27): saturate the largest limit's probe capacity.** `limit + 1` wrapped negative for
+`Long.MAX_VALUE`, so `readBounded` skipped its loop and returned an empty array even for a non-empty stream. The
+capacity now saturates at `Long.MAX_VALUE`. `theLargestLongLimitDoesNotOverflow` uses a stream that rejects
+zero-length reads and requires the real input byte to be returned; it failed against the old code with `expected [0]
+but was []`. The ordinary exact-limit and one-byte-over tests remain unchanged.
 
 ## Related Decisions
 
