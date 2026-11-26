@@ -315,6 +315,51 @@ class OpenApiModelTest {
     }
 
     @Test
+    @DisplayName("braces must fill a whole path segment, as Router requires")
+    void bracesMustFillAWholeSegment() {
+      assertThatThrownBy(() -> Operation.builder(
+          new OperationMetadata(HttpMethod.GET, "/users/prefix{id}", "u", List.of()))
+          .response(ApiResponse.empty("200", "ok"))
+          .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("whole parameter");
+    }
+
+    @Test
+    @DisplayName("path parameter names use Router's identifier grammar")
+    void pathParameterNamesUseIdentifierGrammar() {
+      assertThatThrownBy(() -> Operation.builder(
+          new OperationMetadata(HttpMethod.GET, "/users/{2fa}", "u", List.of()))
+          .response(ApiResponse.empty("200", "ok"))
+          .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("not a parameter name");
+    }
+
+    @Test
+    @DisplayName("a path template cannot name the same parameter twice")
+    void duplicatePathParameterName() {
+      assertThatThrownBy(() -> Operation.builder(
+          new OperationMetadata(HttpMethod.GET, "/users/{id}/{id}", "u", List.of()))
+          .parameter(Parameter.path("id", Schema.integer()))
+          .response(ApiResponse.empty("200", "ok"))
+          .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("twice");
+    }
+
+    @Test
+    @DisplayName("a path template cannot carry a query")
+    void queryInPathPattern() {
+      assertThatThrownBy(() -> Operation.builder(
+          new OperationMetadata(HttpMethod.GET, "/users?q=1", "u", List.of()))
+          .response(ApiResponse.empty("200", "ok"))
+          .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must not contain \"?\"");
+    }
+
+    @Test
     @DisplayName("responses keep declaration order through the builder")
     void responseOrderIsDeclaredOrder() {
       Operation operation = getUser()

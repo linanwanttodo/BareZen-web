@@ -188,22 +188,51 @@ public final class Operation {
 
     /** The capture names {@code /users/{id}/orders/{oid}} contributes: {@code [id, oid]}, in order. */
     private static List<String> pathParameterNames(String pattern) {
+      if (pattern.indexOf('?') >= 0) {
+        throw new IllegalArgumentException("path pattern \"" + pattern
+            + "\" must not contain \"?\"; routing is decided on the path, not a query");
+      }
       List<String> names = new ArrayList<>();
-      int i = 0;
-      while (i < pattern.length()) {
-        int open = pattern.indexOf('{', i);
-        if (open < 0) {
-          break;
+      for (String segment : pattern.substring(1).split("/", -1)) {
+        if (isParameter(segment)) {
+          String name = segment.substring(1, segment.length() - 1);
+          if (!isIdentifier(name)) {
+            throw new IllegalArgumentException("\"{" + name + "}\" in the path pattern \"" + pattern
+                + "\" is not a parameter name. A name is a letter followed by letters, digits or underscores,"
+                + " matching Router's route grammar");
+          }
+          if (names.contains(name)) {
+            throw new IllegalArgumentException("the path pattern \"" + pattern + "\" names the parameter \"" + name
+                + "\" twice; one map key cannot hold two different path positions");
+          }
+          names.add(name);
+        } else if (segment.indexOf('{') >= 0 || segment.indexOf('}') >= 0) {
+          if (segment.indexOf('{') >= 0 && segment.indexOf('}') < 0) {
+            throw new IllegalArgumentException("path pattern \"" + pattern
+                + "\" has an unclosed '{'; a parameter is a segment exactly shaped as {name}");
+          }
+          throw new IllegalArgumentException("path pattern \"" + pattern + "\" has the segment \"" + segment
+              + "\", in which braces are not a whole parameter. A parameter is a segment exactly shaped as {name}");
         }
-        int close = pattern.indexOf('}', open);
-        if (close < 0) {
-          throw new IllegalArgumentException("path pattern \"" + pattern
-              + "\" has an unclosed '{'; the router's grammar is exactly {name} per parameter segment");
-        }
-        names.add(pattern.substring(open + 1, close));
-        i = close + 1;
       }
       return names;
+    }
+
+    private static boolean isParameter(String segment) {
+      return segment.length() > 2 && segment.charAt(0) == '{' && segment.charAt(segment.length() - 1) == '}';
+    }
+
+    private static boolean isIdentifier(String name) {
+      if (name.isEmpty() || !Character.isLetter(name.charAt(0))) {
+        return false;
+      }
+      for (int index = 1; index < name.length(); index++) {
+        char character = name.charAt(index);
+        if (!Character.isLetterOrDigit(character) && character != '_') {
+          return false;
+        }
+      }
+      return true;
     }
   }
 }

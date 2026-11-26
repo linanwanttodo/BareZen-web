@@ -31,7 +31,7 @@ Operation 则保留参数、响应和 security requirement 的声明顺序。响
 - 悬空 `$ref`：operation payload 或组件内部引用了不存在的组件。
 - 无效 security requirement：operation 使用了 document 未声明的 scheme。
 
-wrong path parameter 也在构造期拒绝，但发生在 Operation 层，不等待 document。同一 `(location, name)` 重复声明同样在 Operation 层拒绝；不同 location 的同名参数仍是两个合法参数。把校验放在不同层不是分类混乱，而是由可见信息决定：operation 看得见自己的模板和参数，document 才看得见所有组件和 scheme。
+wrong path parameter 也在构造期拒绝，但发生在 Operation 层，不等待 document。同一 `(location, name)` 重复声明同样在 Operation 层拒绝；不同 location 的同名参数仍是两个合法参数。模板语法本身也与 Router 对齐：部分花括号、非法标识符、重复 path 名称和 query 都在提取参数时失败。把校验放在不同层不是分类混乱，而是由可见信息决定：operation 看得见自己的模板和参数，document 才看得见所有组件和 scheme。
 
 第四项设计是 operationId 派生而不是声明。`GET /users/{id}` 去掉方法大小写与路径分隔符并首字母大写，得到 `getUsersId`。这减少了应用需要同步维护的字段，却也制造了可检测的碰撞：`/users/{id}` 与 `/users/id` 都得到 `getUsersId`。document 用第二遍扫描拒绝碰撞，并指出两个原始 operation，而不是等客户端生成器覆盖其中一个。
 
@@ -118,7 +118,7 @@ mvn -o -B -ntp -pl framework/barezen-plugins -am test \
   -Dtest=OpenApiModelTest,OpenApiDocumentTest,JsonWriterTest,ReadmeDocumentExampleTest
 ```
 
-这组共 51 项：OpenApiModel 24、OpenApiDocument 19、JsonWriter 7、README example 1；本章统一检查点中全部通过。`OpenApiDocumentTest.Determinism` 改变 operation 装配顺序，`responseOrderIsDeclaredOrderInOutput` 固定 404 在 200 前；`orderIsDefinedNotAccidental` 检查 `/alpha` 在 `/mike` 前、DELETE 在 GET 前。它们分别防止“无序但偶尔相同”和“排序过度”两种回归。
+这组共 55 项：OpenApiModel 28、OpenApiDocument 19、JsonWriter 7、README example 1；本章统一检查点中全部通过。`OpenApiDocumentTest.Determinism` 改变 operation 装配顺序，`responseOrderIsDeclaredOrderInOutput` 固定 404 在 200 前；`orderIsDefinedNotAccidental` 检查 `/alpha` 在 `/mike` 前、DELETE 在 GET 前。它们分别防止“无序但偶尔相同”和“排序过度”两种回归。
 
 `JsonWriterTest` 的 Output 4 项覆盖对象/数组顺序、嵌套空容器、转义和非 ASCII 原样保留；Misuse 3 项覆盖在数组里写 field、关闭不匹配容器和未闭合 document。只测试正常输出不足以证明 writer 安全：如果 object/array 栈检查永远通过，渲染调用写错时仍可能悄悄产出错误文本，因此拒绝路径也必须可执行。
 
