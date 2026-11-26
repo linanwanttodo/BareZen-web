@@ -34,9 +34,11 @@ An explicitly requested capability never degrades silently. `AUTO` is the only p
 
 ## Consequences
 
-- Bounded concurrency has one meaning on both providers: a fixed platform pool and a semaphore-gated
+- Bounded concurrency has one meaning on both providers: a fixed platform pool and a condition-gated
   per-task virtual executor give the same ceiling, so switching thread model does not change a resource bound.
-  A shared conformance test suite proves it for both.
+  A shared conformance test suite proves it for both. Amended on 2026-11-26: closing the gate wakes submitters
+  parked on a full bound and rejects them with `RejectedExecutionException`; a null command is refused before
+  admission rather than failing later on a worker thread.
 - `close()` cannot run arbitrarily long: orderly shutdown first, then a bounded force stop, then a report. A
   task that survives force stop is logged rather than waited on forever.
 - Subsystems must ask for their own provider, which reads as slightly more wiring than a global. That is the
