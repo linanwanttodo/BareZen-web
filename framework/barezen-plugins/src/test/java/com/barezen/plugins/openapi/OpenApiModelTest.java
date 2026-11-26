@@ -267,6 +267,33 @@ class OpenApiModelTest {
     }
 
     @Test
+    @DisplayName("the same parameter name and location cannot be declared twice")
+    void duplicateParameterIdentity() {
+      assertThatThrownBy(() -> Operation.builder(
+          new OperationMetadata(HttpMethod.GET, "/users", "u", List.of()))
+          .parameter(Parameter.query("q", Schema.string(), false))
+          .parameter(Parameter.query("q", Schema.integer(), true))
+          .response(ApiResponse.empty("200", "ok"))
+          .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("q")
+          .hasMessageContaining("twice");
+    }
+
+    @Test
+    @DisplayName("the same name in different locations remains legal")
+    void sameNameInDifferentLocations() {
+      Operation operation = Operation.builder(
+          new OperationMetadata(HttpMethod.GET, "/users", "u", List.of()))
+          .parameter(Parameter.query("q", Schema.string(), false))
+          .parameter(Parameter.header("q", Schema.string(), false))
+          .response(ApiResponse.empty("200", "ok"))
+          .build();
+
+      assertThat(operation.parameters()).hasSize(2);
+    }
+
+    @Test
     @DisplayName("a query or header parameter wearing a path name is refused")
     void nameCollisionWithPattern() {
       assertThatThrownBy(() -> getUser()

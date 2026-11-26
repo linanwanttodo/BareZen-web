@@ -2,10 +2,12 @@ package com.barezen.plugins.openapi;
 
 import com.barezen.web.HttpMethod;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * One operation in the specification: the {@link OperationMetadata} the {@link OpenApiPlugin} collected, enriched
@@ -141,7 +143,8 @@ public final class Operation {
     /**
      * Verifies the whole: at least one response (a documented operation that promises no answer is the missing
      * response field Stage 2.14-F names), every path parameter of the pattern declared and typed as a string-ish
-     * primitive, and no parameter name claimed twice or placed outside a pattern that has it.
+     * primitive, no parameter (location, name) declared twice, and no parameter name claimed by a non-path location
+     * when the pattern reserves it as a path parameter.
      */
     public Operation build() {
       if (responses.isEmpty()) {
@@ -149,7 +152,12 @@ public final class Operation {
             + " that promises no answer describes a route nobody can call");
       }
       List<String> patternNames = pathParameterNames(metadata.path());
+      Set<String> declaredParameters = new HashSet<>();
       for (Parameter parameter : parameters) {
+        if (!declaredParameters.add(parameter.location().name() + "\u0000" + parameter.name())) {
+          throw new IllegalArgumentException("operation " + metadata + " declares " + parameter.location().text()
+              + " parameter '" + parameter.name() + "' twice; one location and name is one parameter");
+        }
         if (parameter.location() == Parameter.Location.PATH) {
           if (!patternNames.contains(parameter.name())) {
             throw new IllegalArgumentException("operation " + metadata + " declares path parameter '"

@@ -64,4 +64,4 @@
 
 TestKit 只包装 JDK adapter，没有 fake server、HTTP/2、WebSocket、SSE、multipart 或 Testcontainers。它的 JSON reader 是包内实现，只服务于断言，不是可公开依赖的 JSON 库；点分路径无法访问自身含点的 key。`TestHttpClient` 可接受绝对 URL，因此它也不是只能访问本机的安全沙箱。数据库 fixture 只执行调用者给出的单条 reset SQL，不关闭传入的 `DataSource`，不提供事务清理或并发迁移管理。
 
-本章最后会把实跑结果固定为 173 项选定测试、九组 major 61 检查，以及 OpenAPI 示例的 1201 字节真实响应；同时说明覆盖率代理对 JDK SQL 接口产生的 `IllegalClassFormatException` 噪声，不把它误报成测试失败，也不通过修改源码掩盖它。
+本章最后会把实跑结果固定为 175 项选定测试、九组 major 61 检查，以及 OpenAPI 示例的 1201 字节真实响应；同时说明覆盖率代理对 JDK SQL 接口产生的 `IllegalClassFormatException` 噪声，不把它误报成测试失败，也不通过修改源码掩盖它。
