@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -376,7 +377,7 @@ public final class StaticContent {
       if (validator.isBlank()) {
         continue;
       }
-      for (String candidate : validator.split(",")) {
+      for (String candidate : candidates(validator)) {
         String trimmed = candidate.trim();
         if (trimmed.equals("*") || etag.equals(opaqueTag(trimmed))) {
           return true;
@@ -384,6 +385,23 @@ public final class StaticContent {
       }
     }
     return false;
+  }
+
+  private static List<String> candidates(String validators) {
+    List<String> candidates = new ArrayList<>();
+    boolean quoted = false;
+    int start = 0;
+    for (int index = 0; index < validators.length(); index++) {
+      char character = validators.charAt(index);
+      if (character == '"') {
+        quoted = !quoted;
+      } else if (character == ',' && !quoted) {
+        candidates.add(validators.substring(start, index));
+        start = index + 1;
+      }
+    }
+    candidates.add(validators.substring(start));
+    return candidates;
   }
 
   private static String opaqueTag(String value) {

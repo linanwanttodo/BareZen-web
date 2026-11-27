@@ -212,7 +212,9 @@ wildcard retain their existing behavior; no public API or generated tag shape ch
 
 `StaticContentTest` grows from 35 to 36 tests. The new malformed-validator case failed against the previous
 implementation with 304 where 200 was required, while the existing valid strong/weak/list/wildcard cases remained
-as reverse controls. The focused Revalidation and Wire checkpoint now runs 9 tests.
+as reverse controls. Candidate splitting is quote-aware: a comma inside a quoted opaque-tag does not start a new
+list member, so a malformed field cannot be cut into a valid-looking tag that happens to equal the current ETag.
+The focused Revalidation and Wire checkpoint now runs 9 tests.
 
 ## Non-goals
 

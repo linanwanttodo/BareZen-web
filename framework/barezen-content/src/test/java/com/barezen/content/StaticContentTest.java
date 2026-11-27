@@ -177,7 +177,8 @@ class StaticContentTest {
           .headers().first("ETag").orElseThrow();
       String opaque = etag.substring(1, etag.length() - 1);
 
-      for (String validator : java.util.List.of(opaque, etag.substring(0, etag.length() - 1), "w/" + etag)) {
+      for (String validator : java.util.List.of(opaque, etag.substring(0, etag.length() - 1), "w/" + etag,
+          "\"x," + etag)) {
         assertThat(handler.handle(request(HttpMethod.GET, "/x", Map.of("If-None-Match", validator)), Map.of())
             .status()).as("validator %s", validator).isEqualTo(200);
       }
