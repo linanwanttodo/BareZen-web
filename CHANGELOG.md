@@ -9,8 +9,8 @@ Dates are taken from `git log`, not from a plan.
 Two claims inherited from the 2.x entries are not true of the environment that produced them and were corrected in
 Phase 3.3 (ADR-0049): the 2.15/2.16 lines say tests were green "on JDK 17 and JDK 21", and no entry can show a CI run.
 At that time JDK 17 was not installed and the repository had no remote, so `.github/workflows/backend-ci.yml` had never
-executed. The repository now has an `origin`, but a workflow file or a push is not itself evidence of a green remote
-run. The builds that produced the historical numbers below ran on Maven's JDK 24 with `maven.compiler.release=17`.
+executed. The repository now has an `origin`, and remote runs have been observed on 2026-11-27; a workflow file or a
+push alone is still not evidence of a green run, so the historical entries below are not retroactively upgraded. The builds that produced the historical numbers below ran on Maven's JDK 24 with `maven.compiler.release=17`.
 The bytecode claim survives because it is asserted inside the build (`ClassMajorContractTest`,
 `scripts/check-class-major.sh`), not by an unobserved matrix.
 
@@ -37,6 +37,9 @@ to.
   boundary test now uses a small drainable surplus instead of expecting a full-duplex client to read a response after
   the JDK's documented large-body reset.
 - CI path filters now include `examples/**` and `app/**`, so changes in the two Java leaf modules run the build matrix.
+- Tutorial checkpoints no longer claim a known JDK 24 method-token failure. Committed token validation answers 400 for
+  control, separator and non-ASCII tokens; the full 216-test adapter module and the 201-test positive list are green on
+  Java 24.0.2 (2026-11-27).
 
 ### Phase 4.3 — Seven Pages, and the Credential Problem They Bring (2026-10-07)
 

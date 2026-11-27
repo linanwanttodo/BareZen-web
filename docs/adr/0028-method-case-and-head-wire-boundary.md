@@ -57,7 +57,11 @@ identical modulo `Date`** (`/tmp/p210/probe/mc-17.txt`, `/tmp/p210/probe2/`):
 | `unknown` / `PURGE` / `purge` | — | 405 | `18` | 18 |
 | empty token (`" /doc…"`) | — | 400 (adapter's) | `11` | 11 |
 | no target (`GET /doc` + CRLF) | — | 400 (JDK's HTML) | `40` | 40 |
-| control char / quote / non-ASCII token | — | 405 | `18` | 18 |
+| control char / quote / non-ASCII token | — | 405 (superseded, see below) | `18` | 18 |
+
+**Amendment (2026-11-27).** This row is historical. After ADR-0018's method-token validation (`9d2609b`), a token
+carrying a control character, a quote or a non-ASCII byte is refused as **400** — by the JDK parser before an
+exchange exists, or by `HttpMethod.of` before routing — and never reaches the 405 row. The other rows stand.
 
 The `head`/`Head` rows are the defect this record closes, and the mechanism is exact: the adapter suppressed the body
 and wrote its derived `Content-Length: 5` into the response fields; the server, failing its `"HEAD".equals` test, took

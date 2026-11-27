@@ -70,7 +70,7 @@ mvn -o -B -ntp -pl framework/barezen-http-jdk -am test \
   -Dtest=JdkMethodCaseSemanticsTest
 ```
 
-当前为 16 项。本次 JDK 24.0.2 上 15 项通过，1 项 InvalidRequestLines 的环境断言失败：带控制字符的 method token 被 JDK 24 交给 dispatcher 并得到 405，而测试期望 JDK 21 的 parser 400。这不是 HEAD framing 失败，也不应通过修改生产代码掩盖。阅读方法矩阵时以 WireLevel、KeepAliveOrders 和 HeadShapes 的证据为准，并保留这一环境差异。
+当前为 15 项。2026-11-27 在 Java 24.0.2 上 15 项全部通过。带控制字符、引号或非 ASCII 的 method token 由 JDK parser 或 `HttpMethod.of` 拒绝为 400，不再进入路由的 405 分支；阅读方法矩阵时以 ContractLevel、WireLevel、KeepAliveOrders 和 HeadShapes 的证据为准。
 
 并发形状测试用 8 线程、50 轮，每轮检查九项 wire 结果，包括 200 body、200 empty、204、304、HEAD、GET、405、404 和 OPTIONS *。parametrizedCalls、getCalls、headCalls 分别精确计数，证明不同状态、body 和 framing 没有跨请求共享。单请求全绿不能证明这一点，因为共享字段往往只在交错时暴露。
 
@@ -80,4 +80,4 @@ mvn -o -B -ntp -pl framework/barezen-http-jdk -am test \
 
 本步交付一张八行 framing matrix、一个原始 token 的 HEAD 判断，以及契约、路由、dispatch、wire 四层的方法大小写证据。精确 HEAD 得到 representation length 和零 body；`head`/`Head` 执行 HEAD Handler 但发送普通 body；204/304 无长度，304 的限制有明确 ADR 依据。
 
-同时交付 26 项响应体测试、16 项方法测试中的 15 项当前通过证据，以及并发形状和 413 HEAD 覆盖。最后一项 JDK 24 parser 差异将原样保留在检查点，不伪装成框架 bug，也不省略。下一章步骤将把本章所有测试组织成可复现的验收命令与失败定位表。
+同时交付 26 项响应体测试、15 项方法测试全部通过，以及并发形状和 413 HEAD 覆盖。JDK parser 与契约层各自拒绝非法 token 的边界保留在 InvalidRequestLines 中，不伪装成框架 bug，也不省略。下一章步骤将把本章所有测试组织成可复现的验收命令与失败定位表。
