@@ -29,6 +29,8 @@ to.
   negative lifetime.
 - Repeated `Authorization` fields are rejected with 401 before authentication. Choosing only the first field allowed
   an intermediary and the application to authenticate different identities.
+- `If-None-Match` is evaluated only on GET and HEAD, as RFC 9110 §13.1.2 defines it. A matching validator sent on
+  POST or another method now gets the ordinary representation instead of a 304.
 - `If-None-Match` now requires valid quoted entity tags and splits candidate lists only outside quotes. Malformed
   validators can no longer manufacture a 304, while valid strong, weak, list and wildcard forms keep working.
 - Static-content ETags retain the complete SHA-256 digest instead of a 64-bit prefix, removing the unsupported

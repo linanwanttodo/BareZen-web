@@ -152,7 +152,7 @@
   <p>Static file serving.</p>
   <table>
     <tr><th>Type</th><th>Description</th></tr>
-    <tr><td><code>StaticContent</code></td><td>Static utility. <code>file(Path)</code> infers content type. <code>file(Path, String)</code> with explicit type. <code>contentTypeOf(String)</code> maps extension to MIME type.</td></tr>
+    <tr><td><code>StaticContent</code></td><td>Static utility. <code>file(Path)</code> infers content type. <code>file(Path, String)</code> with explicit type. <code>resource(ClassLoader, String)</code> and its explicit-type overload serve a frozen classpath asset. <code>contentTypeOf(String)</code> maps extension to MIME type. Handlers answer ETag, conditional GET (GET/HEAD only), one byte range on GET with 206/416.</td></tr>
   </table>
 
   <h2>barezen-testkit</h2>

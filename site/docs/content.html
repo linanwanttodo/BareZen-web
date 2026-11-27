@@ -30,10 +30,10 @@
 </header>
 <main>
   <h1>Static content</h1>
-  <p class="lede">barezen-content provides StaticContent — one file on disk served as one route, with ETag and conditional GET (304) support.</p>
+  <p class="lede">barezen-content provides StaticContent — one file, on disk or on the classpath, served as one route, with ETag, conditional GET (304) and single byte range support.</p>
 
   <h2>Module overview</h2>
-  <p>The <code>barezen-content</code> module provides a single class: <code>StaticContent</code>. It creates a <code>Handler</code> for one file on disk. The handler reads the file per request, computes an ETag from the content bytes, and answers 304 to a client that already has the current version.</p>
+  <p>The <code>barezen-content</code> module provides a single class: <code>StaticContent</code>. It creates a <code>Handler</code> for one file on disk or one classpath resource. The handler reads the content per request, computes an ETag from the bytes, and answers 304 to a client that already has the current version.</p>
 
   <p>Design decisions:</p>
   <ul>
@@ -108,26 +108,48 @@ Handler page = StaticContent.file(
   </table>
 
   <h2>ETag and conditional GET</h2>
-  <p>The handler computes a strong ETag from the file content using SHA-256 (first 8 bytes, hex-encoded, in quotes). When a client sends <code>If-None-Match</code> with a matching ETag, the handler returns <code>304 Not Modified</code> with no body.</p>
+  <p>The handler computes a strong ETag from the file content using SHA-256: the complete 32-byte digest as 64 lowercase hex digits, in quotes. On GET and HEAD, a client that sends <code>If-None-Match</code> with a matching tag receives <code>304 Not Modified</code> with no body.</p>
 
   <h3>How it works</h3>
   <ol>
     <li>Client requests <code>GET /styles.css</code></li>
-    <li>Server responds with <code>200 OK</code>, body, and <code>ETag: "a1b2c3d4e5f60708"</code></li>
-    <li>Later, client requests <code>GET /styles.css</code> with <code>If-None-Match: "a1b2c3d4e5f60708"</code></li>
-    <li>Server reads the file, computes the same ETag, and returns <code>304 Not Modified</code> with no body</li>
+    <li>Server responds with <code>200 OK</code>, body, and an <code>ETag</code> such as <code>"ec185bc08f4786af241df127b22ae38c7ed5efc6393649e364daa306c425c0cb"</code></li>
+    <li>Later, client requests <code>GET /styles.css</code> with that tag in <code>If-None-Match</code></li>
+    <li>Server reads the file, computes the same ETag, and returns <code>304 Not Modified</code> with the tag and no body</li>
   </ol>
 
   <h3>ETag format</h3>
-  <p>The ETag is a strong tag: the first 8 bytes of the content's SHA-256 hash, hex-encoded, enclosed in double quotes. For example: <code>"a1b2c3d4e5f60708"</code>. This provides 2^64 values — collision-free for the set of files one deployment serves.</p>
+  <p>The ETag is a strong tag: all 32 bytes of the content's SHA-256 hash, hex-encoded, enclosed in double quotes. The tag is derived only from the bytes, so identical content produces an identical tag across files, restarts and machines. No <code>Content-Length</code> is sent with a 304; the response contract forbids a body for that status.</p>
 
   <h3>If-None-Match handling</h3>
-  <p>The handler supports the three shapes defined by RFC 9110:</p>
+  <p>The handler supports the shapes defined by RFC 9110:</p>
   <ul>
-    <li><strong>Wildcard.</strong> <code>If-None-Match: *</code> matches any ETag.</li>
-    <li><strong>Comma-separated list.</strong> <code>If-None-Match: "abc", "def"</code> matches if any tag matches.</li>
-    <li><strong>Weak tags.</strong> <code>If-None-Match: W/"abc"</code> is treated the same as <code>"abc"</code> for conditional GET.</li>
+    <li><strong>Wildcard.</strong> <code>If-None-Match: *</code> matches any current representation.</li>
+    <li><strong>Comma-separated list.</strong> <code>If-None-Match: "abc", "def"</code> matches if any member matches.</li>
+    <li><strong>Weak tags.</strong> <code>If-None-Match: W/"abc"</code> is compared as <code>"abc"</code>.</li>
+    <li><strong>Valid tags only.</strong> A candidate must be a quoted entity tag, optionally prefixed with <code>W/</code>. Unquoted values, a missing closing quote and lowercase <code>w/</code> are ignored rather than stripped into a match.</li>
+    <li><strong>Retrieval methods only.</strong> A matching tag on POST or any method other than GET and HEAD is ignored; the request gets the ordinary representation, not a 304.</li>
   </ul>
+
+  <h2>Single byte range</h2>
+  <p>On GET, one <code>bytes</code> range is answered with <code>206</code> and the selected bytes, plus <code>Content-Range</code> and the existing content type and ETag:</p>
+  <pre><code>GET /styles.css
+Range: bytes=2-5
+
+206 Partial Content
+Content-Range: bytes 2-5/44</code></pre>
+  <p><code>bytes=7-</code> and <code>bytes=-3</code> work as well. A syntactically valid range outside the representation, a zero-length suffix, or any range over an empty representation produces <code>416</code> with an empty body and <code>Content-Range: bytes */size</code>.</p>
+  <p>Malformed syntax, an end before the start, an unknown unit, numeric overflow, a comma-separated set and repeated <code>Range</code> field lines fall back to the complete 200 response. HEAD ignores <code>Range</code> and keeps the full representation length. <code>If-Range</code> enables the range only when its single value exactly equals the current strong ETag; a stale tag, weak tag, HTTP date or repeated field line falls back to 200. <code>If-None-Match</code> is evaluated first, so a matching validator on GET or HEAD still answers 304.</p>
+
+  <h2>Classpath resources</h2>
+  <p>For assets that ship inside the jar, use <code>StaticContent.resource(ClassLoader, name)</code> or its overload with an explicit content type:</p>
+  <pre><code>Handler icon = StaticContent.resource(
+    getClass().getClassLoader(), "public/favicon.ico");
+
+Handler manifest = StaticContent.resource(
+    getClass().getClassLoader(), "public/manifest.json",
+    "application/manifest+json");</code></pre>
+  <p>The name must be relative and must not contain empty, <code>.</code> or <code>..</code> segments. The bytes are read once at construction and frozen because a jar resource is not a live deployment file; ETag, conditional GET, range and MIME rules are shared with <code>file(...)</code>. A missing resource fails construction. There is no classpath scanning, directory route or request-supplied resource name.</p>
 
   <h2>Error handling</h2>
   <h3>File not found at construction</h3>
@@ -160,16 +182,18 @@ Router router = builder.build();</code></pre>
   <h2>What this module does not do</h2>
   <ul>
     <li><strong>No directory listing.</strong> A directory would leak the deployment's layout.</li>
-    <li><strong>No streaming.</strong> The whole file is read into memory. For large files, write a custom handler.</li>
+    <li><strong>No streaming.</strong> The whole file is read into memory, and a range selects from those bytes. For large files, write a custom handler.</li>
     <li><strong>No Last-Modified header.</strong> Only ETag is used. A clock-based validator would make the output untestable.</li>
+    <li><strong>No multipart ranges.</strong> One byte range per GET; a comma-separated set falls back to the complete response.</li>
+    <li><strong>No If-Match or If-Modified-Since.</strong> Conditional write preconditions and date validators are out of scope.</li>
     <li><strong>No caching headers.</strong> The handler does not set <code>Cache-Control</code>. Add a middleware or wrapper handler if you need caching control.</li>
   </ul>
 
   <h2>Best practices</h2>
   <ul>
     <li>Register static files at startup, not per request — the handler is stateless and reusable.</li>
-    <li>Use absolute paths or paths relative to the working directory, not classpath resources.</li>
-    <li>For production, consider a reverse proxy (Nginx, Caddy) for static file serving — it is faster and supports range requests.</li>
+    <li>Use absolute paths or paths relative to the working directory for live files; use <code>StaticContent.resource(...)</code> for assets packaged in the jar.</li>
+    <li>The module answers a single byte range, but for large files or heavy static traffic a reverse proxy (Nginx, Caddy) is still the better fit: it streams and never buffers the whole file.</li>
     <li>Register HEAD routes alongside GET routes for assets where clients may check size before downloading.</li>
   </ul>
 
@@ -188,7 +212,7 @@ Router router = builder.build();</code></pre>
   </div>
 </main>
 <footer>
-  <div class="band"><p>BareZen · Static content · one file per route, ETag, conditional GET.</p></div>
+  <div class="band"><p>BareZen · Static content · one file per route, ETag, conditional GET, single byte range.</p></div>
 </footer>
 </body>
 </html>

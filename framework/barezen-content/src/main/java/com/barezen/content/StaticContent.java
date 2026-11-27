@@ -249,7 +249,9 @@ public final class StaticContent {
 
   private static Response respond(byte[] content, String contentType, Request request) {
     String etag = etagOf(content);
-    if (matches(request.headers().values("If-None-Match"), etag)) {
+    boolean retrieval = request.method() == HttpMethod.GET || request.method() == HttpMethod.HEAD;
+    // RFC 9110 §13.1.2: If-None-Match is ignored on every method but GET and HEAD, where 304 is the answer.
+    if (retrieval && matches(request.headers().values("If-None-Match"), etag)) {
       // No body, and no length stated: ADR-0029 D1 keeps a 304 free of Content-Length, and Response refuses a body
       // for the status anyway. The ETag travels because a validator has to survive the answer it validated.
       return new Response(304, Headers.of("ETag", etag), null);

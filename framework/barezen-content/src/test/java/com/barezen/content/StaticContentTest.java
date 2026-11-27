@@ -193,6 +193,19 @@ class StaticContentTest {
       assertThat(handler.handle(request(HttpMethod.GET, "/x", Map.of("If-None-Match", "  ")), Map.of()).status())
           .isEqualTo(200);
     }
+
+    @Test
+    void aValidatorOnANonGetMethodIsIgnored(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "app.css", "a{}"));
+      String etag = handler.handle(request(HttpMethod.GET, "/x", Map.of()), Map.of())
+          .headers().first("ETag").orElseThrow();
+
+      Response response = handler.handle(
+          request(HttpMethod.POST, "/x", Map.of("If-None-Match", etag)), Map.of());
+
+      assertThat(response.status()).isEqualTo(200);
+      assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("a{}");
+    }
   }
 
   @Nested

@@ -53,7 +53,7 @@ git show 9aeb03e -- examples/src/main/java/com/barezen/examples/staticcontent/St
 
 你应能列出构造时拒绝与请求时回答：不存在、目录、空类型在装配时失败；装配后文件被删除或不可读则返回纯文本 404。前者是部署错误，后者是资源当前不可用。两者都不把文件系统路径回给客户端。
 
-你应能说明 ETag 是带引号的 64 位十六进制字符串，来自完整 SHA-256 摘要；相同内容跨文件和重启得到相同标签，内容改变则标签改变。If-None-Match 支持 `*`、逗号列表、重复字段行和 `W/` 弱标签；GET 支持单范围 `bytes` 请求、206 与 416，If-Range 只接受完全匹配的强 ETag。当前没有 If-Match、If-Modified-Since、多部分范围、压缩或缓存策略。
+你应能说明 ETag 是带引号的 64 位十六进制字符串，来自完整 SHA-256 摘要；相同内容跨文件和重启得到相同标签，内容改变则标签改变。If-None-Match 只在 GET/HEAD 上求值，支持 `*`、逗号列表、重复字段行和 `W/` 弱标签；GET 支持单范围 `bytes` 请求、206 与 416，If-Range 只接受完全匹配的强 ETag。当前没有 If-Match、If-Modified-Since、多部分范围、压缩或缓存策略。
 
 你应能从路由表看见每个平铺文件对应 GET 与 HEAD 两条记录，并知道 Files.list 只枚举一层普通文件。动态资产集、子目录发布、大文件与 CDN 缓存都有明确 reopen trigger，当前实现没有偷偷承诺它们。
 

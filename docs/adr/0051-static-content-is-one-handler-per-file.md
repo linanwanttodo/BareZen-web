@@ -217,6 +217,19 @@ as reverse controls. Candidate splitting is quote-aware: a comma inside a quoted
 list member, so a malformed field cannot be cut into a valid-looking tag that happens to equal the current ETag.
 The focused Revalidation and Wire checkpoint now runs 9 tests.
 
+## Amendment (2026-11-27): If-None-Match applies to retrieval methods only
+
+`If-None-Match` is now evaluated only for GET and HEAD. RFC 9110 §13.1.2 defines it as a precondition on the
+selected representation of a retrieval request, so a POST, PUT or DELETE carrying a matching validator receives the
+ordinary 200 representation instead of a 304. The previous code answered 304 to every method, which inverts the
+meaning of the header: a client using it to skip re-downloading would be told "not modified" for a request that never
+retrieves the representation. Range and If-Range were already GET-only and are unchanged.
+
+`StaticContentTest` grows from 36 to 37 tests. The new case reads the current tag with a GET, sends it back on a POST,
+and requires 200 with the original bytes; against the previous implementation it failed with 304. The existing
+Revalidation cases stay as reverse controls, so the guard cannot be satisfied by disabling conditional handling
+wholesale. The focused Revalidation and Wire checkpoint now runs 10 tests.
+
 ## Amendment (2026-11-27): retain the complete SHA-256 digest
 
 The original tag kept only the first eight digest bytes and described that 64-bit prefix as collision-free for a
