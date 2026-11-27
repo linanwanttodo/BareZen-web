@@ -62,7 +62,9 @@ case-insensitively as HTTP requires, while the credential value remains exact an
 halves of that rule. Amended on 2026-11-27: `Credential` and `Authentication.bearer` require the scheme to be an
 RFC 9110 token. Blank, separators, controls and non-ASCII schemes are refused; legal token punctuation remains valid.
 The middleware test uses an authenticator that trusts every credential to prove a malformed scheme still cannot
-reach it.
+reach it. Amended on 2026-11-27: repeated `Authorization` fields are refused before authentication, because choosing
+only the first leaves an intermediary and the application free to authenticate different identities. The test proves
+both the authenticator and delegate remain uncalled.
 
 ## Non-goals
 

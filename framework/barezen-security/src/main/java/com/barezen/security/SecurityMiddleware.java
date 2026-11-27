@@ -5,9 +5,9 @@ import com.barezen.web.Headers;
 import com.barezen.web.Request;
 import com.barezen.web.Response;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * The security middleware: authenticate, then authorize, then the handler.
@@ -33,8 +33,8 @@ import java.util.Optional;
  * <ul>
  *   <li>no credential, an anonymous result or a failed authentication answers {@code 401 Unauthorized}: the request
  *       has no identity, so the question "is it allowed?" cannot be asked;
- *   <li>a malformed {@code Authorization} field that cannot form a credential answers {@code 401 Unauthorized}:
- *       it is a client input error, not a broken authentication component;
+ *   <li>a malformed {@code Authorization} field that cannot form a credential, or repeated {@code Authorization}
+ *       fields, answers {@code 401 Unauthorized}: it is a client input error, not a broken authentication component;
  *   <li>an authenticated identity that the authorization denies answers {@code 403 Forbidden}: the identity is known,
  *       and the answer is no;
  *   <li>an authentication or authorization component that throws answers {@code 500 Internal Server Error}: a broken
@@ -143,13 +143,18 @@ public final class SecurityMiddleware implements Handler {
    *
    * @param request the request to extract from
    * @return the credential, or null when the header is absent
+   * @throws IllegalArgumentException when fields are repeated or the sole value cannot form a credential
    */
   private static Credential credentialFrom(Request request) {
-    Optional<String> header = request.headers().first("Authorization");
-    if (header.isEmpty()) {
+    List<String> values = request.headers().values("Authorization");
+    if (values.isEmpty()) {
       return null;
     }
-    String value = header.get();
+    if (values.size() != 1) {
+      throw new IllegalArgumentException("a request must carry at most one Authorization field; repeated credentials"
+          + " leave intermediaries and the application free to authenticate different identities");
+    }
+    String value = values.get(0);
     int space = value.indexOf(' ');
     if (space < 1) {
       return new Credential("Bearer", value);

@@ -237,6 +237,31 @@ class SecurityMiddlewareTest {
     }
 
     @Test
+    @DisplayName("repeated Authorization fields are refused before authentication")
+    void repeatedAuthorizationIsUnauthorized() {
+      AtomicInteger authentications = new AtomicInteger();
+      AtomicInteger calls = new AtomicInteger();
+      Handler handler = SecurityMiddleware.wrap(
+          credential -> {
+            authentications.incrementAndGet();
+            return AuthenticationResult.authenticated(ADA);
+          },
+          (request, parameters) -> {
+            calls.incrementAndGet();
+            return ok("answered");
+          });
+      Request request = new Request(HttpMethod.GET, "/secure", null,
+          Headers.of("Authorization", "Bearer good").with("authorization", "Bearer other"), new byte[0]);
+
+      Response response = handler.handle(request, Map.of());
+
+      assertThat(response.status()).isEqualTo(401);
+      assertThat(bodyOf(response)).isEqualTo("Unauthorized");
+      assertThat(authentications).hasValue(0);
+      assertThat(calls).hasValue(0);
+    }
+
+    @Test
     @DisplayName("a malformed scheme is refused even when the authenticator would trust every credential")
     void malformedSchemeCannotReachATrustingAuthenticator() {
       AtomicInteger calls = new AtomicInteger();

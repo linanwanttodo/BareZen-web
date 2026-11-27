@@ -46,7 +46,7 @@ wrap(Authentication authentication, Authorization authorization,
 
 ## 2. 凭据只从 Authorization 头读取
 
-中间件读取 `Request.headers().first("Authorization")`，因此重复的 `Authorization` 字段只使用第一个。解析规则是：
+中间件读取 `Request.headers().values("Authorization")`：没有字段向 `Authentication` 传 `null`；超过一个字段直接返回 401，不调用认证组件或业务 Handler。重复认证字段会让代理与后端自由选择不同凭据，因此不能沿用“只取第一个”的便利规则。恰好一个字段时，解析规则是：
 
 - 没有字段：向 `Authentication` 传 `null`。
 - 没有空格：按 scheme 为 `Bearer`、整个字段为值处理。
@@ -218,6 +218,7 @@ AuthenticationResult returning = auth.authenticate(new Credential("Bearer", toke
 | 条件 | 状态 | 正文 | 调用业务 Handler |
 | --- | --- | --- | --- |
 | 匿名或认证失败 | 401 | `Unauthorized` | 否 |
+| 重复 `Authorization` 字段或无法形成凭据 | 401 | `Unauthorized` | 否 |
 | 已认证但授权拒绝 | 403 | `Forbidden` | 否 |
 | 安全组件抛 `RuntimeException` | 500 | `Internal Server Error` | 否 |
 | 认证与授权均通过 | — | — | 是 |
