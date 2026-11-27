@@ -58,7 +58,8 @@ checks them.**
 4. **`barezen-content` keeps a real consumer by moving it, not by losing it.** `examples/` gains
    `staticcontent/StaticFileExample` (the eighth program): it lists a directory at assembly, registers one handler per
    file for both `GET` and `HEAD`, and prints the answers a reader cares about. Measured on this build:
-   `GET /notes.txt -> 200, 44 bytes, ETag "ec185bc08f4786af"`, `GET with the same tag -> 304, 0 bytes,
+   `GET /notes.txt -> 200, 44 bytes, ETag "ec185bc08f4786af"` (the then-current 16-hex prefix; ADR-0051's
+   2026-11-27 amendment now emits the full digest), `GET with the same tag -> 304, 0 bytes,
    Content-Length (absent)`, `HEAD /notes.txt -> 200, states Content-Length 44, received 0 bytes of body`,
    `GET outside the routes -> 404, body "Not Found"`. ADR-0051's named consumer is now this program, and the site no
    longer needs to be one.
