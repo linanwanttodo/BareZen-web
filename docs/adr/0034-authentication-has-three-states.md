@@ -55,7 +55,7 @@ an attacker which half of a credential they got wrong.
 ## Testing
 
 `AuthenticationResultTest` (8 tests): each state's `isAuthenticated`/`maybePrincipal`, the anonymous singleton, and the
-null refusals through both the convenience factories and the public record constructors. `AuthenticationTest` (8
+null refusals through both the convenience factories and the public record constructors. `AuthenticationTest` (9
 tests) proves the three producers yield the three states, a different scheme
 yields Failure, and a null credential yields Anonymous. Amended on 2026-11-25: the authentication scheme is compared
 case-insensitively as HTTP requires, while the credential value remains exact and case-sensitive; the tests pin both
@@ -64,7 +64,10 @@ RFC 9110 token. Blank, separators, controls and non-ASCII schemes are refused; l
 The middleware test uses an authenticator that trusts every credential to prove a malformed scheme still cannot
 reach it. Amended on 2026-11-27: repeated `Authorization` fields are refused before authentication, because choosing
 only the first leaves an intermediary and the application free to authenticate different identities. The test proves
-both the authenticator and delegate remain uncalled.
+both the authenticator and delegate remain uncalled. Amended on 2026-11-27: `Authentication.bearer` compares the
+credential value with `MessageDigest.isEqual` instead of `String.equals`, the same constant-time primitive
+ADR-0035 already requires for hash verification. A fixed API token is a secret, and a secret is not compared with
+`equals`; the failure shape for every non-match stays the one `Failure` result.
 
 ## Non-goals
 

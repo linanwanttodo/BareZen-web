@@ -1,5 +1,6 @@
 package com.barezen.security;
 
+import java.security.MessageDigest;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -52,7 +53,11 @@ public interface Authentication {
    * An authentication that trusts one fixed principal for a matching credential value.
    *
    * <p>Useful for tests and for the simplest possible bearer-token setup. The scheme is compared case-insensitively,
-   * as HTTP authentication schemes require; the credential value remains exact and case-sensitive.
+   * as HTTP authentication schemes require; the credential value is compared in constant time with
+   * {@link MessageDigest#isEqual}, the same comparison {@link PasswordHasher} uses, so the time the check takes does
+   * not measure how many leading bytes the caller guessed. The matched value itself is not a password hash — an
+   * application that stores password-derived material should verify through a {@link PasswordHasher} — but a fixed
+   * API token is still a secret, and a secret is not compared with {@code equals}.
    *
    * @param scheme the HTTP token scheme to match, never null or blank
    * @param value the value to match, never null
@@ -64,11 +69,13 @@ public interface Authentication {
     Credential.requireScheme(scheme);
     Objects.requireNonNull(value, "the value to match");
     Objects.requireNonNull(principal, "the principal to return");
+    byte[] expected = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     return credential -> {
       if (credential == null) {
         return AuthenticationResult.anonymous();
       }
-      if (credential.scheme().equalsIgnoreCase(scheme) && credential.value().equals(value)) {
+      if (credential.scheme().equalsIgnoreCase(scheme)
+          && MessageDigest.isEqual(expected, credential.value().getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
         return AuthenticationResult.authenticated(principal);
       }
       return AuthenticationResult.failure("credential rejected");

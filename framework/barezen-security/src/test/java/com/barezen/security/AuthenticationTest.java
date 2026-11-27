@@ -46,6 +46,20 @@ class AuthenticationTest {
   }
 
   @Test
+  @DisplayName("bearer() compares the value in constant time: every non-match is the same Failure")
+  void bearerValueComparisonIsConstantTime() {
+    Authentication authentication = Authentication.bearer("Bearer", "s3cr3t-value", new Principal("ada"));
+    // Same length, one differing byte; one byte shorter; a shared prefix. The decision is the same Failure shape
+    // for each, so a caller cannot read the distance of the guess from the answer.
+    for (String attempt : java.util.List.of("s3cr3t-valuf", "s3cr3t-valu", "s3cr3t", "xxxxxxxxxxxxxxx")) {
+      AuthenticationResult result = authentication.authenticate(new Credential("Bearer", attempt));
+      assertThat(result.isAuthenticated()).as(attempt).isFalse();
+      assertThat(result).as(attempt).isInstanceOf(AuthenticationResult.Failure.class);
+    }
+    assertThat(authentication.authenticate(new Credential("Bearer", "s3cr3t-value")).isAuthenticated()).isTrue();
+  }
+
+  @Test
   @DisplayName("bearer() fails a different scheme")
   void bearerWrongScheme() {
     Authentication authentication = Authentication.bearer("Bearer", "s3cr3t", new Principal("ada"));

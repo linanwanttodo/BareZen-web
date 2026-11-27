@@ -54,14 +54,14 @@ wrap(Authentication authentication, Authorization authorization,
 
 如果拆分后的 scheme 为空白（包括 Unicode 空白）或不是 RFC 9110 token（例如含 `/`、`,`、非 ASCII 或控制字符），无法形成 `Credential`，中间件直接返回固定 401，不调用认证组件或业务 Handler。这是客户端输入错误；认证组件自身抛运行时异常仍返回 500。`Credential` 构造器与 `Authentication.bearer(...)` 都执行同一 scheme token 校验，合法 `tchar` 标点仍可用于扩展认证方案。
 
-框架不读取 cookie、query 或表单来寻找凭据，也不自动做 Basic 解码。scheme 和值的比较规则由 `Authentication` 实现决定；内置的 `Authentication.bearer(...)` 与 `AuthPlugin` 按 HTTP 规则忽略 scheme 大小写，但 token 值仍精确、区分大小写。
+框架不读取 cookie、query 或表单来寻找凭据，也不自动做 Basic 解码。scheme 和值的比较规则由 `Authentication` 实现决定；内置的 `Authentication.bearer(...)` 与 `AuthPlugin` 按 HTTP 规则忽略 scheme 大小写。`bearer(...)` 的值比较使用 `MessageDigest.isEqual` 恒定时间比较，与 `PasswordHasher` 验证散列用同一原语：比较耗时不再度量调用方猜中了多少前缀字节。`AuthPlugin` 的值经 `SessionStore` 以 Map 键查找，查找本身不构成时序旁路（HashMap 命中与否不泄漏逐字节前缀）。
 
 ```java
 Authentication authentication = Authentication.bearer(
         "Bearer", "replace-with-a-real-secret", new Principal("ada"));
 ```
 
-这个便捷构造器适合测试和最小演示。它不做密码散列，也不适合把长期密码或公开示例 token 直接用于生产。请求头 `Authorization: Bearer replace-with-a-real-secret` 会得到 `ada`，错误 scheme 或错误值得到失败结果，没有凭据得到匿名结果。
+这个便捷构造器适合测试和最小演示。它不做密码散列，也不适合把长期密码或公开示例 token 直接用于生产。请求头 `Authorization: Bearer replace-with-a-real-secret` 会得到 `ada`，错误 scheme 或错误值得到失败结果，没有凭据得到匿名结果；任何非匹配值的失败形态相同，答案不携带猜测距离。
 
 `Credential` 是不可变值，`toString()` 只输出 scheme，不输出值。应用日志也不应额外记录完整 `Authorization` 头、密码或 session token。
 
