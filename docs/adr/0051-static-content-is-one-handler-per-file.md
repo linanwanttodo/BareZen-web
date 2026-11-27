@@ -202,6 +202,18 @@ between malformed and unsatisfiable input. The focused checkpoint runs 35 behavi
 class-major checks in content. The shipped `StaticFileExample` also sends `Range: bytes=0-3` and has a TestKit assertion
 for both 206 and 416 through the public API.
 
+## Amendment (2026-11-27): strict entity-tag matching
+
+`If-None-Match` candidates are now parsed as RFC 9110 entity tags before weak comparison. A candidate must be a
+quoted opaque-tag, optionally preceded by the case-sensitive `W/` weak prefix. Unquoted values, missing closing
+quotes and lowercase `w/` are ignored instead of being stripped into a match. This prevents malformed client input
+from manufacturing a 304 and leaving a cache with stale bytes. Valid strong tags, weak tags, lists and the `*`
+wildcard retain their existing behavior; no public API or generated tag shape changes.
+
+`StaticContentTest` grows from 35 to 36 tests. The new malformed-validator case failed against the previous
+implementation with 304 where 200 was required, while the existing valid strong/weak/list/wildcard cases remained
+as reverse controls. The focused Revalidation and Wire checkpoint now runs 9 tests.
+
 ## Non-goals
 
 Wildcard or prefix routes, directory listing, `Last-Modified`/`If-Modified-Since`, `Cache-Control` or any CDN policy,

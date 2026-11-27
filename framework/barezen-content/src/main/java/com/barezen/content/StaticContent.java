@@ -368,8 +368,8 @@ public final class StaticContent {
    *
    * <p>Handles the three shapes the field takes (RFC 9110 §8.8.3): the wildcard, a comma-separated list, and a weak tag
    * on either side — a weak comparison is what a conditional GET needs, since the representation is identical even if
-   * the validator was recorded weakly. Quoting is stripped before comparison rather than normalised on the way out, so
-   * a client that sent {@code W/"abc"} matches a strong {@code "abc"}.
+   * the validator was recorded weakly. Each candidate must be a syntactically valid entity tag; an unquoted or
+   * unterminated value is ignored rather than allowed to manufacture a 304.
    */
   private static boolean matches(List<String> validators, String etag) {
     for (String validator : validators) {
@@ -378,7 +378,7 @@ public final class StaticContent {
       }
       for (String candidate : validator.split(",")) {
         String trimmed = candidate.trim();
-        if (trimmed.equals("*") || unquote(trimmed).equals(unquote(etag))) {
+        if (trimmed.equals("*") || etag.equals(opaqueTag(trimmed))) {
           return true;
         }
       }
@@ -386,10 +386,18 @@ public final class StaticContent {
     return false;
   }
 
-  private static String unquote(String value) {
-    String withoutWeakness = value.startsWith("W/") || value.startsWith("w/") ? value.substring(2) : value;
-    return withoutWeakness.length() >= 2 && withoutWeakness.charAt(0) == '"'
-        ? withoutWeakness.substring(1, withoutWeakness.length() - 1)
-        : withoutWeakness;
+  private static String opaqueTag(String value) {
+    int start = value.startsWith("W/") ? 2 : 0;
+    if (value.length() - start < 2 || value.charAt(start) != '"'
+        || value.charAt(value.length() - 1) != '"') {
+      return null;
+    }
+    for (int index = start + 1; index < value.length() - 1; index++) {
+      char character = value.charAt(index);
+      if (character == '"' || character <= 0x20 || character == 0x7f) {
+        return null;
+      }
+    }
+    return value.substring(start);
   }
 }

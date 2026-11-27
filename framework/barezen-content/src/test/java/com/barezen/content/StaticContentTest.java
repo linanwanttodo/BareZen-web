@@ -171,6 +171,19 @@ class StaticContentTest {
     }
 
     @Test
+    void malformedEntityTagsDoNotProduce304(@TempDir Path directory) throws Exception {
+      Handler handler = StaticContent.file(write(directory, "app.css", "a{}"));
+      String etag = handler.handle(request(HttpMethod.GET, "/x", Map.of()), Map.of())
+          .headers().first("ETag").orElseThrow();
+      String opaque = etag.substring(1, etag.length() - 1);
+
+      for (String validator : java.util.List.of(opaque, etag.substring(0, etag.length() - 1), "w/" + etag)) {
+        assertThat(handler.handle(request(HttpMethod.GET, "/x", Map.of("If-None-Match", validator)), Map.of())
+            .status()).as("validator %s", validator).isEqualTo(200);
+      }
+    }
+
+    @Test
     void anAbsentOrBlankValidatorIsAPlainGet(@TempDir Path directory) throws Exception {
       Path file = write(directory, "app.css", "a{}");
       Handler handler = StaticContent.file(file);
