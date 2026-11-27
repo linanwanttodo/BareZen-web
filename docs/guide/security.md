@@ -52,7 +52,7 @@ wrap(Authentication authentication, Authorization authorization,
 - 没有空格：按 scheme 为 `Bearer`、整个字段为值处理。
 - 有空格：在第一个空格处拆分；scheme 是前半段，值是剩余全部文本，值可以包含后续空格或为空。
 
-如果拆分后的 scheme 为空白（包括 Unicode 空白），无法形成 `Credential`，中间件直接返回固定 401，不调用认证组件或业务 Handler。这是客户端输入错误；认证组件自身抛运行时异常仍返回 500。
+如果拆分后的 scheme 为空白（包括 Unicode 空白）或不是 RFC 9110 token（例如含 `/`、`,`、非 ASCII 或控制字符），无法形成 `Credential`，中间件直接返回固定 401，不调用认证组件或业务 Handler。这是客户端输入错误；认证组件自身抛运行时异常仍返回 500。`Credential` 构造器与 `Authentication.bearer(...)` 都执行同一 scheme token 校验，合法 `tchar` 标点仍可用于扩展认证方案。
 
 框架不读取 cookie、query 或表单来寻找凭据，也不自动做 Basic 解码。scheme 和值的比较规则由 `Authentication` 实现决定；内置的 `Authentication.bearer(...)` 与 `AuthPlugin` 按 HTTP 规则忽略 scheme 大小写，但 token 值仍精确、区分大小写。
 

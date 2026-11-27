@@ -55,11 +55,14 @@ an attacker which half of a credential they got wrong.
 ## Testing
 
 `AuthenticationResultTest` (8 tests): each state's `isAuthenticated`/`maybePrincipal`, the anonymous singleton, and the
-null refusals through both the convenience factories and the public record constructors. `AuthenticationTest` (7
+null refusals through both the convenience factories and the public record constructors. `AuthenticationTest` (8
 tests) proves the three producers yield the three states, a different scheme
 yields Failure, and a null credential yields Anonymous. Amended on 2026-11-25: the authentication scheme is compared
 case-insensitively as HTTP requires, while the credential value remains exact and case-sensitive; the tests pin both
-halves of that rule.
+halves of that rule. Amended on 2026-11-27: `Credential` and `Authentication.bearer` require the scheme to be an
+RFC 9110 token. Blank, separators, controls and non-ASCII schemes are refused; legal token punctuation remains valid.
+The middleware test uses an authenticator that trusts every credential to prove a malformed scheme still cannot
+reach it.
 
 ## Non-goals
 

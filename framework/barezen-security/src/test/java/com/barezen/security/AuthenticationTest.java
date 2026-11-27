@@ -1,6 +1,7 @@
 package com.barezen.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import org.junit.jupiter.api.DisplayName;
@@ -56,6 +57,12 @@ class AuthenticationTest {
   void bearerNullCredential() {
     Authentication authentication = Authentication.bearer("Bearer", "s3cr3t", new Principal("ada"));
     assertThat(authentication.authenticate(null)).isSameAs(AuthenticationResult.anonymous());
+  }
+
+  @Test
+  @DisplayName("bearer() refuses a configured scheme outside the HTTP token grammar")
+  void bearerRefusesInvalidScheme() {
+    assertThatIllegalArgumentException().isThrownBy(() -> Authentication.bearer("Bad Scheme", "v", new Principal("a")));
   }
 
   @Test

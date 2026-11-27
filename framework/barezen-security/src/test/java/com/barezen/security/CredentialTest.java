@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +30,21 @@ class CredentialTest {
   @DisplayName("refuses a blank scheme: a credential without a scheme cannot be interpreted")
   void refusesBlankScheme() {
     assertThatIllegalArgumentException().isThrownBy(() -> new Credential(" ", "v"));
+  }
+
+  @Test
+  @DisplayName("refuses a scheme outside the HTTP token grammar")
+  void refusesInvalidSchemeTokens() {
+    for (String scheme : List.of("Bad Scheme", "Bad/Scheme", "Bad,Scheme", "Béarer", "Bad\tScheme")) {
+      assertThatIllegalArgumentException().isThrownBy(() -> new Credential(scheme, "v"));
+    }
+  }
+
+  @Test
+  @DisplayName("accepts every legal HTTP token punctuation character in a scheme")
+  void acceptsTokenPunctuation() {
+    String scheme = "!#$%&'*+-.^_`|~";
+    assertThat(new Credential(scheme, "v").scheme()).isEqualTo(scheme);
   }
 
   @Test

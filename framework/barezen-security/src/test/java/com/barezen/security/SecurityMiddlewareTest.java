@@ -237,6 +237,25 @@ class SecurityMiddlewareTest {
     }
 
     @Test
+    @DisplayName("a malformed scheme is refused even when the authenticator would trust every credential")
+    void malformedSchemeCannotReachATrustingAuthenticator() {
+      AtomicInteger calls = new AtomicInteger();
+      Handler handler = SecurityMiddleware.wrap(
+          credential -> AuthenticationResult.authenticated(ADA),
+          (request, parameters) -> {
+            calls.incrementAndGet();
+            return ok("answered");
+          });
+
+      for (String header : java.util.List.of("Bad/Scheme value", "Bad,Scheme value", "Béarer value")) {
+        Response response = handler.handle(requestWithAuthorization(header), Map.of());
+        assertThat(response.status()).as(header).isEqualTo(401);
+        assertThat(bodyOf(response)).isEqualTo("Unauthorized");
+      }
+      assertThat(calls).hasValue(0);
+    }
+
+    @Test
     @DisplayName("the header name match is case-insensitive, as Headers promises")
     void headerNameIsCaseInsensitive() {
       Request request = new Request(HttpMethod.GET, "/secure", null,

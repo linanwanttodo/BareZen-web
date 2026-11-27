@@ -19,25 +19,42 @@ import java.util.Objects;
  * caller naming it. This is the same rule {@code Headers} applies to header values: a credential is a secret, and a
  * secret that appears in a log line, an exception message or a debugger view is a leak that cannot be recalled.
  *
- * @param scheme the authentication scheme, never null and never blank
+ * @param scheme the authentication scheme, an HTTP token: never null, blank or containing separators
  * @param value the credential value, never null; may be empty when the scheme itself is the credential (e.g. a session
  *     cookie scheme where the cookie name is the scheme and the value is the cookie value, still a string)
  */
 public record Credential(String scheme, String value) {
 
+  private static final String SEPARATORS = "()<>@,;:\\\"/[]?={} \t";
+
   /**
-   * A credential with a scheme that is not blank.
+   * A credential with an HTTP token as its scheme.
    *
    * @throws NullPointerException if {@code scheme} or {@code value} is null
-   * @throws IllegalArgumentException if {@code scheme} is blank — a credential with no scheme is uninterpretable, and
-   *     guessing the scheme from the value is how tokens get accepted as passwords
+   * @throws IllegalArgumentException if {@code scheme} is blank or is not an HTTP token — a credential with no
+   *     usable scheme is uninterpretable, and guessing the scheme from the value is how tokens get accepted as
+   *     passwords
    */
   public Credential {
-    Objects.requireNonNull(scheme, "the credential scheme; without one the value cannot be interpreted");
+    requireScheme(scheme);
     Objects.requireNonNull(value, "the credential value; a credential with no value is not a credential");
+  }
+
+  static void requireScheme(String scheme) {
+    Objects.requireNonNull(scheme, "the credential scheme; without one the value cannot be interpreted");
     if (scheme.isBlank()) {
       throw new IllegalArgumentException(
           "a credential scheme must not be blank; a value without a scheme is uninterpretable");
+    }
+    for (int index = 0; index < scheme.length(); index++) {
+      char character = scheme.charAt(index);
+      if (character <= 0x20 || character >= 0x7f || SEPARATORS.indexOf(character) >= 0) {
+        String shown = character <= 0x20 || character >= 0x7f
+            ? "\\u" + String.format("%04X", (int) character) : "'" + character + "'";
+        throw new IllegalArgumentException("credential scheme is not an HTTP token; got " + shown
+            + " at index " + index + ". An authentication scheme is one token, not a place for whitespace,"
+            + " controls or separators");
+      }
     }
   }
 

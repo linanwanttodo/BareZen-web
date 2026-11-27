@@ -54,14 +54,14 @@ public interface Authentication {
    * <p>Useful for tests and for the simplest possible bearer-token setup. The scheme is compared case-insensitively,
    * as HTTP authentication schemes require; the credential value remains exact and case-sensitive.
    *
-   * @param scheme the scheme to match, never null
+   * @param scheme the HTTP token scheme to match, never null or blank
    * @param value the value to match, never null
    * @param principal the principal to return on a match, never null
    * @return an authentication that returns the principal for the matching credential, failure for a wrong one,
    *     anonymous for none
    */
   static Authentication bearer(String scheme, String value, Principal principal) {
-    Objects.requireNonNull(scheme, "the scheme to match");
+    Credential.requireScheme(scheme);
     Objects.requireNonNull(value, "the value to match");
     Objects.requireNonNull(principal, "the principal to return");
     return credential -> {
