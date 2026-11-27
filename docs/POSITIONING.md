@@ -18,7 +18,7 @@ BareZen 是一个**用于学习 Web 框架构造过程、也可以承载小型�
 | `barezen-http-servlet` | `BarezenServlet`，把同一套路由放进 Jakarta Servlet 容器 | 嵌入已有 Tomcat、Jetty 等部署，而不是替换容器 |
 | `barezen-security` | Handler 装饰器、认证与授权端口、PBKDF2 密码哈希、不透明会话 | 在业务 Handler 之外组合认证、授权和会话 |
 | `barezen-data` | `Database(DataSource)`、显式事务、版本化迁移 | 使用应用选择的 JDBC 驱动和连接池 |
-| `barezen-content` | 单文件静态 Handler、内容类型、ETag 和条件 GET | 为已知文件注册明确的静态资源路由 |
+| `barezen-content` | 单文件静态 Handler、内容类型、ETag、条件 GET 与单范围 GET | 为已知文件注册明确的静态资源路由 |
 | `barezen-plugins` | 认证、用户和 OpenAPI 插件实现 | 展示插件如何坐在框架之上，而不是被框架反向依赖 |
 | `barezen-testkit` | JDK 适配器上的真实端口测试服务、HTTP 客户端和测试夹具 | 让消费者从公开 API 验证真实 HTTP 行为 |
 
@@ -84,15 +84,15 @@ BareZen 的价值不只在“能启动一个服务”，更在它把常见框架
 - 路由使用原始路径段：不解码、不归一化、段数必须完全相同、字面量大小写敏感、尾斜杠有意义。
 - 没有通配符、前缀路由或多段捕获。`StaticContent.file(...)` 与 `StaticContent.resource(...)` 以“一资源一路由”工作，应用在装配时枚举磁盘文件或显式选择 classpath 资源。
 - `HEAD` 不是从 `GET` 自动推导的。需要同时提供 HEAD 时，要分别注册两个方法。
-- 静态内容不提供目录列表、Range、压缩或 `Cache-Control` 默认策略。
+- 静态内容不提供目录列表、多范围响应、压缩或 `Cache-Control` 默认策略；GET 支持单个 `bytes` 范围，畸形或多范围请求退回完整 200，越界范围返回 416。
 
 ### 安全与会话
 
 - 密码哈希使用 PBKDF2-HMAC-SHA256，默认 600,000 次迭代、带随机盐；验证拒绝非正或超过 2,000,000 次的损坏记录。
 - `SessionStore` 是单实例内存存储。重启会丢失会话，多个实例不会共享它，也没有分布式失效广播。
 - 过期记录在查询或轮换时删除；`size()` 不等于“仍有效的会话数”，`rotate` 不会续期过期 token。
-- 默认中间件从 `Authorization` 读取 Bearer 凭据；scheme 忽略大小写，token 值精确匹配。没有现成的 Cookie 凭据来源、CSRF 防护、OAuth/OIDC 流程或完整账户系统。`barezen-plugins` 有 H2 用户仓库，但它不是数据库无关的账户管理平台。
-- 已认证但无权限是 403；当前中间件把匿名、认证失败和无法形成凭据的畸形 `Authorization` 头都回答为 401，安全组件抛出运行时异常时回答 500，但不会自动记录该异常。`AuthPlugin` 保留三态：null credential 为匿名，无效 scheme、未知或过期 token 为 Failure；wire 仍统一返回 401。
+- 默认中间件从 `Authorization` 读取 Bearer 凭据；scheme 忽略大小写，token 值精确匹配。重复 `Authorization` 字段在认证前拒绝，避免代理与后端选择不同凭据。没有现成的 Cookie 凭据来源、CSRF 防护、OAuth/OIDC 流程或完整账户系统。`barezen-plugins` 有 H2 用户仓库，但它不是数据库无关的账户管理平台。
+- 已认证但无权限是 403；当前中间件把匿名、认证失败、重复字段和无法形成凭据的畸形 `Authorization` 头都回答为 401，安全组件抛出运行时异常时回答 500，但不会自动记录该异常。`AuthPlugin` 保留三态：null credential 为匿名，无效 scheme、未知或过期 token 为 Failure；wire 仍统一返回 401。
 - JDK TLS 只在构造时解析；未配置 path 时保持明文，显式空白 path 会失败而不是静默降级。没有证书轮换、mTLS、协议/cipher 配置或 HTTP/2 协商策略。日志脱敏不等于密码已从配置快照或临时字符数组中擦除。
 
 ### 数据与配置
