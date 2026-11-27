@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.barezen.core.config.Configuration;
 import com.barezen.security.Authentication;
 import com.barezen.security.Authorization;
 import com.barezen.security.Permission;
@@ -14,6 +15,7 @@ import com.barezen.web.Router;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -103,6 +105,26 @@ class TestServerIntegrationTest {
       server.close();
       assertThat(server.isRunning()).isFalse();
       assertThatCode(server::close).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("a configured body limit refuses before the handler and still accepts the exact boundary")
+    void configuredBodyLimit() {
+      AtomicInteger calls = new AtomicInteger();
+      Router router = Router.builder()
+          .route(HttpMethod.POST, "/echo", (request, params) -> {
+            calls.incrementAndGet();
+            return TestFixtures.textHandler("ok").handle(request, params);
+          })
+          .build();
+      Configuration configuration = Configuration.inMemory(
+          Map.of("barezen.http.jdk.maxRequestBodyBytes", "4"));
+      try (TestServer server = TestServer.start(router, configuration)) {
+        Assertions.assertThat(server.client().post("/echo", "12345")).statusIs(413);
+        assertThat(calls).hasValue(0);
+        Assertions.assertThat(server.client().post("/echo", "1234")).statusIs(200);
+        assertThat(calls).hasValue(1);
+      }
     }
 
     @Test

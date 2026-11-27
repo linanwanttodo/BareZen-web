@@ -1,9 +1,11 @@
 package com.barezen.testkit;
 
+import com.barezen.core.config.Configuration;
 import com.barezen.http.jdk.JdkHttpServerAdapter;
 import com.barezen.web.Router;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -39,9 +41,14 @@ public final class TestServer implements AutoCloseable {
   private volatile boolean closed;
 
   private TestServer(Router router) {
+    this(router, Configuration.inMemory(Map.of()));
+  }
+
+  private TestServer(Router router, Configuration configuration) {
     Objects.requireNonNull(router, "the router the test server serves; a server with no routes answers 404 to everything"
         + " and is usually a mistake, not a policy");
-    this.adapter = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", RANDOM_PORT), router);
+    Objects.requireNonNull(configuration, "the adapter configuration; null would silently restore defaults");
+    this.adapter = new JdkHttpServerAdapter(new InetSocketAddress("127.0.0.1", RANDOM_PORT), router, configuration);
     this.adapter.start();
     this.port = this.adapter.port()
         .orElseThrow(() -> new IllegalStateException("a started adapter must report the port it bound; it did not, so"
@@ -61,6 +68,18 @@ public final class TestServer implements AutoCloseable {
    */
   public static TestServer start(Router router) {
     return new TestServer(router);
+  }
+
+  /**
+   * Start a server with an explicit adapter configuration, for tests that need a non-default policy such as a small
+   * request-body limit. The snapshot is handed to the real adapter; the test server does not read configuration itself.
+   *
+   * @param router the application's router, served exactly as it would be in production
+   * @param configuration the adapter configuration, never null; an empty snapshot keeps the adapter defaults
+   * @return a started server; close it to release the port
+   */
+  public static TestServer start(Router router, Configuration configuration) {
+    return new TestServer(router, configuration);
   }
 
   /**

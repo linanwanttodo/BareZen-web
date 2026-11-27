@@ -2,6 +2,7 @@ package com.barezen.console;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.barezen.core.config.Configuration;
 import com.barezen.core.kernel.LifecycleOrchestrator;
 import com.barezen.core.plugin.Plugin;
 import com.barezen.testkit.Assertions;
@@ -67,12 +68,16 @@ class ConsoleTest {
   }
 
   private static Running running() throws IOException {
+    return running(Configuration.inMemory(Map.of()));
+  }
+
+  private static Running running(Configuration configuration) throws IOException {
     Console.Assembly wiring = Console.wiring(Console.dataSource());
     List<Plugin> plugins = Console.assemble(wiring, List.of());
     Router routes = Console.router(wiring, plugins, Console.webRoot());
     LifecycleOrchestrator application = Console.start(plugins);
     Console.seed(wiring);
-    return new Running(TestServer.start(routes), wiring, plugins, application);
+    return new Running(TestServer.start(routes, configuration), wiring, plugins, application);
   }
 
   /** A request that carries a bearer token, so the tests name the credential they are testing with. */
@@ -181,12 +186,15 @@ class ConsoleTest {
 
     @Test
     void aBodyOverTheAdaptersLimitNeverReachesThePlugin() throws IOException {
-      try (Running console = running()) {
+      Configuration configuration = Configuration.inMemory(
+          Map.of("barezen.http.jdk.maxRequestBodyBytes", "32"));
+      try (Running console = running(configuration)) {
         String token = console.signIn("ada", "hunter2");
-        // The 413 is the adapter's, above the same table ADR-0031 bounds at one mebibyte in both servers.
+        // A small surplus stays inside the JDK's post-response drain. A 1 MiB surplus can reset a full-duplex client
+        // before it reads the 413, which ADR-0031 already records; this test is about the plugin boundary, not that reset.
         Assertions.assertThat(console.server.client().request(HttpMethod.POST, "/api/reports")
             .header("Authorization", "Bearer " + token)
-            .body("title=big&body=" + "x".repeat(1024 * 1024 + 64)).send()).statusIs(413);
+            .body("x".repeat(33)).send()).statusIs(413);
         Assertions.assertThat(console.server.client().request(HttpMethod.GET, "/api/reports")
             .header("Authorization", "Bearer " + token).send()).statusIs(200);
       }

@@ -48,6 +48,11 @@ the response. `TestServer.start` binds the real `JdkHttpServerAdapter` to `127.0
 and two tests running in parallel never collide (ADR-0044). `close()` — automatic at the end of the try block — stops
 the adapter exactly once and releases both the port and the threads the adapter owned.
 
+When a test needs a non-default adapter policy, use `TestServer.start(router, configuration)`. The configuration is passed
+to the real `JdkHttpServerAdapter`; for example, a small `barezen.http.jdk.maxRequestBodyBytes` makes a 413 boundary test
+fast and avoids relying on the JDK's large-body connection-reset behavior. `TestServer.start(router)` remains the
+default-policy form.
+
 ## What to read next
 
 - [first-integration-test.md](first-integration-test.md) walks the same test with a real handler and a request body, and
