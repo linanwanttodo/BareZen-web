@@ -6,11 +6,13 @@ headings, and the project tracks the phases it names rather than a semver releas
 
 Dates are taken from `git log`, not from a plan.
 
-Two claims inherited from the 2.x entries are not true of this environment and were corrected in Phase 3.3 (ADR-0049):
-the 2.15/2.16 lines say tests were green "on JDK 17 and JDK 21", and no entry can show a CI run. JDK 17 is not installed
-here, `git remote -v` is empty so `.github/workflows/backend-ci.yml` has never executed, and the builds that produced the
-numbers below ran on Maven's JDK 24 with `maven.compiler.release=17`. The bytecode claim survives because it is asserted
-inside the build (`ClassMajorContractTest`, `scripts/check-class-major.sh`), not by a matrix that never ran.
+Two claims inherited from the 2.x entries are not true of the environment that produced them and were corrected in
+Phase 3.3 (ADR-0049): the 2.15/2.16 lines say tests were green "on JDK 17 and JDK 21", and no entry can show a CI run.
+At that time JDK 17 was not installed and the repository had no remote, so `.github/workflows/backend-ci.yml` had never
+executed. The repository now has an `origin`, but a workflow file or a push is not itself evidence of a green remote
+run. The builds that produced the historical numbers below ran on Maven's JDK 24 with `maven.compiler.release=17`.
+The bytecode claim survives because it is asserted inside the build (`ClassMajorContractTest`,
+`scripts/check-class-major.sh`), not by an unobserved matrix.
 
 ## [Unreleased]
 
@@ -18,6 +20,21 @@ The whole 2.x line and the first phase of the 3.x line live under `0.1.0-SNAPSHO
 cut, the phases below get grouped under its tag with the real release date; until then this section is the honest state.
 Phase 3.1 is the first phase after the 2.x line closed, and it is the phase ADR-0016 §6 deferred the extension mechanism
 to.
+
+### Maintenance hardening (2026-11-27)
+
+- HTTP methods, header names and authentication schemes are checked as RFC 9110 tokens; raw controls and separators
+  are refused before they can become routing, framing or authentication input.
+- `SessionStore.rotate` validates its duration before token lookup, so an unknown token cannot hide a null, zero or
+  negative lifetime.
+- Repeated `Authorization` fields are rejected with 401 before authentication. Choosing only the first field allowed
+  an intermediary and the application to authenticate different identities.
+- `If-None-Match` now requires valid quoted entity tags and splits candidate lists only outside quotes. Malformed
+  validators can no longer manufacture a 304, while valid strong, weak, list and wildcard forms keep working.
+- `TestServer.start(router, configuration)` passes an explicit configuration to the real adapter. The console's 413
+  boundary test now uses a small drainable surplus instead of expecting a full-duplex client to read a response after
+  the JDK's documented large-body reset.
+- CI path filters now include `examples/**` and `app/**`, so changes in the two Java leaf modules run the build matrix.
 
 ### Phase 4.3 — Seven Pages, and the Credential Problem They Bring (2026-10-07)
 

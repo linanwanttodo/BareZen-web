@@ -24,9 +24,10 @@ import java.util.Objects;
  * be enforced early enough to be useful (ADR-0027 §4, §5):
  *
  * <ul>
- *   <li><b>a status that forbids a message body is not given one.</b> HTTP says {@code 1xx}, {@code 204} and {@code 304}
- *       carry no body, so a non-empty body alongside one of those statuses is refused rather than written and then
- *       quietly discarded at the socket. The alternative was measured: the JDK forces the length to {@code -1}, drops
+ *   <li><b>a status that forbids a message body is not given one.</b> HTTP says {@code 1xx}, {@code 204}, {@code 205}
+ *       and {@code 304} carry no body, so a non-empty body alongside one of those statuses is refused rather than
+ *       written and then quietly discarded at the socket. The alternative was measured: the JDK forces the length to
+ *       {@code -1}, drops
  *       the bytes, and logs a warning on the server — the response a client sees is not the response the handler
  *       returned, and nobody is told. A refusal at construction names the line the developer wrote; a silent drop names
  *       nothing. An empty body stays legal, because {@code (204, no content)} is exactly what the status means.
