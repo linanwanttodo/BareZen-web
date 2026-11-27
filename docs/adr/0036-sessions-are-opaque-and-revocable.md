@@ -83,7 +83,7 @@ refusal of zero/negative duration and null clock, `toString` hiding the value. `
 round trip, 64-token uniqueness, unknown-token empty, expired-not-found *and* retired (size drops), the expiry
 boundary, invalidate idempotence, rotate-replaces-and-kills-the-old, rotate-of-expired returning empty without
 creating a replacement, a failed rotation preserving the original session, concurrent rotations leaving one winner, rotate-of-unknown, clear, the null/argument
-refusals, `standard()` on the system clock, and the `Session` record's null refusals. The current rotation creates the
+refusals (including invalid rotate durations before token lookup), `standard()` on the system clock, and the `Session` record's null refusals. The current rotation creates the
 replacement before conditionally removing the old key; it is failure-safe but still not a linearizable two-key
 operation. Mutations SM9 (expired session stays in the map) and SM10 (rotate copies instead of replacing) each killed
 by a single named test, restored byte-identical.

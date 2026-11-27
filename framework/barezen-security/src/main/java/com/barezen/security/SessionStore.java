@@ -66,11 +66,7 @@ public final class SessionStore {
    */
   public Session create(Principal principal, Duration duration) {
     Objects.requireNonNull(principal, "the principal to create a session for; without one there is no session");
-    Objects.requireNonNull(duration, "the session duration; without one the session never expires");
-    if (duration.isNegative() || duration.isZero()) {
-      throw new IllegalArgumentException(
-          "a session's duration must be positive; zero or negative makes the session already expired");
-    }
+    checkedDuration(duration);
     byte[] bytes = new byte[32];
     random.nextBytes(bytes);
     String value = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
@@ -119,6 +115,7 @@ public final class SessionStore {
    */
   public Optional<Session> rotate(String value, Duration duration) {
     Objects.requireNonNull(value, "the token value to rotate; without one there is nothing to rotate");
+    checkedDuration(duration);
     Session old = sessions.get(value);
     if (old == null) {
       return Optional.empty();
@@ -133,6 +130,15 @@ public final class SessionStore {
       return Optional.empty();
     }
     return Optional.of(rotated);
+  }
+
+  private static Duration checkedDuration(Duration duration) {
+    Objects.requireNonNull(duration, "the session duration; without one the session never expires");
+    if (duration.isNegative() || duration.isZero()) {
+      throw new IllegalArgumentException(
+          "a session's duration must be positive; zero or negative makes the session already expired");
+    }
+    return duration;
   }
 
   /**

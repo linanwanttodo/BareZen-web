@@ -232,6 +232,9 @@ class SessionStoreTest {
     assertThatNullPointerException().isThrownBy(() -> store.lookup(null));
     assertThatNullPointerException().isThrownBy(() -> store.invalidate(null));
     assertThatNullPointerException().isThrownBy(() -> store.rotate(null, Duration.ofMinutes(1)));
+    assertThatNullPointerException().isThrownBy(() -> store.rotate("missing", null));
+    assertThatIllegalArgumentException().isThrownBy(() -> store.rotate("missing", Duration.ZERO));
+    assertThatIllegalArgumentException().isThrownBy(() -> store.rotate("missing", Duration.ofSeconds(-1)));
   }
 
   @Test
