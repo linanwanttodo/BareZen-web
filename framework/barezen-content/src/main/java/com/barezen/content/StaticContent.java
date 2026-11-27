@@ -342,11 +342,11 @@ public final class StaticContent {
   }
 
   /**
-   * A strong entity tag over the bytes: the first eight bytes of the content's SHA-256, in quotes.
+   * A strong entity tag over the complete SHA-256 digest of the bytes, in quotes.
    *
-   * <p>Truncated because a tag is compared, not read, and 16 hex characters is 2^64 values — collision-free for the set
-   * of files one deployment serves, and short enough that a test can name it. SHA-256 is in the JDK, so this costs no
-   * dependency (ADR-0001).
+   * <p>The full digest is retained rather than truncated: a tag is a cache identity, and a shorter prefix trades
+   * collision resistance for a few bytes of header width. SHA-256 is in the JDK, so this costs no dependency
+   * (ADR-0001).
    */
   private static String etagOf(byte[] content) {
     MessageDigest digest;
@@ -357,9 +357,9 @@ public final class StaticContent {
       throw new IllegalStateException("this JVM has no SHA-256, which every JDK 17 and later provides", absent);
     }
     byte[] hash = digest.digest(content);
-    StringBuilder tag = new StringBuilder(18).append('"');
-    for (int index = 0; index < 8; index++) {
-      tag.append(String.format("%02x", hash[index]));
+    StringBuilder tag = new StringBuilder(hash.length * 2 + 2).append('"');
+    for (byte value : hash) {
+      tag.append(String.format("%02x", value));
     }
     return tag.append('"').toString();
   }

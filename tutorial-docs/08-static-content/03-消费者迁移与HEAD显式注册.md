@@ -95,7 +95,7 @@ CP="$CP:$M2/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar:$M2/com/h2database/h
 java -cp "$CP" com.barezen.examples.staticcontent.StaticFileExample
 ```
 
-本次实跑看到两个临时文件加一个 classpath 资源生成六条路由：`GET /notes.txt`、`HEAD /notes.txt`、`GET /status.json`、`HEAD /status.json`、`GET /classpath.txt`、`HEAD /classpath.txt`；notes 为 44 字节，ETag 为 `"ec185bc08f4786af"`；reload 为 304、0 字节、Content-Length absent；HEAD 声明 44、收到 0 字节；`Range: bytes=0-3` 为 206、4 字节、`Content-Range: bytes 0-3/44`；未注册路径为 404、正文 `Not Found`。临时目录名每次不同，不是固定输出。
+本次实跑看到两个临时文件加一个 classpath 资源生成六条路由：`GET /notes.txt`、`HEAD /notes.txt`、`GET /status.json`、`HEAD /status.json`、`GET /classpath.txt`、`HEAD /classpath.txt`；notes 为 44 字节，ETag 为 `"ec185bc08f4786af241df127b22ae38c7ed5efc6393649e364daa306c425c0cb"`；reload 为 304、0 字节、Content-Length absent；HEAD 声明 44、收到 0 字节；`Range: bytes=0-3` 为 206、4 字节、`Content-Range: bytes 0-3/44`；未注册路径为 404、正文 `Not Found`。临时目录名每次不同，不是固定输出。
 
 再执行 `./scripts/check-site.sh`。本次当前树实测输出 `checked 34 pages, 1 stylesheet(s)` 与 `OK: the static site is self-consistent`。ADR-0054 记录的是当时 12 页，文档引用历史结果时必须标明时间，不能把旧数字当成当前验收结果。
 

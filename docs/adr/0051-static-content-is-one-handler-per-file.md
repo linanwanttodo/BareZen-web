@@ -82,7 +82,8 @@ exactly as it applies to an adapter.
 
 ### 4. The `ETag` is a hash of the bytes, and there is no `Last-Modified`
 
-A strong tag, the first eight bytes of the content's SHA-256, computed from what the request is about to be answered with.
+A strong tag computed from the complete SHA-256 digest of the content, encoded as 64 lowercase hexadecimal digits in
+quotes, using what the request is about to be answered with.
 It changes exactly when the representation does — no restart, no clock, no filesystem that reports no mtime, and no two
 machines disagreeing about a timestamp's granularity. `Last-Modified` is refused rather than deferred: it would import a
 clock into the answer (ADR-0011's rule about time being an argument), and `If-Modified-Since` would add a second
@@ -215,6 +216,15 @@ implementation with 304 where 200 was required, while the existing valid strong/
 as reverse controls. Candidate splitting is quote-aware: a comma inside a quoted opaque-tag does not start a new
 list member, so a malformed field cannot be cut into a valid-looking tag that happens to equal the current ETag.
 The focused Revalidation and Wire checkpoint now runs 9 tests.
+
+## Amendment (2026-11-27): retain the complete SHA-256 digest
+
+The original tag kept only the first eight digest bytes and described that 64-bit prefix as collision-free for a
+deployment. That claim was too strong. `etagOf` now emits all 32 digest bytes as 64 hexadecimal digits. The wire change
+is deliberate: existing cached validators miss once and revalidate, while future comparisons keep SHA-256's full
+collision resistance instead of trading it for 48 header characters. The tag-shape test failed against the truncated
+implementation with 16 digits where 64 were required; content identity, weak comparison, ranges and 304 framing are
+otherwise unchanged.
 
 ## Non-goals
 

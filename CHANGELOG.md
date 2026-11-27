@@ -31,6 +31,8 @@ to.
   an intermediary and the application to authenticate different identities.
 - `If-None-Match` now requires valid quoted entity tags and splits candidate lists only outside quotes. Malformed
   validators can no longer manufacture a 304, while valid strong, weak, list and wildcard forms keep working.
+- Static-content ETags retain the complete SHA-256 digest instead of a 64-bit prefix, removing the unsupported
+  collision-free claim at the cost of one cache revalidation for existing clients.
 - `TestServer.start(router, configuration)` passes an explicit configuration to the real adapter. The console's 413
   boundary test now uses a small drainable surplus instead of expecting a full-duplex client to read a response after
   the JDK's documented large-body reset.

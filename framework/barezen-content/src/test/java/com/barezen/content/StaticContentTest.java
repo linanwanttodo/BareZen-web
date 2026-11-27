@@ -64,7 +64,7 @@ class StaticContentTest {
       assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("body{margin:0}");
       assertThat(response.headers().first("Content-Type")).contains("text/css; charset=utf-8");
       assertThat(response.headers().first("ETag")).get()
-          .satisfies(tag -> assertThat(tag).matches("^\"[0-9a-f]{16}\"$"));
+          .satisfies(tag -> assertThat(tag).matches("^\"[0-9a-f]{64}\"$"));
     }
 
     @Test
