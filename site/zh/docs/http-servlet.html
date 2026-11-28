@@ -100,7 +100,7 @@ public class MyServlet extends BarezenServlet {
     <tr><td><code>barezen.maxRequestBodyBytes</code></td><td><code>long</code></td><td>1 MB（1,048,576 字节）</td><td>最大请求主体大小。超过此限制的请求以 413 拒绝。</td></tr>
   </table>
 
-  <p>如果参数存在但不是有效的数字，部署以 <code>ServletException</code> 失败，命名参数和找到的值。</p>
+  <p>如果参数存在但不是有效的数字——包括空串或纯空白值——部署以 <code>ServletException</code> 失败，命名参数和找到的值。只有参数缺省时才回退到默认值。</p>
 
   <h2>ServletContext 属性</h2>
   <p>对于声明式部署，必须在 servlet 初始化之前将路由器放在属性名 <code>com.barezen.http.servlet.router</code>（可作为 <code>BarezenServlet.ROUTER_ATTRIBUTE</code> 访问）下。</p>

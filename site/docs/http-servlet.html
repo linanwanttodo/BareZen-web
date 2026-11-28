@@ -100,7 +100,7 @@ public class MyServlet extends BarezenServlet {
     <tr><td><code>barezen.maxRequestBodyBytes</code></td><td><code>long</code></td><td>1 MB (1,048,576 bytes)</td><td>Maximum request body size. Requests exceeding this limit are rejected with 413.</td></tr>
   </table>
 
-  <p>If the parameter is present but not a valid number, the deployment fails with a <code>ServletException</code> naming the parameter and the value found.</p>
+  <p>If the parameter is present but not a valid number — an empty or whitespace-only value included — the deployment fails with a <code>ServletException</code> naming the parameter and the value found. Only an absent parameter falls back to the default.</p>
 
   <h2>ServletContext attribute</h2>
   <p>For declarative deployment, the router must be placed under the attribute name <code>com.barezen.http.servlet.router</code> (accessible as <code>BarezenServlet.ROUTER_ATTRIBUTE</code>) before the servlet initializes.</p>
