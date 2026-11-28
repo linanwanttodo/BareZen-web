@@ -44,7 +44,7 @@ public static Handler file(Path file, String contentType) {
 }
 ```
 
-这里省略了实际源码的长错误消息，但校验顺序与 [StaticContent.java:68](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L68)、[StaticContent.java:84](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L84) 一致。保存绝对规范化路径，避免进程工作目录后来变化；FileHandler 的字段是 final，实例不在请求间保存可变状态。contentTypeOf 的完整固定表在 [StaticContent.java:148](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L148)。
+这里省略了实际源码的长错误消息，但校验顺序与 [StaticContent.java:73](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L73)、[StaticContent.java:89](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L89) 一致。保存绝对规范化路径，避免进程工作目录后来变化；FileHandler 的字段是 final，实例不在请求间保存可变状态。contentTypeOf 的完整固定表在 [StaticContent.java:153](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L153)。
 
 应用侧注册就是两行，不需要新生命周期接口：
 
@@ -73,7 +73,7 @@ return new Response(200,
     Headers.of("Content-Type", contentType).with("ETag", etagOf(content)), content);
 ```
 
-这是 [StaticContent.java:215](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L215) 的教学摘录，条件请求分支留到下一步。文件不在构造时读入，因此编辑内容无需重启；每次请求重新读取也意味着本实现没有缓存，更不会在多个请求之间复用过期 byte[]。
+这是 [StaticContent.java:220](../../framework/barezen-content/src/main/java/com/barezen/content/StaticContent.java#L220) 的教学摘录，条件请求分支留到下一步。文件不在构造时读入，因此编辑内容无需重启；每次请求重新读取也意味着本实现没有缓存，更不会在多个请求之间复用过期 byte[]。
 
 ## 常见的第一次写错
 

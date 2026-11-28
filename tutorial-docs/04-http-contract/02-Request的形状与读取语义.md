@@ -37,7 +37,7 @@ body 采用 byte[]，构造和读取都复制。适配器可以复用读缓冲�
 - [Request.java:114](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L114)：query 返回 Optional。
 - [Request.java:138](../../framework/barezen-web/src/main/java/com/barezen/web/Request.java#L138)：body 每次返回副本。
 - [HttpMethod.java:89](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L89)：先校验 RFC 9110 token，再对标准方法忽略大小写归一，其他方法保持原始 token。
-- [RequestTest.java:21](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21)：表面、路径、查询、字节体、拒绝和日志脱敏测试。
+- [RequestTest.java:16](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L16)：表面、路径、查询、字节体、拒绝和日志脱敏测试。
 - [HttpMethodTest.java](../../framework/barezen-web/src/test/java/com/barezen/web/HttpMethodTest.java)：标准方法、未知方法与拒绝输入。
 - [ADR-0018 §6–§8](../../docs/adr/0018-http-is-a-contract-not-a-server.md#L240)：同步 Handler、原始值、字节体与防御性复制。
 
@@ -51,7 +51,7 @@ body 采用 byte[]，构造和读取都复制。适配器可以复用读缓冲�
 
 ## 怎么确认这一步没造错
 
-[RequestTest.Surface](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L21) 用反射断言只有 method/path/query/headers/body/toString，没有 setter、put、remove。这个测试保护的不是代码风格，而是 Handler 能否信任输入不被后一个组件改写。
+[RequestTest.Surface](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L24) 用反射断言只有 method/path/query/headers/body/toString，没有 setter、put、remove。这个测试保护的不是代码风格，而是 Handler 能否信任输入不被后一个组件改写。
 
 路径与 query 测试分别覆盖 `%2F`、编码点段、重复斜杠、尾斜杠、OPTIONS *、相对路径拒绝、原始空格/控制字符拒绝、空 query 与未解析 query。字节体测试覆盖输入缓冲被改写、返回数组被改写、null/空数组和二进制内容。日志测试构造 Authorization 与密码 body，断言 toString 只有方法、path 和字节数。
 

@@ -27,7 +27,7 @@ hook 测试使用 CapturingShutdownHookRegistry 记录 add/remove 并手动 fire
 - [ShutdownTest.java](../../framework/barezen-core/src/test/java/com/barezen/core/kernel/ShutdownTest.java)：8 项，覆盖最佳努力停机、报告、hook 安装/移除/触发、移除失败继续清理与失败启动不安装。
 - [RecordingParticipant.java](../../framework/barezen-core/src/test/java/com/barezen/core/kernel/RecordingParticipant.java)：共享事件日志和失败注入，只存在于测试源码。
 - [ShutdownHookRegistry.java](../../framework/barezen-core/src/main/java/com/barezen/core/kernel/ShutdownHookRegistry.java)：包私有替换点，避免单元测试操作真实测试 JVM 的 hook。
-- [LifecycleOrchestrator.java:160](../../framework/barezen-core/src/main/java/com/barezen/core/kernel/LifecycleOrchestrator.java#L160)：正常 stop 的实际入口与线程提供者关闭位置。
+- [LifecycleOrchestrator.java:161](../../framework/barezen-core/src/main/java/com/barezen/core/kernel/LifecycleOrchestrator.java#L161)：正常 stop 的实际入口与线程提供者关闭位置。
 - [ADR-0005](../../docs/adr/0005-shutdown-is-best-effort-and-reported.md#L15)：所有参与者均尝试，异常转为报告。
 
 `2670984` 建立第一组生命周期测试；后续 `e0bc31b` 与 `e2c9902` 调整 builder 和装配时也维护这些测试；`6aac12f` 删除公开 threadKind 后，测试改为从应用位置解析 ThreadPolicy。这个变化不是“测试迁就实现”，而是测试不再依赖一个只服务于测试的公开 getter。

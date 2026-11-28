@@ -38,10 +38,10 @@ private Handler timing(Handler inner) {
 
 ## 动手
 
-- [Response.java:99](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L99)：构造时校验状态、headers 与 body，并复制字节。
-- [Response.java:114](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L114)：三个读取器，没有 send/write/setStatus。
-- [Response.java:155](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L155)：状态限制为 100–599。
-- [Response.java:179](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L179)：1xx、204、304 禁止非空 body。
+- [Response.java:100](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L100)：构造时校验状态、headers 与 body，并复制字节。
+- [Response.java:115](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L115)：三个读取器，没有 send/write/setStatus。
+- [Response.java:156](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L156)：状态限制为 100–599。
+- [Response.java:180](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L180)：1xx、204、304 禁止非空 body。
 - [Response.java:205](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L205)：Content-Length 与 Transfer-Encoding 不属于 Handler。
 - [ResponseTest.java:20](../../framework/barezen-web/src/test/java/com/barezen/web/ResponseTest.java#L20)：表面、状态、body、复制与拒绝测试。
 - [HandlerTest.java:284](../../framework/barezen-web/src/test/java/com/barezen/web/HandlerTest.java#L284)：不依赖 Middleware 类型的装饰器。

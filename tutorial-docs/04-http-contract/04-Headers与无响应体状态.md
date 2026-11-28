@@ -38,8 +38,8 @@ HEAD 与 304 常被混为一谈，但规则不同。HEAD 的 Response 可以保�
 - [Headers.java:128](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L128)：first 返回 Optional，大小写不敏感匹配。
 - [Headers.java:149](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L149)：values 保留同名字段的所有值和顺序。
 - [Headers.java:221](../../framework/barezen-web/src/main/java/com/barezen/web/Headers.java#L221)：名称 token 与值控制字符校验。
-- [HeadersTest.java:23](../../framework/barezen-web/src/test/java/com/barezen/web/HeadersTest.java#L23)：大小写、重复、缺失、安全拒绝、不可变和脱敏测试。
-- [Response.java:179](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L179)：1xx/204/304 非空 body 拒绝。
+- [HeadersTest.java:22](../../framework/barezen-web/src/test/java/com/barezen/web/HeadersTest.java#L22)：大小写、重复、缺失、安全拒绝、不可变和脱敏测试。
+- [Response.java:180](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L180)：1xx/204/304 非空 body 拒绝。
 - [Response.java:205](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L205)：两种 framing 字段拒绝。
 - [ResponseTest.java:197](../../framework/barezen-web/src/test/java/com/barezen/web/ResponseTest.java#L197)：无体状态与 framing 的全部构造测试。
 - [ADR-0029 决策表](../../docs/adr/0029-response-framing-and-304-length.md#L106)：200/204/304/HEAD/404/405/500 的最终 wire 矩阵。
