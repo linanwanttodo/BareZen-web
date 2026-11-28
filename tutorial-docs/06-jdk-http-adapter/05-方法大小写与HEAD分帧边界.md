@@ -26,7 +26,7 @@ Handler 也不能自己写 Content-Length 或 Transfer-Encoding。框架已经�
 
 - [Response.java:100](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java#L100)：构造时拒绝 1xx、204、304 的非空 body。
 - [Response.java](../../framework/barezen-web/src/main/java/com/barezen/web/Response.java)：拒绝 Handler 自带 Content-Length/Transfer-Encoding，wire framing 由适配器推导。
-- [HttpMethod.java:86](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L86)：九个标准方法折叠，扩展 token 保持原样。
+- [HttpMethod.java:89](../../framework/barezen-web/src/main/java/com/barezen/web/HttpMethod.java#L89)：九个标准方法折叠，扩展 token 保持原样。
 - [JdkRequestDispatcher.java:243](../../framework/barezen-http-jdk/src/main/java/com/barezen/http/jdk/JdkRequestDispatcher.java#L243)：`!"HEAD".equals(exchange.getRequestMethod())` 决定是否写 body。
 - [JdkExchangeBridge.java:205](../../framework/barezen-http-jdk/src/main/java/com/barezen/http/jdk/JdkExchangeBridge.java#L205)：普通 framing、HEAD representation length 与 statusOnly 分支。
 - [JdkExchangeBridge.java:243](../../framework/barezen-http-jdk/src/main/java/com/barezen/http/jdk/JdkExchangeBridge.java#L243)：`mayCarryABody` 排除 1xx、204、304。

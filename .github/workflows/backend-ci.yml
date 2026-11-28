@@ -9,6 +9,9 @@ on:
       - 'framework/**'
       - 'examples/**'
       - 'app/**'
+      - 'docs/**'
+      - 'tutorial-docs/**'
+      - 'README.md'
       - 'site/**'
       - 'scripts/**'
       - '.github/workflows/backend-ci.yml'
@@ -19,6 +22,9 @@ on:
       - 'framework/**'
       - 'examples/**'
       - 'app/**'
+      - 'docs/**'
+      - 'tutorial-docs/**'
+      - 'README.md'
       - 'site/**'
       - 'scripts/**'
       - '.github/workflows/backend-ci.yml'
@@ -42,6 +48,11 @@ jobs:
           distribution: temurin
           java-version: ${{ matrix.java }}
           cache: maven
+
+      - name: Test and check documentation source anchors
+        run: |
+          python3 -m unittest -v scripts/test_check_source_anchors.py
+          python3 scripts/check_source_anchors.py
 
       - name: Assert the compile baseline is still JDK 17
         run: ./scripts/check-jdk-baseline.sh

@@ -33,6 +33,13 @@ BareZen 的定位是理解 HTTP 框架内部原理的学习项目，加上可以
 
 每个检查点都给出可执行的 Maven 命令、具体测试类或示例 `main`，并说明期望看到什么。命令中的 `-pl` 用于选择模块，`-am` 让 Maven 先构建它依赖的模块；`-Dtest=...` 缩小测试范围，但 Maven 仍会编译所选模块。需要同时指定多个测试类时使用逗号分隔，不要误以为一个字符串会做模糊匹配。使用 `-am` 时，上游模块通常没有这些测试类，因此检查点同时加入 `-Dsurefire.failIfNoSpecifiedTests=false`，只忽略“上游没有匹配测试”，不会忽略目标模块的测试失败。
 
+教程中的 Java 源码行号也是验收物，不是装饰。提交前运行下面两条命令：第一条用临时真实文件验证检查器会拒绝坏锚点，第二条检查全仓链接是否仍指向存在的代码行。CI 已把 `docs/**`、`tutorial-docs/**` 与 `README.md` 纳入触发范围，并在 JDK 矩阵前执行相同检查。
+
+```bash
+python3 -m unittest -v scripts/test_check_source_anchors.py
+python3 scripts/check_source_anchors.py
+```
+
 教程编写时的环境是 JDK 24.0.2、Maven 3.9.12。项目产物仍以 `maven.compiler.release=17` 编译，即 major 61；运行期通过 `RuntimeCapabilities` 探测能力，JDK 21+ 才选择虚拟线程。构建主机版本不是产物基线，这个区别会一再出现。
 
 检查点中的“通过”只对应当次命令选择的测试。它不是整仓库 `clean verify`、不是 JDK 17/21 CI 矩阵已经执行的证明，也不把行覆盖率当作分支覆盖、变异有效性或安全证明。仓库中的 CI 工作流声明 JDK 17/21 矩阵，且已观察到远端运行；最新结论以 GitHub Actions 为准，本文不静态保存运行结论。发布验收仍需在目标 JDK 上完整执行 verify、覆盖率与产物检查，并保留退出码和报告。

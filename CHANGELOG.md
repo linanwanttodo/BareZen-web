@@ -46,6 +46,14 @@ to.
   control, separator and non-ASCII tokens; the full 216-test adapter module and the 201-test positive list are green on
   Java 24.0.2 (2026-11-27).
 
+### Documentation integrity (2026-11-28)
+
+- Tutorial source links are now checked by `scripts/check_source_anchors.py`: every Java anchor must resolve inside the
+  repository, agree with its displayed line number, and land on a code line rather than a blank, comment or brace-only
+  line. The checker has nine filesystem-level unit tests.
+- CI now includes `docs/**`, `tutorial-docs/**` and `README.md` in its path filters and runs the anchor tests and check
+  before the JDK 17/21 Maven matrix, so documentation-only commits receive the same verification discipline.
+
 ### Phase 4.3 — Seven Pages, and the Credential Problem They Bring (2026-10-07)
 
 - The console is now **seven files on seven clean addresses** — `/`, `/reports`, `/session`, `/events`, `/people`,

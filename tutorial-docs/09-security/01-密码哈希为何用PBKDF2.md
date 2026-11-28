@@ -32,7 +32,7 @@ public static PasswordHasher of(int iterations, SecureRandom random) {
 }
 ```
 
-接着实现 `hash(String)`：每次生成新盐，调用 JDK 的 `SecretKeyFactory` 派生三十二字节，然后保存四段文本。源码在 [PasswordHasher.java:85](../../framework/barezen-security/src/main/java/com/barezen/security/PasswordHasher.java#L85)，格式是 `算法$次数$Base64盐$Base64密钥`。Base64 使用标准编码器，因为这是数据库编码而不是 URL；空密码也会被哈希，强度策略不应偷偷塞进这个类。
+接着实现 `hash(String)`：每次生成新盐，调用 JDK 的 `SecretKeyFactory` 派生三十二字节，然后保存四段文本。源码在 [PasswordHasher.java:92](../../framework/barezen-security/src/main/java/com/barezen/security/PasswordHasher.java#L92)，格式是 `算法$次数$Base64盐$Base64密钥`。Base64 使用标准编码器，因为这是数据库编码而不是 URL；空密码也会被哈希，强度策略不应偷偷塞进这个类。
 
 ```java
 byte[] salt = new byte[SALT_LENGTH];

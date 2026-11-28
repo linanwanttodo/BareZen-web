@@ -67,7 +67,7 @@ for (Operation operation : builder.operations) {
 
 先检查重复路线，再检查派生 id，错误诊断才准确。两个完全相同的 GET `/users` 同时也会撞 operationId，但“同一 operation 声明两次”比“两个模板碰撞”更接近根因。测试分别覆盖这两件事，避免实现只在第二个循环抛一个泛化消息。
 
-引用检查位于 [ApiDocument.java:98](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/ApiDocument.java#L98)。它遍历 operation 的 parameters、requestBody、responses，再遍历每个 security requirement，最后检查组件 schema 自身。任何 `$ref` 不存在都会抛出包含使用位置与目标名的 `IllegalArgumentException`。security 则只检查 scheme name 是否声明；当前 bearer scheme 不是 OAuth2，因此 `Security.Requirement.of` 直接拒绝非空 scopes，不会输出 OpenAPI 3.0.3 禁止的 scope 数组。
+引用检查位于 [ApiDocument.java:101](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/ApiDocument.java#L101)。它遍历 operation 的 parameters、requestBody、responses，再遍历每个 security requirement，最后检查组件 schema 自身。任何 `$ref` 不存在都会抛出包含使用位置与目标名的 `IllegalArgumentException`。security 则只检查 scheme name 是否声明；当前 bearer scheme 不是 OAuth2，因此 `Security.Requirement.of` 直接拒绝非空 scopes，不会输出 OpenAPI 3.0.3 禁止的 scope 数组。
 
 渲染入口 [OpenApiJson.java:28](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/OpenApiJson.java#L28) 先写 `openapi`，再写 `info`，然后按 document 顺序写 servers、paths、components、tags。空 servers/components/tags 不输出，避免制造无意义字段。operation 的字段顺序固定为 operationId、summary、tags、parameters、requestBody、security、responses；response 先写 description，有 body schema 才写 content。
 
@@ -84,7 +84,7 @@ if (schema.type() == Schema.SchemaType.REFERENCE) {
 
 它位于 [OpenApiJson.java:175](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/OpenApiJson.java#L175)。正因为这里没有递归查找目标，`User.friends = array(ref User)` 只展开一次 User 组件，friends 节点保持引用字符串。`nullable` 只在显式 true 时输出；required 来自 property flags，不另存一份列表。
 
-`JsonWriter` 的关键不是转义，而是分隔符所有权。[JsonWriter.java:51](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/JsonWriter.java#L51) 的 `field` 只在 object frame 中写逗号、键名和冒号；[JsonWriter.java:99](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/JsonWriter.java#L99) 的 `valueStart` 只在 array frame 中写逗号。把两者合并会很难判断一个值究竟位于对象还是数组，当前拆分让误用立即抛出 `IllegalStateException`。
+`JsonWriter` 的关键不是转义，而是分隔符所有权。[JsonWriter.java:52](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/JsonWriter.java#L52) 的 `field` 只在 object frame 中写逗号、键名和冒号；[JsonWriter.java:100](../../framework/barezen-plugins/src/main/java/com/barezen/plugins/openapi/JsonWriter.java#L100) 的 `valueStart` 只在 array frame 中写逗号。把两者合并会很难判断一个值究竟位于对象还是数组，当前拆分让误用立即抛出 `IllegalStateException`。
 
 最小 document 的 golden bytes 是很好的整体验收：
 
