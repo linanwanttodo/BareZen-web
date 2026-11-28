@@ -189,6 +189,17 @@ same output reports `checked=302 unique-majors=[65] expected=61` and exits 1.
 `target/classes` emptied while its sources remain; and no class files at all (the guard refuses to run before a
 build). Six shapes, six failures, and a clean tree that passes at `checked=302` on JDK 17 and JDK 21.
 
+## Amendment (2026-11-28)
+
+The coverage agent must understand the JDK that runs the tests, independently of the major 61 bytes the compiler emits.
+JaCoCo 0.8.12 officially supports Java 22 and only experimentally supports Java 23; on the JDK 24 build host it reported
+`Unsupported class file major version 68` while instrumenting JDK classes. The property in `barezen-parent` now pins
+0.8.13, the first release that officially supports Java 24, so the Maven plugin, report goals and runtime agent stay on
+one version. The focused command `mvn -B -ntp -pl framework/barezen-testkit -am test -Dtest=TestDatabaseTest
+-Dsurefire.failIfNoSpecifiedTests=false` went from 36 such errors to zero with all seven tests passing. This changes
+no emitted class major and no coverage threshold; it makes the existing build contract measurable on the documented
+JDK 24 host. Source: [JaCoCo change history](https://www.jacoco.org/jacoco/trunk/doc/changes.html).
+
 ## Related Decisions
 
 - **Completes ADR-0002.** That record made JDK 17 a compatibility baseline and refused JDK-specific modules; this one

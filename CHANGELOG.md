@@ -46,6 +46,12 @@ to.
   control, separator and non-ASCII tokens; the full 216-test adapter module and the 201-test positive list are green on
   Java 24.0.2 (2026-11-27).
 
+### Build tooling (2026-11-28)
+
+- JaCoCo moves from 0.8.12 to 0.8.13, the first release that officially supports Java 24. The same TestKit database
+  test that produced 36 `Unsupported class file major version 68` instrumentation errors on JDK 24 now produces none;
+  the Maven plugin and runtime agent are both 0.8.13.
+
 ### Documentation integrity (2026-11-28)
 
 - Tutorial source links are now checked by `scripts/check_source_anchors.py`: every Java anchor must resolve inside the
