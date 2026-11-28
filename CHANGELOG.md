@@ -51,6 +51,9 @@ to.
 - JaCoCo moves from 0.8.12 to 0.8.13, the first release that officially supports Java 24. The same TestKit database
   test that produced 36 `Unsupported class file major version 68` instrumentation errors on JDK 24 now produces none;
   the Maven plugin and runtime agent are both 0.8.13.
+- ArchUnit moves from 1.3.0 to 1.4.0, the first release that supports Java 24 class files. The same core architecture
+  test that produced 88 `Unsupported class file major version 68` import warnings on JDK 24 now produces none, with all
+  21 architecture tests passing.
 
 ### Documentation integrity (2026-11-28)
 

@@ -200,6 +200,14 @@ one version. The focused command `mvn -B -ntp -pl framework/barezen-testkit -am 
 no emitted class major and no coverage threshold; it makes the existing build contract measurable on the documented
 JDK 24 host. Source: [JaCoCo change history](https://www.jacoco.org/jacoco/trunk/doc/changes.html).
 
+The architecture-rule importer has the same runtime requirement. ArchUnit 1.3.0 could not read JDK 24 classes and
+reported 88 `Unsupported class file major version 68` import warnings in `BarezenCoreArchitectureTest`. The parent now
+pins 1.4.0, whose release notes explicitly add Java 24 support; the same command
+`mvn -B -ntp -pl framework/barezen-core -am test -Dtest=BarezenCoreArchitectureTest
+-Dsurefire.failIfNoSpecifiedTests=false` went from 88 warnings to zero with all 21 tests passing. This is test-scope
+tooling only and changes no production dependency or architecture rule. Source:
+[ArchUnit 1.4.0 release notes](https://github.com/TNG/ArchUnit/releases/tag/v1.4.0).
+
 ## Related Decisions
 
 - **Completes ADR-0002.** That record made JDK 17 a compatibility baseline and refused JDK-specific modules; this one
