@@ -147,7 +147,7 @@ public class BarezenServlet extends HttpServlet {
           + " deployment that looks like an empty application (ADR-0049).");
     }
     String limit = config.getInitParameter(MAX_REQUEST_BODY_BYTES_PARAM);
-    if (limit != null && !limit.isBlank()) {
+    if (limit != null) {
       long parsed;
       try {
         parsed = Long.parseLong(limit.trim());

@@ -128,6 +128,20 @@ class BarezenServletAssemblyTest {
     }
 
     @Test
+    void aBlankLimitIsConfiguredButNotANumberAndFailsTheDeployment() {
+      for (String value : new String[] {"", "   "}) {
+        BarezenServlet servlet = new BarezenServlet(ROUTER);
+
+        assertThatThrownBy(() -> servlet.init(config(
+            Map.of(BarezenServlet.MAX_REQUEST_BODY_BYTES_PARAM, value), Map.of())))
+            .isInstanceOf(ServletException.class)
+            .hasMessageContaining(BarezenServlet.MAX_REQUEST_BODY_BYTES_PARAM)
+            .hasMessageContaining("not a byte count")
+            .hasCauseInstanceOf(NumberFormatException.class);
+      }
+    }
+
+    @Test
     void aNegativeLimitIsAMisassemblyNotAPolicy() {
       BarezenServlet servlet = new BarezenServlet(ROUTER);
 

@@ -46,6 +46,12 @@ to.
   control, separator and non-ASCII tokens; the full 216-test adapter module and the 201-test positive list are green on
   Java 24.0.2 (2026-11-27).
 
+### Runtime hardening (2026-11-28)
+
+- `BarezenServlet` now treats a configured blank `barezen.maxRequestBodyBytes` as invalid instead of silently taking the
+  1 MiB default. Only an absent parameter is unconfigured; empty or whitespace-only values fail deployment with the
+  parameter name and the original `NumberFormatException`.
+
 ### Build tooling (2026-11-28)
 
 - JaCoCo moves from 0.8.12 to 0.8.13, the first release that officially supports Java 24. The same TestKit database

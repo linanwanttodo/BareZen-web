@@ -73,7 +73,7 @@ HEAD is where the two containers agree by different mechanisms. On Tomcat, `HEAD
 
 ### 6. The body limit is the same number, configured the container's way
 
-`barezen.maxRequestBodyBytes` as a servlet init-parameter, defaulting to the same 1 MiB the JDK adapter enforces, resolved once in `init()` into a `long` field: a client cannot send more content by choosing a different server, and an unparsable or negative value fails the deployment naming the parameter (ADR-0013, ADR-0031). Declared lengths are refused on the claim before a byte is read; undeclared ones are counted to limit + 1.
+`barezen.maxRequestBodyBytes` as a servlet init-parameter, defaulting to the same 1 MiB the JDK adapter enforces, resolved once in `init()` into a `long` field: a client cannot send more content by choosing a different server, and an unparsable (including blank) or negative value fails the deployment naming the parameter (ADR-0013, ADR-0031). Declared lengths are refused on the claim before a byte is read; undeclared ones are counted to limit + 1.
 
 `Configuration` is deliberately *not* used: this module has no dependency on `barezen-core`, and a declarative deployment cannot hand a constructor a snapshot. A kernel-free adapter is also what keeps the artifact droppable into a war.
 
@@ -119,7 +119,7 @@ One byte-level difference of the same family, measured: Tomcat re-emits `Content
 
 - `ServletContractSemanticsTest` — 18. Responses (4): a body with its length stated and no `Transfer-Encoding`; two values of one field staying two lines; 204 and 304 carrying neither a length nor a body. Head (3): the stated length surviving suppression; a `head` token getting the body its representation has; a HEAD with no HEAD route refused without a body. Routing (5): 404 naming no path, 405 with `Allow: GET, HEAD`, an unregistered verb still reaching the router, a captured parameter, `%20` surviving as the client sent it. Requests (4): absent versus empty versus present query, a declared body, a chunked body, two request header values reaching the handler. Failures (2): the 500 that leaks nothing anywhere in the message, and two requests on one connection answering independently.
 - `ServletRequestBodyLimitTest` — 7: claim over the limit, claim exactly at it, bodiless request passes, limit 0 refuses every body but the head, counted overflow on a chunked body, chunked under the limit, and the refusal being the contract's plain answer rather than the container's page.
-- `BarezenServletAssemblyTest` — 10, no container: the constructor path, the attribute path, a null router, a missing router naming both remedies, a wrong-typed attribute naming the class it found, an unparsable limit failing the deployment with its cause, a negative limit refused, `0` accepted, whitespace tolerated, and the default taken when nothing is configured.
+- `BarezenServletAssemblyTest` — 11, no container: the constructor path, the attribute path, a null router, a missing router naming both remedies, a wrong-typed attribute naming the class it found, an unparsable limit failing the deployment with its cause, a blank configured limit failing rather than falling back, a negative limit refused, `0` accepted, whitespace tolerated, and the default taken when nothing is configured.
 - `ServletDeploymentTest` — 4: a container-instantiated servlet serving the context attribute's router; a miswired deployment serving nothing of the route table (measured, see Decision 8); a `/app` context matching `/doc`; and a router that baked the context path into its own patterns answering the contract's 404.
 - `BarezenHttpServletArchitectureTest` — 8 rules. `BarezenServletSurfaceTest` — 7. `contract.ClassMajorContractTest` — 4 (`checked=23 unique-majors=[61]`).
 - **Architecture spike**: one temporary public class implementing `Handler`, holding a `ThreadLocal` and a static non-final field, calling `System.getProperty` and naming `com.sun.net.httpserver` fired **six of the eight rules** — violations 1/3/1/1/1/1, 8 tests 6 failures, build failed. The two that did not fire are the cross-module rules (`no_other_module_names_the_servlet_api`, `this_integration_depends_on_the_contract_and_the_facade_only`): nothing on this module's classpath can violate them, because core, security, data, plugins and testkit are not dependencies here. That is stated rather than presented as a passing guard — those two rules are javac-enforced, exactly as ADR-0018 argued for `the_contract_does_not_reach_into_core`.
@@ -142,6 +142,15 @@ One byte-level difference of the same family, measured: Tomcat re-emits `Content
   plugins, testkit or http-jdk classpaths, so ADR-0021's "only one module names `com.sun.net.httpserver`" and ADR-0044's
   isolation rules still pass with the same counts.
 - **JDK**: measured on the JDK this build runs (Maven on `JAVA_HOME=/usr/lib/jvm/jdk-24.0.2`, emitting major 61 under `release=17`), and ADR-0047/0048's "JDK 21" lines are wrong for the same reason — corrected in this phase's docs commit. Neither JDK 17 nor JDK 21 ran this build: 17 is not installed here, and `git remote -v` is empty so the CI matrix has never executed. `ClassMajorContractTest` and `scripts/check-class-major.sh` are what the bytecode claim rests on.
+
+## Amendment (2026-11-28): a blank configured limit is not an absent limit
+
+The original `init()` guard used `limit != null && !limit.isBlank()`, so an empty or whitespace-only init-parameter
+silently took the 1 MiB default. That contradicted Decision 6 and ADR-0013: a configured value that cannot be parsed
+must fail deployment rather than look unconfigured. Only `null` now means absent. Empty and whitespace-only values go
+through `Long.parseLong(limit.trim())` and fail with `ServletException` naming the parameter and retaining the original
+`NumberFormatException`. `BarezenServletAssemblyTest` grows from 10 to 11 tests; the focused class runs 11/11 green.
+Absent, `0`, negative and numeric-with-surrounding-whitespace behaviour is unchanged.
 
 ## Non-goals
 
