@@ -50,7 +50,7 @@ to.
 
 - Tutorial source links are now checked by `scripts/check_source_anchors.py`: every Java anchor must resolve inside the
   repository, agree with its displayed line number, and land on a code line rather than a blank, comment or brace-only
-  line. The checker has nine filesystem-level unit tests.
+  line. A method-name label must also name the method on that line. The checker has eleven filesystem-level unit tests.
 - CI now includes `docs/**`, `tutorial-docs/**` and `README.md` in its path filters and runs the anchor tests and check
   before the JDK 17/21 Maven matrix, so documentation-only commits receive the same verification discipline.
 

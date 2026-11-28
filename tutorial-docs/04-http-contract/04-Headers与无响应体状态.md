@@ -20,7 +20,7 @@ Headers 没有 builder、set 或 entries Map。with 返回新对象，同名再�
 
 名称必须是 HTTP token，值不能包含控制字符。后一条是响应拆分防线：如果 Location 或 Content-Disposition 由用户输入拼接，CR/LF 会开启新字段甚至新响应行。当前实现连 tab 也拒绝，理由是实现明确选择更严格的字段值边界，避免折叠续行歧义；这不是在解析每个 Header 的领域语法。
 
-错误消息本身也安全。被拒绝的 CR/LF 不会原样进入日志，而是输出四位 `\u000D`、`\u000A`。[neverRepeatsTheRejectedCharacterInItsOwnMessage](../../framework/barezen-web/src/test/java/com/barezen/web/HeadersTest.java#L201) 同时检查转义文本存在和原始换行不存在。否则防御逻辑把攻击字符挡在 Header 外，却通过异常消息把它送进日志。
+错误消息本身也安全。被拒绝的 CR/LF 不会原样进入日志，而是输出四位 `\u000D`、`\u000A`。[neverRepeatsTheRejectedCharacterInItsOwnMessage](../../framework/barezen-web/src/test/java/com/barezen/web/HeadersTest.java#L223) 同时检查转义文本存在和原始换行不存在。否则防御逻辑把攻击字符挡在 Header 外，却通过异常消息把它送进日志。
 
 toString 只输出字段名和数量，不输出值。Authorization、Cookie 或自定义 token 可能出现在 Header 中；Request/Response 的 toString 同样不打印 body 和 Header 值。需要诊断值时，应用必须显式选择要记录哪个字段，而不是被默认 toString 泄露。
 

@@ -10,7 +10,7 @@
 
 构造器只有五个参数，读取器也只有五个事实加 toString。没有 scheme、remote address、protocol version、cookie 或 attribute，因为这些值或者属于 socket，或者需要字段级解析规则。以后真实消费者需要远端地址时，应由适配器以明确类型提供，而不是提前塞进所有 Request。
 
-path 保存客户端发送的原始形式。`/a%2Fb` 与 `/a/b` 在语义上不是同一个资源形状：前者包含一个编码斜杠，后者是两个段。`java.net.URI.getPath()` 会把两者都返回为 `/a/b`，因此 [keepsPercentEncodingIntact](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L71) 同时断言 Request 保留编码和 URI 解码后的差别。解码是资源所有者的事情，载体不能替它决定。
+path 保存客户端发送的原始形式。`/a%2Fb` 与 `/a/b` 在语义上不是同一个资源形状：前者包含一个编码斜杠，后者是两个段。`java.net.URI.getPath()` 会把两者都返回为 `/a/b`，因此 [keepsPercentEncodingIntact](../../framework/barezen-web/src/test/java/com/barezen/web/RequestTest.java#L72) 同时断言 Request 保留编码和 URI 解码后的差别。解码是资源所有者的事情，载体不能替它决定。
 
 原始还意味着不归一化。`/a//b`、`/a/`、`/a/./b` 都原样保存。尾斜杠、重复斜杠和点段是否等价，是第五章 Router 要显式处理的匹配规则。Request 如果先清理一遍，Router 的规则就不再是对客户端请求目标的规则，而是对框架重写结果的规则。
 

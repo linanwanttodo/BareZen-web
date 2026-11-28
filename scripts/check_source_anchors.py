@@ -5,6 +5,7 @@ import sys
 
 
 ANCHOR = re.compile(r"\[([^\]]+)\]\(([^)]+\.java)#L(\d+)\)")
+METHOD_LABEL = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)(?:\(\):\d+)?")
 BRACE_ONLY = {"{", "}", "};", "},", ");"}
 
 
@@ -43,6 +44,13 @@ def check(root):
                         )
                         continue
                     actual = lines[line_number - 1].strip()
+                    method = None if ".java" in label else METHOD_LABEL.fullmatch(label)
+                    if method and method.group(1) not in actual:
+                        problems.append(
+                            f"{location}: method label '{method.group(1)}' is not on "
+                            f"{source.relative_to(root)}:{line_number}"
+                        )
+                        continue
                     if not actual:
                         problems.append(f"{location}: {source.relative_to(root)}:{line_number} is a blank line")
                     elif actual.startswith(("/*", "*", "//")):

@@ -39,6 +39,14 @@ class SourceAnchorCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("checked 1 Java source anchor", result.stdout)
 
+    def test_accepts_a_file_label_without_a_line_number(self):
+        self.write_anchor(label="Example.java")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("checked 1 Java source anchor", result.stdout)
+
     def test_rejects_a_missing_source_file(self):
         self.write_anchor(target="Missing.java#L1")
 
@@ -70,6 +78,16 @@ class SourceAnchorCheckTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("label says line 2", result.stderr)
+
+    def test_rejects_a_method_label_that_is_not_on_the_target_line(self):
+        for label in ("actual", "actual():1"):
+            with self.subTest(label=label):
+                self.write_anchor(label=label)
+
+                result = self.run_check()
+
+                self.assertEqual(result.returncode, 1, f"{result.stdout}\n{result.stderr}")
+                self.assertIn("method label 'actual'", result.stderr)
 
     def test_rejects_a_blank_target_line(self):
         self.write_anchor(label="Example.java:2", target="Example.java#L2")
